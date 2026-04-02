@@ -109,54 +109,55 @@
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| TEN-01 | — | Pending |
-| TEN-02 | — | Pending |
-| TEN-03 | — | Pending |
-| TEN-04 | — | Pending |
-| TEN-05 | — | Pending |
-| AUTH-01 | — | Pending |
-| AUTH-02 | — | Pending |
-| AUTH-03 | — | Pending |
-| AUTH-04 | — | Pending |
-| AUTH-05 | — | Pending |
-| ACTN-01 | — | Pending |
-| ACTN-02 | — | Pending |
-| ACTN-03 | — | Pending |
-| ACTN-04 | — | Pending |
-| ACTN-05 | — | Pending |
-| ACTN-06 | — | Pending |
-| ACTN-07 | — | Pending |
-| ACTN-08 | — | Pending |
-| ACTN-09 | — | Pending |
-| ACTN-10 | — | Pending |
-| ACTN-11 | — | Pending |
-| ACTN-12 | — | Pending |
-| OBS-01 | — | Pending |
-| OBS-02 | — | Pending |
-| OBS-03 | — | Pending |
-| OBS-04 | — | Pending |
-| OBS-05 | — | Pending |
-| OBS-06 | — | Pending |
-| OBS-07 | — | Pending |
-| KNOW-01 | — | Pending |
-| KNOW-02 | — | Pending |
-| KNOW-03 | — | Pending |
-| KNOW-04 | — | Pending |
-| KNOW-05 | — | Pending |
-| KNOW-06 | — | Pending |
-| CAMP-01 | — | Pending |
-| CAMP-02 | — | Pending |
-| CAMP-03 | — | Pending |
-| CAMP-04 | — | Pending |
-| CAMP-05 | — | Pending |
-| CAMP-06 | — | Pending |
-| CAMP-07 | — | Pending |
+| TEN-01 | Phase 1 | Pending |
+| TEN-02 | Phase 1 | Pending |
+| TEN-03 | Phase 1 | Pending |
+| TEN-04 | Phase 1 | Pending |
+| TEN-05 | Phase 1 | Pending |
+| AUTH-01 | Phase 1 | Pending |
+| AUTH-02 | Phase 1 | Pending |
+| AUTH-03 | Phase 1 | Pending |
+| AUTH-04 | Phase 1 | Pending |
+| AUTH-05 | Phase 1 | Pending |
+| ACTN-01 | Phase 2 | Pending |
+| ACTN-02 | Phase 2 | Pending |
+| ACTN-03 | Phase 2 | Pending |
+| ACTN-04 | Phase 2 | Pending |
+| ACTN-05 | Phase 2 | Pending |
+| ACTN-06 | Phase 2 | Pending |
+| ACTN-07 | Phase 2 | Pending |
+| ACTN-08 | Phase 2 | Pending |
+| ACTN-09 | Phase 2 | Pending |
+| ACTN-10 | Phase 2 | Pending |
+| ACTN-11 | Phase 2 | Pending |
+| ACTN-12 | Phase 2 | Pending |
+| OBS-01 | Phase 3 | Pending |
+| OBS-02 | Phase 3 | Pending |
+| OBS-03 | Phase 3 | Pending |
+| OBS-04 | Phase 3 | Pending |
+| OBS-05 | Phase 3 | Pending |
+| OBS-06 | Phase 3 | Pending |
+| OBS-07 | Phase 3 | Pending |
+| KNOW-01 | Phase 4 | Pending |
+| KNOW-02 | Phase 4 | Pending |
+| KNOW-03 | Phase 4 | Pending |
+| KNOW-04 | Phase 4 | Pending |
+| KNOW-05 | Phase 4 | Pending |
+| KNOW-06 | Phase 4 | Pending |
+| CAMP-01 | Phase 5 | Pending |
+| CAMP-02 | Phase 5 | Pending |
+| CAMP-03 | Phase 5 | Pending |
+| CAMP-04 | Phase 5 | Pending |
+| CAMP-05 | Phase 5 | Pending |
+| CAMP-06 | Phase 5 | Pending |
+| CAMP-07 | Phase 5 | Pending |
 
 **Coverage:**
 - v1 requirements: 42 total
-- Mapped to phases: 0
-- Unmapped: 42 ⚠️
+- Mapped to phases: 42
+- Unmapped: 0
 
 ---
+
 *Requirements defined: 2026-03-30*
-*Last updated: 2026-03-30 after initial definition*
+*Last updated: 2026-04-02 — Phase assignments added after roadmap creation*
