@@ -78,6 +78,18 @@ A multi-tenant SaaS platform that serves as the operational layer for agencies r
 | pgvector for RAG (not external vector DB) | Keeps stack simple, co-located with application data, Supabase-native | — Pending |
 | No Stripe/billing in MVP | Monetization handled outside platform initially | — Pending |
 
+## Current Milestone: v1.0 VoiceOps MVP
+
+**Goal:** Build the complete operational layer for agencies running voice AI via Vapi.ai — Action Engine, Observability, Knowledge Base, and Campaigns in a multi-tenant admin panel.
+
+**Target features:**
+- Multi-Tenancy: org management, assistant mapping, RLS data isolation
+- Authentication: Supabase Auth with admin/member roles
+- Action Engine: Edge webhook → execute GoHighLevel actions → log (<500ms)
+- Observability: call logs, chat-format transcripts, inline tool badges, dashboard
+- Knowledge Base: document upload → vectorize (OpenAI + pgvector) → semantic search during calls
+- Outbound Campaigns: CSV contact import, Vapi outbound dial, real-time per-contact status
+
 ## Evolution
 
 This document evolves at phase transitions and milestone boundaries.
@@ -96,4 +108,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-03-30 after initialization*
+*Last updated: 2026-04-02 — Milestone v1.0 started*
