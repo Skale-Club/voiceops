@@ -29,8 +29,16 @@
   3. Admin can create, update, deactivate, and list organizations — each scoped to their account
   4. Admin can link a Vapi assistant ID to an organization and toggle the mapping active/inactive
   5. Any database query made by one organization cannot return data belonging to another organization (RLS enforced on all tables)
-**Plans:** TBD
+**Plans:** 6 plans
 **UI hint:** yes
+
+Plans:
+- [ ] 01-01-PLAN.md — Test infrastructure: vitest.config.ts + 5 test stub files
+- [ ] 01-02-PLAN.md — Next.js scaffold + Supabase clients + auth middleware
+- [ ] 01-03-PLAN.md — Database schema + RLS migrations + database types
+- [ ] 01-04-PLAN.md — Login page + dashboard layout shell + sidebar
+- [ ] 01-05-PLAN.md — Organizations CRUD: server actions + table + form
+- [ ] 01-06-PLAN.md — Assistant Mappings CRUD: server actions + table + Switch toggle
 
 ---
 
@@ -98,7 +106,7 @@
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Foundation | 0/? | Not started | - |
+| 1. Foundation | 0/6 | Planned | - |
 | 2. Action Engine | 0/? | Not started | - |
 | 3. Observability | 0/? | Not started | - |
 | 4. Knowledge Base | 0/? | Not started | - |
@@ -123,3 +131,4 @@
 
 *Roadmap created: 2026-04-02*
 *Milestone: v1.0 VoiceOps MVP*
+*Phase 1 planned: 2026-04-02 — 6 plans in 4 waves*
