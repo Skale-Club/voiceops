@@ -9,7 +9,7 @@
 
 ## Phases
 
-- [ ] **Phase 1: Foundation** - Multi-tenant org management, authentication, and RLS data isolation
+- [x] **Phase 1: Foundation** - Multi-tenant org management, authentication, and RLS data isolation
 - [ ] **Phase 2: Action Engine** - Vapi webhook receiver, integration credentials, GoHighLevel execution, and action logging
 - [ ] **Phase 3: Observability** - End-of-call ingestion, call list, chat-format transcripts, inline tool badges, and dashboard
 - [ ] **Phase 4: Knowledge Base** - Document upload, vectorization pipeline, and RAG semantic search during calls
@@ -29,16 +29,16 @@
   3. Admin can create, update, deactivate, and list organizations — each scoped to their account
   4. Admin can link a Vapi assistant ID to an organization and toggle the mapping active/inactive
   5. Any database query made by one organization cannot return data belonging to another organization (RLS enforced on all tables)
-**Plans:** 3/6 plans executed
+**Plans:** 6/6 plans executed
 **UI hint:** yes
 
 Plans:
 - [x] 01-01-PLAN.md — Test infrastructure: vitest.config.ts + 5 test stub files
 - [x] 01-02-PLAN.md — Next.js scaffold + Supabase clients + auth middleware
-- [ ] 01-03-PLAN.md — Database schema + RLS migrations + database types
+- [x] 01-03-PLAN.md — Database schema + RLS migrations + database types
 - [x] 01-04-PLAN.md — Login page + dashboard layout shell + sidebar
-- [ ] 01-05-PLAN.md — Organizations CRUD: server actions + table + form
-- [ ] 01-06-PLAN.md — Assistant Mappings CRUD: server actions + table + Switch toggle
+- [x] 01-05-PLAN.md — Organizations CRUD: server actions + table + form
+- [x] 01-06-PLAN.md — Assistant Mappings CRUD: server actions + table + Switch toggle
 
 ---
 
@@ -106,7 +106,7 @@ Plans:
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Foundation | 3/6 | In Progress|  |
+| 1. Foundation | 6/6 | Complete | 2026-04-02 |
 | 2. Action Engine | 0/? | Not started | - |
 | 3. Observability | 0/? | Not started | - |
 | 4. Knowledge Base | 0/? | Not started | - |

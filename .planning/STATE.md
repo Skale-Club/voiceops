@@ -3,23 +3,23 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: VoiceOps MVP
 status: executing
-last_updated: "2026-04-02T23:15:00.000Z"
+last_updated: "2026-04-02T23:55:00.000Z"
 last_activity: 2026-04-02
 progress:
   total_phases: 5
-  completed_phases: 0
+  completed_phases: 1
   total_plans: 6
-  completed_plans: 3
+  completed_plans: 6
 ---
 
 # VoiceOps — State
 
 ## Current Position
 
-Phase: 1 (Foundation) — EXECUTING
-Plan: 5 of 6
-Status: Ready to execute
-Last activity: 2026-04-02 -- Plan 01-04 complete (Login page + dashboard layout shell + sidebar)
+Phase: 1 (Foundation) — COMPLETE ✓
+Plan: 6 of 6
+Status: Phase verified — ready to plan Phase 2
+Last activity: 2026-04-02 -- All 6 plans complete + verified (5/5 success criteria passed)
 
 ## Milestone
 
@@ -61,6 +61,8 @@ Started: 2026-04-02
 - [Phase 01-foundation]: vitest node environment — integration tests target Supabase server clients, not browser DOM
 - [Phase 01-foundation]: it.todo stubs allow test harness to exit 0 before any feature implementation exists
 - [Phase 01-02]: Manual scaffold instead of create-next-app due to existing files in worktree directory
+- [Phase 01-foundation]: createOrganization uses service-role client to bootstrap org + org_members atomically (RLS bootstrap gap — get_current_org_id() returns NULL before first org_members row)
+- [Phase 01-foundation]: getClaims() returns `{ data: { claims } }` — middleware uses `claimsData?.claims` pattern (not direct destructure)
 
 ## Blockers
 
