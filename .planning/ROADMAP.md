@@ -29,11 +29,11 @@
   3. Admin can create, update, deactivate, and list organizations — each scoped to their account
   4. Admin can link a Vapi assistant ID to an organization and toggle the mapping active/inactive
   5. Any database query made by one organization cannot return data belonging to another organization (RLS enforced on all tables)
-**Plans:** 6 plans
+**Plans:** 1/6 plans executed
 **UI hint:** yes
 
 Plans:
-- [ ] 01-01-PLAN.md — Test infrastructure: vitest.config.ts + 5 test stub files
+- [x] 01-01-PLAN.md — Test infrastructure: vitest.config.ts + 5 test stub files
 - [ ] 01-02-PLAN.md — Next.js scaffold + Supabase clients + auth middleware
 - [ ] 01-03-PLAN.md — Database schema + RLS migrations + database types
 - [ ] 01-04-PLAN.md — Login page + dashboard layout shell + sidebar
@@ -106,7 +106,7 @@ Plans:
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Foundation | 0/6 | Planned | - |
+| 1. Foundation | 1/6 | In Progress|  |
 | 2. Action Engine | 0/? | Not started | - |
 | 3. Observability | 0/? | Not started | - |
 | 4. Knowledge Base | 0/? | Not started | - |

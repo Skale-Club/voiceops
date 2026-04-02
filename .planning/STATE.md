@@ -1,11 +1,25 @@
+---
+gsd_state_version: 1.0
+milestone: v1.0
+milestone_name: VoiceOps MVP
+status: executing
+last_updated: "2026-04-02T21:49:26.657Z"
+last_activity: 2026-04-02
+progress:
+  total_phases: 5
+  completed_phases: 0
+  total_plans: 6
+  completed_plans: 1
+---
+
 # VoiceOps — State
 
 ## Current Position
 
-Phase: Phase 1 — Foundation
-Plan: —
-Status: Ready to plan
-Last activity: 2026-04-02 — Roadmap created, 5 phases defined, 42/42 requirements mapped
+Phase: 1 (Foundation) — EXECUTING
+Plan: 2 of 6
+Status: Ready to execute
+Last activity: 2026-04-02
 
 ## Milestone
 
@@ -37,6 +51,9 @@ Started: 2026-04-02
 | No Stripe/billing in MVP | Monetization handled outside platform initially |
 | TEN + AUTH in one foundation phase | RLS and auth are co-dependent — neither is safe to ship without the other |
 | ACTN as a dedicated phase before OBS | You need tool executions before you can observe them — action_logs feeds the inline badges in Phase 3 |
+
+- [Phase 01-foundation]: vitest node environment — integration tests target Supabase server clients, not browser DOM
+- [Phase 01-foundation]: it.todo stubs allow test harness to exit 0 before any feature implementation exists
 
 ## Blockers
 
