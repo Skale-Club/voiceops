@@ -22,9 +22,8 @@ export async function middleware(request: NextRequest) {
     }
   )
 
-  const {
-    data: { claims },
-  } = await supabase.auth.getClaims()
+  const { data: claimsData } = await supabase.auth.getClaims()
+  const claims = claimsData?.claims
 
   const isAuthRoute = request.nextUrl.pathname.startsWith('/login')
   const isVapiRoute = request.nextUrl.pathname.startsWith('/api/vapi')
