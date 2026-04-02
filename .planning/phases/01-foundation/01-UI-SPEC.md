@@ -54,15 +54,16 @@ Exceptions:
 | Role | Size | Weight | Line Height |
 |------|------|--------|-------------|
 | Body | 14px | 400 (regular) | 1.5 |
-| Label | 12px | 500 (medium) | 1.4 |
+| Label | 12px | 400 (regular) | 1.4 |
 | Heading | 20px | 600 (semibold) | 1.2 |
 | Display | 28px | 600 (semibold) | 1.1 |
 
 **Notes:**
 - Body (14px / 400 / 1.5): table cell content, form input values, description text, sidebar nav labels
-- Label (12px / 500 / 1.4): table column headers, form field labels, badge text, status pills, metadata (timestamp, duration)
+- Label (12px / 400 / 1.4): table column headers, form field labels, badge text, status pills, metadata (timestamp, duration)
 - Heading (20px / 600 / 1.2): page titles (`<h1>` on each route), section headings, modal titles
 - Display (28px / 600 / 1.1): reserved for login page product name only
+- Two weights only: 400 (regular) and 600 (semibold). Weight 500 (medium) is not used anywhere in this phase.
 - No font sizes outside this set. Do not introduce 16px, 18px, 24px, or any other value.
 
 ---
@@ -107,6 +108,7 @@ Dark professional palette (B2B SaaS operations tool). All values are CSS custom 
 - Avoid emojis in UI copy. Use them only in inline tool status badges (reserved for Phase 3).
 - Error messages: describe the problem first, then the resolution path.
 - CTA verbs: precise imperative verbs (Create, Save, Deactivate, Add, Remove). Never "Submit."
+- Cancel buttons must be context-specific — the bare label "Cancel" is prohibited. Use the form "Keep [thing]" or "Back to [place]" or "Discard Changes" depending on context.
 
 ### Per-Surface Copy
 
@@ -124,6 +126,7 @@ Dark professional palette (B2B SaaS operations tool). All values are CSS custom 
 | Auth error (invalid creds) | Invalid email or password. Check your credentials and try again. |
 | Auth error (network) | Unable to connect. Check your internet connection and try again. |
 | Auth error (account disabled) | This account has been disabled. Contact your administrator. |
+| Primary focal point | Sign In button |
 
 #### Admin Layout Shell
 
@@ -143,11 +146,12 @@ Dark professional palette (B2B SaaS operations tool). All values are CSS custom 
 | Page heading | Organizations |
 | Page description | Manage tenants and their Vapi assistant mappings. |
 | Primary CTA | Create Organization |
+| Primary focal point | Create Organization button |
 | Table column: Name | Name |
 | Table column: Status | Status |
 | Table column: Created | Created |
 | Table column: Actions | (no header — visually empty) |
-| Row action: Edit | Edit |
+| Row action: Edit | Edit Organization |
 | Row action: Deactivate | Deactivate |
 | Row action: Reactivate | Reactivate |
 | Empty state heading | No organizations yet |
@@ -161,20 +165,22 @@ Dark professional palette (B2B SaaS operations tool). All values are CSS custom 
 |---------|------|
 | Page heading (edit mode) | Edit Organization |
 | Page heading (create mode) | New Organization |
+| Primary focal point | Save Changes button (edit mode) / Create Organization button (create mode) |
 | Field: Name label | Organization Name |
 | Field: Name placeholder | e.g. Alpha Home Improvements |
 | Field: Status label | Status |
 | Field: Status options | Active, Inactive, Deactivated |
 | Primary CTA (save) | Save Changes |
 | Primary CTA (create) | Create Organization |
-| Cancel button | Cancel |
+| Navigation button (edit mode) | Discard Changes |
+| Navigation button (create mode) | Back to Organizations |
 | Loading CTA state | Saving... |
 | Success toast | Organization saved. |
 | Error toast | Failed to save organization. Try again. |
 | Deactivate dialog title | Deactivate Organization |
 | Deactivate dialog body | This organization's data will remain intact. Vapi webhooks for its assistants will stop resolving until reactivated. |
 | Deactivate dialog confirm | Deactivate |
-| Deactivate dialog cancel | Cancel |
+| Deactivate dialog cancel | Keep Organization |
 | Validation: name required | Organization name is required. |
 | Validation: name too long | Name must be 100 characters or fewer. |
 
@@ -185,13 +191,14 @@ Dark professional palette (B2B SaaS operations tool). All values are CSS custom 
 | Page heading | Assistant Mappings |
 | Page description | Link Vapi assistant IDs to this organization. Active mappings route Vapi tool-call webhooks to the correct tenant. |
 | Primary CTA | Add Assistant |
+| Primary focal point | Add Assistant button |
 | Table column: Label | Label |
 | Table column: Assistant ID | Vapi Assistant ID |
 | Table column: Status | Status |
 | Table column: Added | Added |
 | Table column: Actions | (no header) |
-| Row action: Edit | Edit |
-| Row action: Remove | Remove |
+| Row action: Edit | Edit Mapping |
+| Row action: Remove | Remove Mapping |
 | Toggle active label (on) | Active |
 | Toggle active label (off) | Inactive |
 | Empty state heading | No assistants linked |
@@ -207,13 +214,26 @@ Dark professional palette (B2B SaaS operations tool). All values are CSS custom 
 | Remove dialog title | Remove Assistant Mapping |
 | Remove dialog body | This assistant ID will no longer route webhooks to this organization. You can re-add it at any time. |
 | Remove dialog confirm | Remove |
-| Remove dialog cancel | Cancel |
+| Remove dialog cancel | Keep Mapping |
 | Success toast (add) | Assistant mapping added. |
 | Success toast (remove) | Assistant mapping removed. |
 | Success toast (toggle active) | Mapping updated. |
 | Error toast | Failed to save. Try again. |
 | Validation: Vapi ID required | Vapi assistant ID is required. |
 | Validation: duplicate ID | This assistant ID is already mapped to an organization. |
+
+---
+
+## Accessibility — Icon-Only Controls
+
+All icon-only interactive controls must declare an explicit `aria-label`. No icon-only button may rely solely on visual context.
+
+| Control | Component | aria-label |
+|---------|-----------|------------|
+| Sidebar collapse/expand toggle | `<SidebarTrigger>` | `aria-label="Toggle sidebar"` |
+| Row action menu (organizations table) | `<DropdownMenuTrigger>` (three-dot icon) | `aria-label="Row actions"` |
+| Row action menu (assistant mappings table) | `<DropdownMenuTrigger>` (three-dot icon) | `aria-label="Row actions"` |
+| Password show/hide toggle | `<Button>` (icon inside input) | `aria-label="Show password"` / `aria-label="Hide password"` (toggled) |
 
 ---
 
@@ -240,7 +260,7 @@ Dark professional palette (B2B SaaS operations tool). All values are CSS custom 
 | Header bar | Custom `<header>` inside `<SidebarInset>` | Contains page breadcrumb + user menu |
 | User menu | `<DropdownMenu>` | Trigger: avatar + name; items: Sign Out |
 | User avatar | `<Avatar>` | Initials fallback from user full_name |
-| Sidebar trigger (mobile) | `<SidebarTrigger>` | Auto-handled by shadcn Sidebar |
+| Sidebar trigger (mobile) | `<SidebarTrigger>` | Auto-handled by shadcn Sidebar; aria-label="Toggle sidebar" |
 | Toast container | `<Toaster>` (sonner) | Once in root layout |
 
 #### Organizations List Page
@@ -249,7 +269,7 @@ Dark professional palette (B2B SaaS operations tool). All values are CSS custom 
 | Page header area | Custom `<div>` flex row | Heading left, CTA right |
 | Data table | `<Table>` + TanStack Table | shadcn Table primitives + `@tanstack/react-table` |
 | Status badge | `<Badge>` variant="outline" | Custom color via className override |
-| Row actions menu | `<DropdownMenu>` | Three-dot icon trigger |
+| Row actions menu | `<DropdownMenu>` | Three-dot icon trigger; aria-label="Row actions" |
 | Create org trigger | `<Button>` (primary) | Opens Sheet |
 | Create/edit form container | `<Sheet>` (slide-in from right) | Preferred over Dialog for forms with multiple fields |
 | Loading state | `<Skeleton>` | Skeleton rows matching table structure |
@@ -262,7 +282,7 @@ Dark professional palette (B2B SaaS operations tool). All values are CSS custom 
 | Name field | `<FormItem>` + `<Input>` | |
 | Status field | `<FormItem>` + `<Select>` | Options: Active, Inactive, Deactivated |
 | Save button | `<Button>` (primary) | Loading state via `disabled` + spinner icon |
-| Cancel button | `<Button>` variant="outline" | |
+| Navigation button | `<Button>` variant="outline" | Label: "Discard Changes" (edit) or "Back to Organizations" (create) |
 | Deactivate button | `<Button>` variant="destructive" | Opens AlertDialog for confirmation |
 | Deactivate confirmation | `<AlertDialog>` | Not Dialog — use AlertDialog for destructive confirms |
 | Field validation | `<FormMessage>` | Below each field |
@@ -279,7 +299,7 @@ Dark professional palette (B2B SaaS operations tool). All values are CSS custom 
 | Label field | `<FormItem>` + `<Input>` | |
 | Vapi ID field | `<FormItem>` + `<Input>` + `<FormDescription>` | Helper text below |
 | Remove confirm | `<AlertDialog>` | Destructive confirm pattern |
-| Row actions | `<DropdownMenu>` | Edit + Remove |
+| Row actions | `<DropdownMenu>` | "Edit Mapping" + "Remove Mapping"; aria-label="Row actions" |
 | Loading state | `<Skeleton>` | |
 | Empty state | Custom `<div>` centered | Same pattern as orgs empty state |
 
@@ -333,6 +353,8 @@ The admin layout uses shadcn/ui `<SidebarProvider>` with a fixed-width sidebar (
 
 **Layout:** Full-page centered. Background: `background` (#0a0a0a). Card: centered, max-width 400px, `card` background, rounded-lg, p-8.
 
+**Primary focal point:** Sign In button (accent color, full width).
+
 **Load state:** No skeleton — page is static until form submission.
 
 **Interaction flow:**
@@ -378,11 +400,13 @@ The admin layout uses shadcn/ui `<SidebarProvider>` with a fixed-width sidebar (
 
 **Data:** Fetched server-side. Table renders on server, hydrated on client for actions.
 
+**Primary focal point:** "Create Organization" button (top-right of page header, accent color).
+
 **Table columns:** Name | Status | Created | (Actions)
 - Name: text, clickable — navigates to /dashboard/organizations/[id]
 - Status: `<Badge>` with status color (see Color section)
 - Created: formatted date (e.g. "Mar 15, 2026") using date-fns `format(date, 'MMM d, yyyy')`
-- Actions: `<DropdownMenu>` with "Edit" and "Deactivate" / "Reactivate" based on current status
+- Actions: `<DropdownMenu>` with "Edit Organization" and "Deactivate" / "Reactivate" based on current status
 
 **Create flow:**
 1. "Create Organization" button opens a `<Sheet>` sliding in from the right
@@ -391,7 +415,7 @@ The admin layout uses shadcn/ui `<SidebarProvider>` with a fixed-width sidebar (
 4. On error: toast with error, sheet remains open
 
 **Edit flow:**
-1. "Edit" in row action dropdown navigates to /dashboard/organizations/[id] (dedicated page, not inline)
+1. "Edit Organization" in row action dropdown navigates to /dashboard/organizations/[id] (dedicated page, not inline)
    — OR — opens the same Sheet in edit mode (implementation choice, but Sheet pattern is preferred for speed)
 2. If Sheet: pre-populated with current values
 
@@ -399,7 +423,7 @@ The admin layout uses shadcn/ui `<SidebarProvider>` with a fixed-width sidebar (
 1. "Deactivate" in row action dropdown
 2. `<AlertDialog>` opens with confirmation copy (see Copywriting section)
 3. On confirm: optimistic UI update (badge changes immediately), API call, error toast on failure with revert
-4. On cancel: dialog closes, no change
+4. On "Keep Organization": dialog closes, no change
 
 **Loading state:** Skeleton — 5 skeleton rows matching table column structure, each row 48px tall with `<Skeleton>` blocks.
 
@@ -412,6 +436,8 @@ The admin layout uses shadcn/ui `<SidebarProvider>` with a fixed-width sidebar (
 ### Surface 4: Organization Detail / Edit Form (/dashboard/organizations/[id])
 
 **Layout:** Single-column form, max-width 560px, centered in content area. Page heading above form card.
+
+**Primary focal point:** "Save Changes" button (edit mode) / "Create Organization" button (create mode), both accent color.
 
 **Fields:**
 1. Organization Name — `<Input>`, required
@@ -431,7 +457,7 @@ The admin layout uses shadcn/ui `<SidebarProvider>` with a fixed-width sidebar (
 - Only shown when current status is NOT already "Deactivated"
 - "Reactivate" button (variant="outline") shown when status IS "Deactivated"
 
-**Navigation:** "Cancel" button navigates back to /dashboard/organizations (or closes Sheet if using Sheet pattern).
+**Navigation:** "Discard Changes" button (edit mode) or "Back to Organizations" button (create mode) navigates back to /dashboard/organizations (or closes Sheet if using Sheet pattern). Both use `variant="outline"`.
 
 **Responsive:** Full-width form on mobile.
 
@@ -441,12 +467,14 @@ The admin layout uses shadcn/ui `<SidebarProvider>` with a fixed-width sidebar (
 
 **Scope decision:** Implement as /dashboard/assistants (global list scoped to admin's org via RLS). Per-org drill-down is accessible from the organization detail page as a tab or linked section.
 
+**Primary focal point:** "Add Assistant" button (top-right of page header, accent color).
+
 **Table columns:** Label | Vapi Assistant ID | Status | Added | (Actions)
 - Label: text (friendly name)
 - Vapi Assistant ID: monospace text, truncated to ~20 chars with full value on hover (`title` attribute or `<Tooltip>`)
 - Status: `<Switch>` inline (active/inactive toggle) — optimistic update
 - Added: formatted date
-- Actions: `<DropdownMenu>` with "Edit" and "Remove"
+- Actions: `<DropdownMenu>` with "Edit Mapping" and "Remove Mapping"
 
 **Add assistant flow:**
 1. "Add Assistant" button opens `<Dialog>` (small form — 2 fields)
@@ -461,9 +489,10 @@ The admin layout uses shadcn/ui `<SidebarProvider>` with a fixed-width sidebar (
 4. On error: switch reverts, error toast appears
 
 **Remove flow:**
-1. "Remove" in row action dropdown
+1. "Remove Mapping" in row action dropdown
 2. `<AlertDialog>` opens (see Copywriting)
 3. On confirm: row removed optimistically, API DELETE call, error toast with revert on failure
+4. On "Keep Mapping": dialog closes, no change
 
 **Vapi ID field display:** Use `font-mono text-xs` for the assistant ID value in the table cell to visually distinguish it from regular text.
 
