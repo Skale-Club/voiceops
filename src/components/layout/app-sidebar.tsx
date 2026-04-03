@@ -43,7 +43,7 @@ const navItems = [
   { icon: Zap, label: 'Tools', href: '/dashboard/tools', active: true },
   { icon: Eye, label: 'Observability', href: '/dashboard/calls', active: true },
   { icon: BookOpen, label: 'Knowledge Base', href: '/dashboard/knowledge', active: true },
-  { icon: Phone, label: 'Campaigns', href: '/dashboard/outbound', active: false },
+  { icon: Phone, label: 'Campaigns', href: '/dashboard/outbound', active: true },
 ]
 
 function getInitials(user: User): string {
