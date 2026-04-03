@@ -2,12 +2,12 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: VoiceOps MVP
-status: in-progress
-last_updated: "2026-04-02T05:20:00Z"
-last_activity: 2026-04-02
+status: complete
+last_updated: "2026-04-03T09:45:00Z"
+last_activity: 2026-04-03
 progress:
   total_phases: 5
-  completed_phases: 3
+  completed_phases: 5
   total_plans: 19
   completed_plans: 19
 ---
@@ -16,16 +16,17 @@ progress:
 
 ## Current Position
 
-Phase: 3 (Observability) — COMPLETE ✓
-Plan: 6 of 6
-Status: Phase complete — all 6 plans executed
-Last activity: 2026-04-02
+Phase: 5 (Outbound Campaigns) — COMPLETE ✓
+Plan: 5 of 5
+Status: ALL PHASES COMPLETE — v1.0 MVP shipped
+Last activity: 2026-04-03
 
 ## Milestone
 
 Version: v1.0
 Name: VoiceOps MVP
 Started: 2026-04-02
+Completed: 2026-04-03
 
 ## Accumulated Context
 
@@ -81,6 +82,11 @@ Started: 2026-04-02
 - [Phase 03-observability]: Filter state for calls list lives entirely in URL searchParams — no client state
 - [Phase 03-observability]: getDashboardMetrics runs 6 queries in Promise.all for minimum latency
 - [Phase 03-observability]: toolSuccessRate null when no action_logs exist — shown as "No data" in UI
+- [Phase 05-outbound-campaigns]: REPLICA IDENTITY FULL on campaign_contacts is critical for Supabase Realtime full row in payload.new
+- [Phase 05-outbound-campaigns]: Individual POST /call per contact (not Vapi Campaign API) — metadata.campaign_contact_id roundtripped for webhook correlation
+- [Phase 05-outbound-campaigns]: mapEndedReasonToStatus is a pure exported function — fully testable without mocking
+- [Phase 05-outbound-campaigns]: importContacts uses service-role for bulk insert; 23505 unique_violation handled gracefully (not thrown)
+- [Phase 05-outbound-campaigns]: CampaignStatus and CampaignContactStatus declared before Database interface (required for use inside interface)
 
 ## Blockers
 
@@ -88,4 +94,20 @@ Started: 2026-04-02
 
 ## Todos
 
-Phase 4 (Knowledge Base) — ready to start
+v1.0 MVP COMPLETE — all 5 phases, all 19 plans executed.
+
+Next steps:
+- Apply migrations 005_campaigns.sql to production Supabase instance
+- Add VAPI_API_KEY to production environment
+- Enable Supabase Realtime for campaign_contacts table in Supabase dashboard
+- Human UAT: navigate /dashboard/outbound, create campaign, import CSV, start campaign, verify realtime updates
+
+## Performance Metrics
+
+| Phase | Plan | Duration | Tasks | Files |
+|-------|------|----------|-------|-------|
+| 05 | 01 | ~8 min | 2 | 2 |
+| 05 | 02 | ~6 min | 2 | 6 |
+| 05 | 03 | ~10 min | 2 | 3 |
+| 05 | 04 | ~8 min | 2 | 5 |
+| 05 | 05 | ~12 min | 2 | 8 |
