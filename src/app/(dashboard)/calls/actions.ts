@@ -58,3 +58,50 @@ export async function getAssistantOptions(): Promise<
   if (error) throw new Error(error.message)
   return data ?? []
 }
+
+export async function getDashboardMetrics(): Promise<{
+  callsToday: number
+  callsWeek: number
+  callsMonth: number
+  toolSuccessRate: number | null
+  recentCalls: CallRow[]
+  recentFailures: Database['public']['Tables']['action_logs']['Row'][]
+}> {
+  const supabase = await createClient()
+  const now = new Date()
+  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString()
+  const weekStart = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString()
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString()
+  const dayAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString()
+
+  const [todayRes, weekRes, monthRes, successRateRes, recentCallsRes, recentFailuresRes] =
+    await Promise.all([
+      supabase.from('calls').select('*', { count: 'exact', head: true }).gte('created_at', todayStart),
+      supabase.from('calls').select('*', { count: 'exact', head: true }).gte('created_at', weekStart),
+      supabase.from('calls').select('*', { count: 'exact', head: true }).gte('created_at', monthStart),
+      supabase.from('action_logs').select('status').gte('created_at', monthStart),
+      supabase.from('calls').select('*').order('created_at', { ascending: false }).limit(10),
+      supabase
+        .from('action_logs')
+        .select('*')
+        .in('status', ['error', 'timeout'])
+        .gte('created_at', dayAgo)
+        .order('created_at', { ascending: false })
+        .limit(20),
+    ])
+
+  const logs = successRateRes.data ?? []
+  const successRate =
+    logs.length === 0
+      ? null
+      : Math.round((logs.filter((l) => l.status === 'success').length * 100) / logs.length)
+
+  return {
+    callsToday: todayRes.count ?? 0,
+    callsWeek: weekRes.count ?? 0,
+    callsMonth: monthRes.count ?? 0,
+    toolSuccessRate: successRate,
+    recentCalls: recentCallsRes.data ?? [],
+    recentFailures: recentFailuresRes.data ?? [],
+  }
+}
