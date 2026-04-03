@@ -30,6 +30,37 @@ function chunkText(text: string, chunkSize = CHUNK_SIZE, overlap = CHUNK_OVERLAP
   return chunks
 }
 
+// Decrypts a key encrypted by src/lib/crypto.ts (AES-256-GCM, format: ivBase64:ciphertextBase64)
+// Uses Web Crypto API — available natively in Deno, no Node.js imports needed.
+async function decryptKey(encrypted: string, secret: string): Promise<string> {
+  const colonIdx = encrypted.indexOf(':')
+  if (colonIdx === -1) throw new Error('Invalid encrypted format — expected ivBase64:ciphertextBase64')
+
+  const ivB64 = encrypted.slice(0, colonIdx)
+  const ctB64 = encrypted.slice(colonIdx + 1)
+
+  // Decode base64 → Uint8Array (atob is available in Deno)
+  const iv = Uint8Array.from(atob(ivB64), (c) => c.charCodeAt(0))
+  const ciphertext = Uint8Array.from(atob(ctB64), (c) => c.charCodeAt(0))
+
+  // Derive key from 64-char hex ENCRYPTION_SECRET (matches crypto.ts getKey())
+  const keyBytes = new Uint8Array(32)
+  for (let i = 0; i < 32; i++) {
+    keyBytes[i] = parseInt(secret.slice(i * 2, i * 2 + 2), 16)
+  }
+
+  const cryptoKey = await crypto.subtle.importKey(
+    'raw',
+    keyBytes,
+    { name: 'AES-GCM' },
+    false,
+    ['decrypt']
+  )
+
+  const plaintext = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, cryptoKey, ciphertext)
+  return new TextDecoder().decode(plaintext)
+}
+
 async function extractTextFromSource(
   supabase: ReturnType<typeof createClient>,
   sourceType: string,
@@ -89,15 +120,38 @@ Deno.serve(async (req: Request) => {
 
   const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? ''
   const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
-  const openaiApiKey = Deno.env.get('OPENAI_API_KEY') ?? ''
+  const encryptionSecret = Deno.env.get('ENCRYPTION_SECRET') ?? ''
 
-  if (!openaiApiKey) {
-    return new Response(JSON.stringify({ error: 'OPENAI_API_KEY not configured' }), { status: 500 })
+  if (!encryptionSecret || encryptionSecret.length !== 64) {
+    return new Response(JSON.stringify({ error: 'ENCRYPTION_SECRET not configured or invalid' }), { status: 500 })
   }
 
   const supabase = createClient(supabaseUrl, serviceRoleKey, {
     auth: { persistSession: false }
   })
+
+  // Fetch OpenAI API key from org's integrations table (not env var)
+  const { data: integrationRow, error: integrationError } = await supabase
+    .from('integrations')
+    .select('encrypted_api_key')
+    .eq('organization_id', organizationId)
+    .eq('provider', 'openai')
+    .eq('is_active', true)
+    .limit(1)
+    .single()
+
+  if (integrationError || !integrationRow) {
+    return new Response(JSON.stringify({ error: 'No active OpenAI integration found for this organization' }), { status: 400 })
+  }
+
+  let openaiApiKey: string
+  try {
+    openaiApiKey = await decryptKey(integrationRow.encrypted_api_key, encryptionSecret)
+  } catch (decryptErr) {
+    const msg = decryptErr instanceof Error ? decryptErr.message : String(decryptErr)
+    return new Response(JSON.stringify({ error: `Failed to decrypt OpenAI key: ${msg}` }), { status: 500 })
+  }
+
   const openai = new OpenAI({ apiKey: openaiApiKey })
 
   // Fetch document metadata
