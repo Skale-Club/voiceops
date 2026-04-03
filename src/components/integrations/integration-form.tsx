@@ -42,7 +42,6 @@ const PROVIDER_LABELS: Record<Provider, string> = {
 // Single schema used for both create and edit.
 // apiKey validation is enforced at submit time for create mode.
 const integrationSchema = z.object({
-  name: z.string().min(1, 'Name is required').max(100, 'Name must be 100 characters or fewer'),
   provider: z.enum(['gohighlevel', 'twilio', 'calcom', 'custom_webhook', 'openai', 'anthropic', 'openrouter', 'vapi'] as const),
   apiKey: z.string(),
   locationId: z.string().optional(),
@@ -64,7 +63,6 @@ export function IntegrationForm({ mode, integration, onSuccess }: IntegrationFor
     resolver: zodResolver(integrationSchema),
     mode: 'onSubmit',
     defaultValues: {
-      name: integration?.name ?? '',
       provider: (integration?.provider ?? 'gohighlevel') as Provider,
       apiKey: '', // Never pre-fill API key for security — not even in edit mode
       locationId: integration?.location_id ?? '',
@@ -90,9 +88,11 @@ export function IntegrationForm({ mode, integration, onSuccess }: IntegrationFor
         config.model = values.defaultModel.trim()
       }
 
+      const name = PROVIDER_LABELS[values.provider]
+
       if (mode === 'create') {
         result = await createIntegration({
-          name: values.name,
+          name,
           provider: values.provider,
           apiKey: values.apiKey,
           locationId: values.locationId ?? '',
@@ -100,7 +100,7 @@ export function IntegrationForm({ mode, integration, onSuccess }: IntegrationFor
         })
       } else if (integration) {
         result = await updateIntegration(integration.id, {
-          name: values.name,
+          name,
           locationId: values.locationId ?? '',
           config,
           // Only pass apiKey if user entered a new one
@@ -132,24 +132,6 @@ export function IntegrationForm({ mode, integration, onSuccess }: IntegrationFor
 
       <Form {...form}>
         <form onSubmit={form.handleSubmit(onSubmit)} className="flex flex-col gap-4">
-          <FormField
-            control={form.control}
-            name="name"
-            render={({ field }) => (
-              <FormItem>
-                <FormLabel>Name</FormLabel>
-                <FormControl>
-                  <Input
-                    placeholder="e.g. Alpha Home Improvements GHL"
-                    disabled={isPending}
-                    {...field}
-                  />
-                </FormControl>
-                <FormMessage />
-              </FormItem>
-            )}
-          />
-
           <FormField
             control={form.control}
             name="provider"
