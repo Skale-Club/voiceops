@@ -252,6 +252,55 @@ export interface Database {
           }
         ]
       }
+      calls: {
+        Row: {
+          id: string
+          organization_id: string
+          vapi_call_id: string
+          assistant_id: string | null
+          call_type: string | null
+          status: string | null
+          ended_reason: string | null
+          started_at: string | null
+          ended_at: string | null
+          duration_seconds: number | null
+          cost: number | null
+          customer_number: string | null
+          customer_name: string | null
+          summary: string | null
+          transcript: string | null
+          transcript_turns: Json
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          organization_id: string
+          vapi_call_id: string
+          assistant_id?: string | null
+          call_type?: string | null
+          status?: string | null
+          ended_reason?: string | null
+          started_at?: string | null
+          ended_at?: string | null
+          cost?: number | null
+          customer_number?: string | null
+          customer_name?: string | null
+          summary?: string | null
+          transcript?: string | null
+          transcript_turns?: Json
+          created_at?: string
+        }
+        Update: Record<string, never>
+        Relationships: [
+          {
+            foreignKeyName: 'calls_organization_id_fkey'
+            columns: ['organization_id']
+            isOneToOne: false
+            referencedRelation: 'organizations'
+            referencedColumns: ['id']
+          }
+        ]
+      }
     }
     Views: Record<string, never>
     Functions: {
