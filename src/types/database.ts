@@ -14,6 +14,9 @@ export type Json =
 
 export type UserRole = 'admin' | 'member'
 
+export type CampaignStatus = 'draft' | 'scheduled' | 'in_progress' | 'paused' | 'completed' | 'stopped'
+export type CampaignContactStatus = 'pending' | 'calling' | 'completed' | 'failed' | 'no_answer'
+
 export interface Database {
   public: {
     Tables: {
@@ -378,6 +381,110 @@ export interface Database {
             columns: ['document_id']
             isOneToOne: false
             referencedRelation: 'documents'
+            referencedColumns: ['id']
+          }
+        ]
+      }
+      campaigns: {
+        Row: {
+          id: string
+          organization_id: string
+          name: string
+          vapi_assistant_id: string
+          vapi_phone_number_id: string
+          vapi_campaign_id: string | null
+          status: CampaignStatus
+          scheduled_start_at: string | null
+          calls_per_minute: number
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          organization_id: string
+          name: string
+          vapi_assistant_id: string
+          vapi_phone_number_id: string
+          vapi_campaign_id?: string | null
+          status?: CampaignStatus
+          scheduled_start_at?: string | null
+          calls_per_minute?: number
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          name?: string
+          vapi_campaign_id?: string | null
+          status?: CampaignStatus
+          scheduled_start_at?: string | null
+          calls_per_minute?: number
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: 'campaigns_organization_id_fkey'
+            columns: ['organization_id']
+            isOneToOne: false
+            referencedRelation: 'organizations'
+            referencedColumns: ['id']
+          }
+        ]
+      }
+      campaign_contacts: {
+        Row: {
+          id: string
+          campaign_id: string
+          organization_id: string
+          name: string | null
+          phone: string
+          custom_data: Json
+          status: CampaignContactStatus
+          vapi_call_id: string | null
+          error_detail: string | null
+          called_at: string | null
+          completed_at: string | null
+          retry_count: number
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          campaign_id: string
+          organization_id: string
+          name?: string | null
+          phone: string
+          custom_data?: Json
+          status?: CampaignContactStatus
+          vapi_call_id?: string | null
+          error_detail?: string | null
+          called_at?: string | null
+          completed_at?: string | null
+          retry_count?: number
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          status?: CampaignContactStatus
+          vapi_call_id?: string | null
+          error_detail?: string | null
+          called_at?: string | null
+          completed_at?: string | null
+          retry_count?: number
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: 'campaign_contacts_campaign_id_fkey'
+            columns: ['campaign_id']
+            isOneToOne: false
+            referencedRelation: 'campaigns'
+            referencedColumns: ['id']
+          },
+          {
+            foreignKeyName: 'campaign_contacts_organization_id_fkey'
+            columns: ['organization_id']
+            isOneToOne: false
+            referencedRelation: 'organizations'
             referencedColumns: ['id']
           }
         ]
