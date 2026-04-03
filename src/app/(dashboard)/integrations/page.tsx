@@ -5,11 +5,11 @@ export default async function IntegrationsPage() {
   const integrations = await getIntegrations()
 
   return (
-    <div className="p-6">
-      <div className="mb-6">
-        <h1 className="text-xl font-semibold">Integrations</h1>
-        <p className="text-sm text-muted-foreground">
-          Manage GoHighLevel credentials for your organization.
+    <div className="p-6 space-y-5">
+      <div>
+        <h1 className="text-lg font-semibold">Integrations</h1>
+        <p className="text-sm text-muted-foreground mt-0.5">
+          Connect external services to your organization.
         </p>
       </div>
       <IntegrationsTable integrations={integrations} />

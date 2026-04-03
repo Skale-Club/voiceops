@@ -14,6 +14,13 @@ export async function POST(
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 })
 
+  const { data: member } = await supabase
+    .from('org_members')
+    .select('organization_id')
+    .eq('user_id', user.id)
+    .single()
+  if (!member) return Response.json({ error: 'No organization found' }, { status: 403 })
+
   const { id: campaignId } = await params
 
   const serviceClient = createServiceClient<Database>(
@@ -26,6 +33,7 @@ export async function POST(
     .from('campaigns')
     .update({ status: 'stopped', updated_at: new Date().toISOString() })
     .eq('id', campaignId)
+    .eq('organization_id', member.organization_id)
     .in('status', ['in_progress', 'paused']) // optimistic lock
     .select('id')
     .single()

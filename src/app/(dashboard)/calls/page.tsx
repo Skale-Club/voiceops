@@ -24,10 +24,10 @@ export default async function CallsPage({
   const totalPages = Math.ceil(total / 20)
 
   return (
-    <div className="p-6">
-      <div className="mb-6">
-        <h1 className="text-xl font-semibold">Calls</h1>
-        <p className="text-sm text-muted-foreground">
+    <div className="p-6 space-y-5">
+      <div>
+        <h1 className="text-lg font-semibold">Calls</h1>
+        <p className="text-sm text-muted-foreground mt-0.5">
           Every completed call processed through your assistants.
         </p>
       </div>

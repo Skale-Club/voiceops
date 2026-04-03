@@ -40,7 +40,7 @@ export function CallsFilters({ assistants }: CallsFiltersProps) {
   }
 
   return (
-    <div className="flex flex-wrap gap-3 mb-4">
+    <div className="flex flex-wrap gap-2">
       <Input
         placeholder="Search by phone or name..."
         defaultValue={searchParams.get('q') ?? ''}
@@ -98,23 +98,23 @@ export function CallsFilters({ assistants }: CallsFiltersProps) {
         </Select>
       )}
 
-      <div className="flex items-center gap-2">
-        <label className="text-sm text-muted-foreground">From</label>
-        <input
+      <div className="flex items-center gap-1.5">
+        <span className="text-sm text-muted-foreground">From</span>
+        <Input
           type="date"
           defaultValue={searchParams.get('from') ?? ''}
           onChange={(e) => updateParam('from', e.target.value || null)}
-          className="h-9 rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm"
+          className="w-[148px]"
         />
       </div>
 
-      <div className="flex items-center gap-2">
-        <label className="text-sm text-muted-foreground">To</label>
-        <input
+      <div className="flex items-center gap-1.5">
+        <span className="text-sm text-muted-foreground">To</span>
+        <Input
           type="date"
           defaultValue={searchParams.get('to') ?? ''}
           onChange={(e) => updateParam('to', e.target.value || null)}
-          className="h-9 rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm"
+          className="w-[148px]"
         />
       </div>
     </div>

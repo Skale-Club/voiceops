@@ -45,7 +45,7 @@ const organizationSchema = z.object({
     .string()
     .min(1, 'Organization name is required.')
     .max(100, 'Name must be 100 characters or fewer.'),
-  is_active: z.boolean().default(true),
+  is_active: z.boolean(),
 })
 
 type OrganizationFormValues = z.infer<typeof organizationSchema>
@@ -72,7 +72,7 @@ export function OrganizationForm({ mode, organization, onSuccess }: Organization
   async function onSubmit(values: OrganizationFormValues) {
     setIsPending(true)
     try {
-      let result: { error?: string } | void
+      let result: { error?: string } | void = undefined
 
       if (mode === 'create') {
         result = await createOrganization({ name: values.name })

@@ -38,18 +38,16 @@ export default async function CallDetailPage({
     : []
 
   return (
-    <div className="p-6 max-w-3xl mx-auto">
+    <div className="p-6 space-y-5 max-w-3xl">
       <Link
         href="/calls"
-        className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground mb-6"
+        className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
       >
         <ChevronLeft className="h-4 w-4" />
         Back to Calls
       </Link>
       <CallDetailHeader call={call} />
-      <div className="mt-6">
-        <CallTranscript timeline={turns} />
-      </div>
+      <CallTranscript timeline={turns} />
     </div>
   )
 }

@@ -7,7 +7,7 @@ import {
   Bot,
   Zap,
   Plug2,
-  Eye,
+  PhoneCall,
   BookOpen,
   Phone,
   ChevronUp,
@@ -26,7 +26,6 @@ import {
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
-  SidebarTrigger,
 } from '@/components/ui/sidebar'
 import {
   DropdownMenu,
@@ -37,13 +36,13 @@ import {
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 
 const navItems = [
-  { icon: Building2, label: 'Organizations', href: '/organizations', active: true },
+  { icon: PhoneCall, label: 'Calls', href: '/calls', active: true },
+  { icon: Phone, label: 'Campaigns', href: '/outbound', active: true },
+  { icon: Zap, label: 'Tools', href: '/tools', active: true },
+  { icon: BookOpen, label: 'Knowledge', href: '/knowledge', active: true },
   { icon: Bot, label: 'Assistants', href: '/assistants', active: true },
   { icon: Plug2, label: 'Integrations', href: '/integrations', active: true },
-  { icon: Zap, label: 'Tools', href: '/tools', active: true },
-  { icon: Eye, label: 'Observability', href: '/calls', active: true },
-  { icon: BookOpen, label: 'Knowledge Base', href: '/knowledge', active: true },
-  { icon: Phone, label: 'Campaigns', href: '/outbound', active: true },
+  { icon: Building2, label: 'Organizations', href: '/organizations', active: true },
 ]
 
 function getInitials(user: User): string {
@@ -89,14 +88,13 @@ export function AppSidebar({ user }: AppSidebarProps) {
 
   return (
     <Sidebar>
-      <SidebarHeader className="px-4 py-3">
+      <SidebarHeader className="px-4 py-4">
         <div className="flex items-center gap-2">
-          <span className="text-[14px] font-semibold">VoiceOps</span>
-          <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-muted text-muted-foreground leading-tight">
+          <span className="text-[14px] font-semibold tracking-tight">VoiceOps</span>
+          <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-primary/10 text-primary leading-tight">
             beta
           </span>
         </div>
-        <SidebarTrigger aria-label="Toggle sidebar" className="-ml-1 mt-1" />
       </SidebarHeader>
 
       <SidebarContent>

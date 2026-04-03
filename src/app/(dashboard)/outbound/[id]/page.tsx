@@ -21,15 +21,13 @@ export default async function CampaignDetailPage({ params }: PageProps) {
   const { campaign, contacts } = detail
 
   return (
-    <div className="flex flex-col gap-6 p-6">
-      <div className="flex items-start justify-between">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight">{campaign.name}</h1>
-          <p className="text-muted-foreground text-sm mt-1">
-            {campaign.calls_per_minute} calls/min
-            {campaign.scheduled_start_at && ` · Scheduled ${format(new Date(campaign.scheduled_start_at), 'MMM d, yyyy HH:mm')}`}
-          </p>
-        </div>
+    <div className="p-6 space-y-6">
+      <div>
+        <h1 className="text-lg font-semibold">{campaign.name}</h1>
+        <p className="text-sm text-muted-foreground mt-0.5">
+          {campaign.calls_per_minute} calls/min
+          {campaign.scheduled_start_at && ` · Scheduled ${format(new Date(campaign.scheduled_start_at), 'MMM d, yyyy HH:mm')}`}
+        </p>
       </div>
 
       <ContactStatusBoard
@@ -40,7 +38,7 @@ export default async function CampaignDetailPage({ params }: PageProps) {
 
       {(campaign.status === 'draft' || campaign.status === 'scheduled') && (
         <div className="rounded-lg border p-6">
-          <h2 className="text-lg font-semibold mb-4">Import Contacts</h2>
+          <h2 className="text-base font-semibold mb-4">Import Contacts</h2>
           <CsvImportForm campaignId={campaign.id} />
         </div>
       )}

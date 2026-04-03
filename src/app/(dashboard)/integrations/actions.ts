@@ -92,16 +92,25 @@ export async function getIntegrations(): Promise<IntegrationForDisplay[]> {
 
   if (error || !data) return []
 
-  return data.map((row) => ({
-    id: row.id,
-    organization_id: row.organization_id,
-    provider: row.provider,
-    name: row.name,
-    masked_api_key: maskApiKey(row.encrypted_api_key),
-    location_id: row.location_id,
-    config: row.config,
-    is_active: row.is_active,
-    created_at: row.created_at,
+  return Promise.all(data.map(async (row) => {
+    let masked_api_key = '••••••••'
+    try {
+      const plaintext = await decrypt(row.encrypted_api_key)
+      masked_api_key = maskApiKey(plaintext)
+    } catch {
+      // encrypted_api_key malformed — show placeholder
+    }
+    return {
+      id: row.id,
+      organization_id: row.organization_id,
+      provider: row.provider,
+      name: row.name,
+      masked_api_key,
+      location_id: row.location_id,
+      config: row.config,
+      is_active: row.is_active,
+      created_at: row.created_at,
+    }
   }))
 }
 

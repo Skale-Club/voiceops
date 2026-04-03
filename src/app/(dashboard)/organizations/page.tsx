@@ -15,10 +15,12 @@ export default async function OrganizationsPage() {
   if (error) throw new Error(error.message)
 
   return (
-    <div className="p-6">
-      <div className="mb-6">
-        <h1 className="text-xl font-semibold">Organizations</h1>
-        <p className="text-sm text-muted-foreground">Manage tenants and their Vapi assistant mappings.</p>
+    <div className="p-6 space-y-5">
+      <div>
+        <h1 className="text-lg font-semibold">Organizations</h1>
+        <p className="text-sm text-muted-foreground mt-0.5">
+          Manage tenants and their Vapi assistant mappings.
+        </p>
       </div>
       <OrganizationsTable organizations={organizations ?? []} />
     </div>

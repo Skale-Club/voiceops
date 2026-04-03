@@ -18,6 +18,14 @@ export async function POST(
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 })
 
+  // Get user's org — scope all campaign operations to it
+  const { data: member } = await supabase
+    .from('org_members')
+    .select('organization_id')
+    .eq('user_id', user.id)
+    .single()
+  if (!member) return Response.json({ error: 'No organization found' }, { status: 403 })
+
   const { id: campaignId } = await params
 
   const serviceClient = createServiceClient<Database>(
@@ -27,10 +35,12 @@ export async function POST(
   )
 
   // Optimistic status transition: draft | paused → in_progress
+  // organization_id filter enforces ownership even through service-role client
   const { data: updated, error } = await serviceClient
     .from('campaigns')
     .update({ status: 'in_progress', updated_at: new Date().toISOString() })
     .eq('id', campaignId)
+    .eq('organization_id', member.organization_id)
     .in('status', ['draft', 'scheduled', 'paused'])
     .select('id, organization_id')
     .single()

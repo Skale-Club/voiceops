@@ -9,10 +9,10 @@ export default async function ToolsPage() {
   ])
 
   return (
-    <div className="p-6">
-      <div className="mb-6">
-        <h1 className="text-xl font-semibold">Tool Configurations</h1>
-        <p className="text-sm text-muted-foreground">
+    <div className="p-6 space-y-5">
+      <div>
+        <h1 className="text-lg font-semibold">Tools</h1>
+        <p className="text-sm text-muted-foreground mt-0.5">
           Map Vapi tool names to GoHighLevel actions.
         </p>
       </div>

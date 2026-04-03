@@ -16,14 +16,14 @@ export default async function KnowledgePage() {
   if (error) throw new Error(error.message)
 
   return (
-    <div className="p-6">
-      <div className="mb-6">
-        <h1 className="text-xl font-semibold">Knowledge Base</h1>
-        <p className="text-sm text-muted-foreground">
-          Upload documents or add URLs to answer knowledge queries during live calls.
+    <div className="p-6 space-y-5">
+      <div>
+        <h1 className="text-lg font-semibold">Knowledge</h1>
+        <p className="text-sm text-muted-foreground mt-0.5">
+          Upload documents to answer knowledge queries during live calls.
         </p>
       </div>
-      <div className="grid gap-6">
+      <div className="space-y-5">
         <UploadForm />
         <DocumentList documents={documents ?? []} />
       </div>

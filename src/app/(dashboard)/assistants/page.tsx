@@ -15,12 +15,12 @@ export default async function AssistantsPage() {
   if (error) throw new Error(error.message)
 
   return (
-    <div className="p-6">
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <h1 className="text-xl font-semibold">Assistant Mappings</h1>
-          <p className="text-sm text-muted-foreground">Link Vapi assistant IDs to this organization. Active mappings route Vapi tool-call webhooks to the correct tenant.</p>
-        </div>
+    <div className="p-6 space-y-5">
+      <div>
+        <h1 className="text-lg font-semibold">Assistants</h1>
+        <p className="text-sm text-muted-foreground mt-0.5">
+          Link Vapi assistant IDs to this organization to route webhooks correctly.
+        </p>
       </div>
       <AssistantMappingsTable mappings={mappings ?? []} />
     </div>
