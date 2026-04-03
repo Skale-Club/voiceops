@@ -120,13 +120,83 @@ describe('ACTN-02: Tool config routing', () => {
   })
 })
 
-describe('ACTN-11: Fallback message on failure', () => {
-  it.todo('POST /api/vapi/tools returns HTTP 200 with fallback_message when GHL executor throws')
-  it.todo('POST /api/vapi/tools returns HTTP 200 with "Service unavailable." for unknown assistant ID')
-  it.todo('POST /api/vapi/tools never returns HTTP non-200 — catches all errors in outer try/catch')
+// ---- ACTN-11: executeAction dispatcher ----
+
+describe('ACTN-11: executeAction dispatcher', () => {
+  beforeEach(() => vi.resetModules())
+
+  const credentials = { apiKey: 'decrypted-token', locationId: 'loc_xyz' }
+  const params = { firstName: 'Jane', email: 'jane@example.com' }
+
+  it('executeAction("create_contact", params, credentials) calls createContact and returns its string result', async () => {
+    vi.doMock('@/lib/ghl/create-contact', () => ({
+      createContact: vi.fn().mockResolvedValue('Contact created. ID: cid_123'),
+    }))
+    const { executeAction } = await import('@/lib/action-engine/execute-action')
+    const result = await executeAction('create_contact', params, credentials)
+    expect(result).toBe('Contact created. ID: cid_123')
+  })
+
+  it('executeAction("get_availability", params, credentials) calls getAvailability and returns its string result', async () => {
+    vi.doMock('@/lib/ghl/get-availability', () => ({
+      getAvailability: vi.fn().mockResolvedValue('Available slots: 09:00 AM, 10:00 AM'),
+    }))
+    const { executeAction } = await import('@/lib/action-engine/execute-action')
+    const result = await executeAction('get_availability', { calendarId: 'cal_123', startDate: '2026-04-10', endDate: '2026-04-11' }, credentials)
+    expect(result).toBe('Available slots: 09:00 AM, 10:00 AM')
+  })
+
+  it('executeAction("create_appointment", params, credentials) calls createAppointment and returns its string result', async () => {
+    vi.doMock('@/lib/ghl/create-appointment', () => ({
+      createAppointment: vi.fn().mockResolvedValue('Appointment confirmed. ID: appt_789'),
+    }))
+    const { executeAction } = await import('@/lib/action-engine/execute-action')
+    const result = await executeAction('create_appointment', { calendarId: 'cal_123', contactId: 'cid_456', startTime: '2026-04-10T09:00:00Z', endTime: '2026-04-10T09:30:00Z' }, credentials)
+    expect(result).toBe('Appointment confirmed. ID: appt_789')
+  })
+
+  it('executeAction with unsupported action_type throws "Unsupported action type: send_sms"', async () => {
+    const { executeAction } = await import('@/lib/action-engine/execute-action')
+    await expect(executeAction('send_sms', params, credentials)).rejects.toThrow('Unsupported action type: send_sms')
+  })
 })
 
-describe('ACTN-12: 500ms response budget', () => {
-  it.todo('action_logs insert happens via after() — not awaited before Response.json() is returned')
-  it.todo('GHL fetch uses AbortController with 400ms timeout signal')
+// ---- ACTN-12: logAction ----
+
+describe('ACTN-12: logAction writes action_logs and swallows errors', () => {
+  beforeEach(() => vi.resetModules())
+
+  const payload = {
+    organization_id: 'org_abc',
+    tool_config_id: 'tc_001',
+    vapi_call_id: 'call_xyz',
+    tool_name: 'create_lead',
+    status: 'success' as const,
+    execution_ms: 123,
+    request_payload: { firstName: 'Jane' },
+    response_payload: { result: 'Contact created. ID: cid_123' },
+    error_detail: null,
+  }
+
+  it('logAction() calls supabase.from("action_logs").insert() with the provided payload', async () => {
+    const insertChain = makeInsertChain({ data: null, error: null })
+    const supabase = { from: vi.fn().mockReturnValue(insertChain) } as unknown as SupabaseClient<Database>
+
+    const { logAction } = await import('@/lib/action-engine/log-action')
+    await logAction(payload, supabase)
+
+    expect(supabase.from).toHaveBeenCalledWith('action_logs')
+    expect(insertChain.insert).toHaveBeenCalledWith(payload)
+  })
+
+  it('logAction() does not throw on Supabase insert error — swallows errors silently', async () => {
+    const insertChain = {
+      insert: vi.fn().mockRejectedValue(new Error('DB connection error')),
+    }
+    const supabase = { from: vi.fn().mockReturnValue(insertChain) } as unknown as SupabaseClient<Database>
+
+    const { logAction } = await import('@/lib/action-engine/log-action')
+    // Must resolve (not reject) even when DB throws
+    await expect(logAction(payload, supabase)).resolves.toBeUndefined()
+  })
 })
