@@ -74,7 +74,10 @@ export async function POST(request: Request): Promise<Response> {
         locationId: toolConfig.integrations.location_id ?? '',
       }
       const args = getToolArguments(toolCall)
-      result = await executeAction(toolConfig.action_type, args, credentials)
+      result = await executeAction(toolConfig.action_type, args, credentials, {
+        organizationId: orgId,
+        supabase,
+      })
     } catch (err) {
       // GHL executor threw (error, timeout, or unsupported action type)
       const isTimeout = err instanceof Error && err.name === 'AbortError'
