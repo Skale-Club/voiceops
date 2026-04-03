@@ -1,11 +1,11 @@
-import { createClient } from '@/lib/supabase/server'
+import { createClient, getUser } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import { AssistantMappingsTable } from '@/components/assistants/assistant-mappings-table'
 
 export default async function AssistantsPage() {
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
+  const user = await getUser()
   if (!user) redirect('/login')
+  const supabase = await createClient()
 
   const { data: mappings, error } = await supabase
     .from('assistant_mappings')

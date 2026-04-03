@@ -4,8 +4,7 @@ import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import { Building2, Check, ChevronsUpDown, Plus, Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
-import { switchOrganization } from '@/app/(dashboard)/organizations/actions'
-import { createOrganization } from '@/app/(dashboard)/organizations/actions'
+import { switchOrganization, createOrganization, getUserOrgs } from '@/app/(dashboard)/organizations/actions'
 import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,
@@ -33,14 +32,14 @@ import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 
+interface OrgSwitcherProps {
+  currentOrgId: string | null
+  currentOrgName: string | null
+}
+
 interface Org {
   id: string
   name: string
-}
-
-interface OrgSwitcherProps {
-  orgs: Org[]
-  currentOrgId: string | null
 }
 
 const createOrgSchema = z.object({
@@ -107,16 +106,31 @@ function CreateOrgDialog({ open, onOpenChange }: { open: boolean; onOpenChange: 
   )
 }
 
-export function OrgSwitcher({ orgs, currentOrgId }: OrgSwitcherProps) {
-  const [isSwitching, startTransition] = useTransition()
+export function OrgSwitcher({ currentOrgId, currentOrgName }: OrgSwitcherProps) {
+  const [isSwitching, startSwitchTransition] = useTransition()
   const [createOpen, setCreateOpen] = useState(false)
+  const [dropdownOpen, setDropdownOpen] = useState(false)
+  const [orgs, setOrgs] = useState<Org[] | null>(null)
+  const [isLoadingOrgs, setIsLoadingOrgs] = useState(false)
   const router = useRouter()
 
-  const currentOrg = orgs.find(o => o.id === currentOrgId)
+  async function handleDropdownOpen(open: boolean) {
+    setDropdownOpen(open)
+    // Lazy-load org list only on first open
+    if (open && orgs === null && !isLoadingOrgs) {
+      setIsLoadingOrgs(true)
+      try {
+        const list = await getUserOrgs()
+        setOrgs(list)
+      } finally {
+        setIsLoadingOrgs(false)
+      }
+    }
+  }
 
   function handleSwitch(orgId: string) {
     if (orgId === currentOrgId || isSwitching) return
-    startTransition(async () => {
+    startSwitchTransition(async () => {
       const result = await switchOrganization(orgId)
       if (result.error) {
         toast.error(result.error)
@@ -128,7 +142,7 @@ export function OrgSwitcher({ orgs, currentOrgId }: OrgSwitcherProps) {
 
   return (
     <>
-      <DropdownMenu>
+      <DropdownMenu open={dropdownOpen} onOpenChange={handleDropdownOpen}>
         <DropdownMenuTrigger asChild>
           <Button
             variant="ghost"
@@ -142,27 +156,34 @@ export function OrgSwitcher({ orgs, currentOrgId }: OrgSwitcherProps) {
               <Building2 className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
             )}
             <span className="max-w-[160px] truncate">
-              {currentOrg?.name ?? 'Select organization'}
+              {currentOrgName ?? 'Select organization'}
             </span>
             <ChevronsUpDown className="h-3 w-3 text-muted-foreground shrink-0" />
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="start" className="w-60">
-          {orgs.map(org => (
-            <DropdownMenuItem
-              key={org.id}
-              onClick={() => handleSwitch(org.id)}
-              className="cursor-pointer gap-2"
-            >
-              <Check
-                className={`h-3.5 w-3.5 shrink-0 ${org.id === currentOrgId ? 'opacity-100' : 'opacity-0'}`}
-              />
-              <span className="truncate">{org.name}</span>
-            </DropdownMenuItem>
-          ))}
+          {isLoadingOrgs ? (
+            <div className="flex items-center gap-2 px-2 py-1.5 text-sm text-muted-foreground">
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              Loading...
+            </div>
+          ) : (
+            (orgs ?? []).map(org => (
+              <DropdownMenuItem
+                key={org.id}
+                onClick={() => handleSwitch(org.id)}
+                className="cursor-pointer gap-2"
+              >
+                <Check
+                  className={`h-3.5 w-3.5 shrink-0 ${org.id === currentOrgId ? 'opacity-100' : 'opacity-0'}`}
+                />
+                <span className="truncate">{org.name}</span>
+              </DropdownMenuItem>
+            ))
+          )}
           <DropdownMenuSeparator />
           <DropdownMenuItem
-            onClick={() => setCreateOpen(true)}
+            onClick={() => { setDropdownOpen(false); setCreateOpen(true) }}
             className="cursor-pointer gap-2 text-muted-foreground"
           >
             <Plus className="h-3.5 w-3.5 shrink-0" />

@@ -2,15 +2,15 @@
 // Server actions: register document after upload, add URL, delete document
 'use server'
 
-import { createClient } from '@/lib/supabase/server'
+import { createClient, getUser } from '@/lib/supabase/server'
 import { createClient as createServiceClient } from '@supabase/supabase-js'
 import { redirect } from 'next/navigation'
 import type { Database } from '@/types/database'
 
 async function getAuthedOrgId(): Promise<{ supabase: Awaited<ReturnType<typeof createClient>>; orgId: string }> {
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
+  const user = await getUser()
   if (!user) redirect('/login')
+  const supabase = await createClient()
 
   const { data: membership } = await supabase
     .from('org_members')

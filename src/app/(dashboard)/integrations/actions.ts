@@ -1,5 +1,5 @@
 'use server'
-import { createClient } from '@/lib/supabase/server'
+import { createClient, getUser } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
 import { encrypt, decrypt, maskApiKey } from '@/lib/crypto'
 
@@ -25,11 +25,9 @@ export async function createIntegration(data: {
   locationId: string
   config?: Record<string, string>
 }): Promise<{ error?: string } | void> {
-  const supabase = await createClient()
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  const user = await getUser()
   if (!user) return { error: 'Not authenticated.' }
+  const supabase = await createClient()
 
   const { data: member, error: memberError } = await supabase
     .from('org_members')
@@ -59,11 +57,9 @@ export async function updateIntegration(
   id: string,
   data: { name: string; locationId: string; config?: Record<string, string>; apiKey?: string }
 ): Promise<{ error?: string } | void> {
-  const supabase = await createClient()
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  const user = await getUser()
   if (!user) return { error: 'Not authenticated.' }
+  const supabase = await createClient()
 
   const updateData: Record<string, unknown> = {
     name: data.name,
@@ -117,11 +113,9 @@ export async function getIntegrations(): Promise<IntegrationForDisplay[]> {
 export async function testConnection(
   integrationId: string
 ): Promise<{ success: boolean; error?: string }> {
-  const supabase = await createClient()
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  const user = await getUser()
   if (!user) return { success: false, error: 'Not authenticated.' }
+  const supabase = await createClient()
 
   const { data: integration, error: fetchError } = await supabase
     .from('integrations')
@@ -213,11 +207,9 @@ export async function testConnection(
 }
 
 export async function deleteIntegration(id: string): Promise<{ error?: string } | void> {
-  const supabase = await createClient()
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  const user = await getUser()
   if (!user) return { error: 'Not authenticated.' }
+  const supabase = await createClient()
 
   const { error } = await supabase.from('integrations').delete().eq('id', id)
 

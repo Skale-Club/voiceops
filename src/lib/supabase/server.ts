@@ -1,8 +1,13 @@
 import { createServerClient } from '@supabase/ssr'
 import { cookies } from 'next/headers'
+import { cache } from 'react'
 import type { Database } from '@/types/database'
 
-export async function createClient() {
+// cache() deduplicates calls within a single server-side render tree.
+// No matter how many server actions call createClient() or getUser(),
+// only one Supabase client is created and only one auth network call is made per request.
+
+export const createClient = cache(async () => {
   const cookieStore = await cookies()
   return createServerClient<Database>(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -24,4 +29,11 @@ export async function createClient() {
       },
     }
   )
-}
+})
+
+// Single cached auth call per request — replaces supabase.auth.getUser() at every call site
+export const getUser = cache(async () => {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  return user
+})

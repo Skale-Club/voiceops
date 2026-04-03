@@ -1,6 +1,6 @@
 'use server'
 
-import { createClient } from '@/lib/supabase/server'
+import { createClient, getUser } from '@/lib/supabase/server'
 import { createClient as createServiceClient } from '@supabase/supabase-js'
 import { revalidatePath } from 'next/cache'
 import type { Database, CampaignStatus } from '@/types/database'
@@ -21,9 +21,9 @@ export interface CreateCampaignInput {
 export async function createCampaign(
   input: CreateCampaignInput
 ): Promise<{ id: string }> {
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
+  const user = await getUser()
   if (!user) throw new Error('Unauthorized')
+  const supabase = await createClient()
 
   // Get org id from session
   const { data: orgId } = await supabase.rpc('get_current_org_id')
@@ -133,9 +133,9 @@ export interface ImportContactsInput {
 export async function importContacts(
   input: ImportContactsInput
 ): Promise<{ imported: number; duplicates: number }> {
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
+  const user = await getUser()
   if (!user) throw new Error('Unauthorized')
+  const supabase = await createClient()
 
   const { data: orgId } = await supabase.rpc('get_current_org_id')
   if (!orgId) throw new Error('No organization found for user')

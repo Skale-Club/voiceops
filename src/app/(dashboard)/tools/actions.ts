@@ -1,8 +1,6 @@
 'use server'
-import { createClient } from '@/lib/supabase/server'
+import { createClient, getUser } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
-import type { IntegrationForDisplay } from '@/app/(dashboard)/integrations/actions'
-import { getIntegrations } from '@/app/(dashboard)/integrations/actions'
 import type { Json } from '@/types/database'
 
 export type ToolConfigWithIntegration = {
@@ -29,11 +27,9 @@ export async function createToolConfig(data: {
   fallbackMessage: string
   config?: Record<string, unknown>
 }): Promise<{ error?: string } | void> {
-  const supabase = await createClient()
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  const user = await getUser()
   if (!user) return { error: 'Not authenticated.' }
+  const supabase = await createClient()
 
   const { data: member, error: memberError } = await supabase
     .from('org_members')
@@ -72,11 +68,9 @@ export async function updateToolConfig(
     config?: Record<string, unknown>
   }
 ): Promise<{ error?: string } | void> {
-  const supabase = await createClient()
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  const user = await getUser()
   if (!user) return { error: 'Not authenticated.' }
+  const supabase = await createClient()
 
   const { error } = await supabase
     .from('tool_configs')
@@ -113,11 +107,9 @@ export async function getToolConfigs(): Promise<ToolConfigWithIntegration[]> {
 }
 
 export async function deleteToolConfig(id: string): Promise<{ error?: string } | void> {
-  const supabase = await createClient()
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  const user = await getUser()
   if (!user) return { error: 'Not authenticated.' }
+  const supabase = await createClient()
 
   const { error } = await supabase.from('tool_configs').delete().eq('id', id)
 
@@ -126,5 +118,3 @@ export async function deleteToolConfig(id: string): Promise<{ error?: string } |
   revalidatePath('/tools')
 }
 
-export { getIntegrations }
-export type { IntegrationForDisplay }

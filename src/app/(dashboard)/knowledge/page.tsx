@@ -1,12 +1,12 @@
-import { createClient } from '@/lib/supabase/server'
+import { createClient, getUser } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import { DocumentList } from '@/components/knowledge/document-list'
 import { UploadForm } from '@/components/knowledge/upload-form'
 
 export default async function KnowledgePage() {
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
+  const user = await getUser()
   if (!user) redirect('/login')
+  const supabase = await createClient()
 
   const { data: documents, error } = await supabase
     .from('documents')
