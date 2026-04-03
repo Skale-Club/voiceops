@@ -30,7 +30,37 @@ export async function createOrganization(data: { name: string }): Promise<{ erro
     .insert({ organization_id: org.id, user_id: user.id, role: 'admin' })
   if (memberError) return { error: memberError.message }
 
-  revalidatePath('/organizations')
+  // Auto-switch to the newly created org
+  await supabase
+    .from('user_active_org')
+    .upsert({ user_id: user.id, organization_id: org.id, updated_at: new Date().toISOString() })
+
+  revalidatePath('/', 'layout')
+}
+
+export async function switchOrganization(organizationId: string): Promise<{ error?: string }> {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { error: 'Not authenticated.' }
+
+  // Verify the user is actually a member of this org (security check)
+  const { data: member } = await supabase
+    .from('org_members')
+    .select('organization_id')
+    .eq('user_id', user.id)
+    .eq('organization_id', organizationId)
+    .single()
+
+  if (!member) return { error: 'You are not a member of this organization.' }
+
+  const { error } = await supabase
+    .from('user_active_org')
+    .upsert({ user_id: user.id, organization_id: organizationId, updated_at: new Date().toISOString() })
+
+  if (error) return { error: error.message }
+
+  revalidatePath('/', 'layout')
+  return {}
 }
 
 export async function updateOrganization(

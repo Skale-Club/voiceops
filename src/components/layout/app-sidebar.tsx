@@ -3,7 +3,6 @@
 import { usePathname, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import {
-  Building2,
   Bot,
   Zap,
   Plug2,
@@ -12,6 +11,7 @@ import {
   Phone,
   ChevronUp,
   LogOut,
+  Settings,
 } from 'lucide-react'
 import type { User } from '@supabase/supabase-js'
 
@@ -31,6 +31,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
@@ -42,7 +43,6 @@ const navItems = [
   { icon: BookOpen, label: 'Knowledge', href: '/knowledge', active: true },
   { icon: Bot, label: 'Assistants', href: '/assistants', active: true },
   { icon: Plug2, label: 'Integrations', href: '/integrations', active: true },
-  { icon: Building2, label: 'Organizations', href: '/organizations', active: true },
 ]
 
 function getInitials(user: User): string {
@@ -162,6 +162,13 @@ export function AppSidebar({ user }: AppSidebarProps) {
             </button>
           </DropdownMenuTrigger>
           <DropdownMenuContent side="top" align="start" className="w-[--radix-dropdown-menu-trigger-width]">
+            <DropdownMenuItem asChild className="cursor-pointer">
+              <Link href="/organizations">
+                <Settings className="h-4 w-4 mr-2" />
+                Manage Organizations
+              </Link>
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
             <DropdownMenuItem onClick={handleSignOut} className="cursor-pointer">
               <LogOut className="h-4 w-4 mr-2" />
               Sign Out

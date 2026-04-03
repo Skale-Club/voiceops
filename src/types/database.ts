@@ -81,6 +81,31 @@ export interface Database {
           }
         ]
       }
+      user_active_org: {
+        Row: {
+          user_id: string
+          organization_id: string
+          updated_at: string
+        }
+        Insert: {
+          user_id: string
+          organization_id: string
+          updated_at?: string
+        }
+        Update: {
+          organization_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: 'user_active_org_organization_id_fkey'
+            columns: ['organization_id']
+            isOneToOne: false
+            referencedRelation: 'organizations'
+            referencedColumns: ['id']
+          }
+        ]
+      }
       assistant_mappings: {
         Row: {
           id: string

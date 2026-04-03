@@ -1,8 +1,8 @@
 import { SidebarProvider, SidebarInset, SidebarTrigger } from '@/components/ui/sidebar'
 import { AppSidebar } from '@/components/layout/app-sidebar'
+import { OrgSwitcher } from '@/components/layout/org-switcher'
 import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
-import { Separator } from '@/components/ui/separator'
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
   const supabase = await createClient()
@@ -12,18 +12,30 @@ export default async function DashboardLayout({ children }: { children: React.Re
 
   if (!user) redirect('/login')
 
+  const [{ data: memberships }, { data: currentOrgId }] = await Promise.all([
+    supabase
+      .from('org_members')
+      .select('organization_id, organizations(id, name)')
+      .eq('user_id', user.id),
+    supabase.rpc('get_current_org_id'),
+  ])
+
+  const orgs = (memberships ?? [])
+    .map(m => m.organizations as { id: string; name: string } | null)
+    .filter((o): o is { id: string; name: string } => o !== null)
+
   return (
     <SidebarProvider>
       <AppSidebar user={user} />
       <SidebarInset>
-        <header className="flex h-12 shrink-0 items-center gap-2 border-b bg-background px-4 sticky top-0 z-10">
-          <SidebarTrigger className="-ml-1" />
-          <Separator orientation="vertical" className="h-4" />
-          <span className="text-sm font-medium text-muted-foreground select-none">VoiceOps</span>
+        <header className="flex h-12 shrink-0 items-center gap-2 border-b px-3">
+          <SidebarTrigger className="-ml-0.5" />
+          <div className="h-4 w-px bg-border mx-0.5" />
+          <OrgSwitcher orgs={orgs} currentOrgId={(currentOrgId as string) ?? null} />
         </header>
-        <div className="flex flex-1 flex-col">
+        <main className="flex-1 overflow-auto">
           {children}
-        </div>
+        </main>
       </SidebarInset>
     </SidebarProvider>
   )
