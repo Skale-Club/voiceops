@@ -52,8 +52,17 @@ Plans:
   3. A real Vapi tool-call webhook sent to /api/vapi/tools is routed to the correct organization based on assistant ID and executes the configured GoHighLevel action
   4. Every tool execution is logged with status (success/error/timeout), execution time in milliseconds, and the request and response payloads
   5. When a tool execution fails, Vapi receives the configured fallback message within 500ms — the call does not go silent
-**Plans:** TBD
+**Plans:** 7 plans
 **UI hint:** yes
+
+Plans:
+- [ ] 02-01-PLAN.md — Wave 0 test stubs: crypto.test.ts, ghl-executor.test.ts, action-engine.test.ts, integrations.test.ts
+- [ ] 02-02-PLAN.md — DB migration 002_action_engine.sql + TypeScript database types
+- [ ] 02-03-PLAN.md — AES-256-GCM crypto utility (Edge-safe) + Vapi webhook Zod schemas
+- [ ] 02-04-PLAN.md — GHL fetch client + createContact, getAvailability, createAppointment executors
+- [ ] 02-05-PLAN.md — Action engine core: resolveOrg, resolveTool, executeAction, logAction
+- [ ] 02-06-PLAN.md — Webhook Edge Function: POST /api/vapi/tools with after() async logging
+- [ ] 02-07-PLAN.md — Admin UI: integrations page + tool configs page + sidebar nav update
 
 ---
 
@@ -107,7 +116,7 @@ Plans:
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Foundation | 6/6 | Complete | 2026-04-02 |
-| 2. Action Engine | 0/? | Not started | - |
+| 2. Action Engine | 0/7 | Planned | - |
 | 3. Observability | 0/? | Not started | - |
 | 4. Knowledge Base | 0/? | Not started | - |
 | 5. Outbound Campaigns | 0/? | Not started | - |
@@ -132,3 +141,4 @@ Plans:
 *Roadmap created: 2026-04-02*
 *Milestone: v1.0 VoiceOps MVP*
 *Phase 1 planned: 2026-04-02 — 6 plans in 4 waves*
+*Phase 2 planned: 2026-04-02 — 7 plans in 4 waves (Wave 0 + Waves 1-3)*
