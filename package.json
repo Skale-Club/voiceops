@@ -55,6 +55,7 @@
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
+    "@types/jsdom": "^28.0.1",
     "@types/node": "^20",
     "@types/papaparse": "^5.5.2",
     "@types/react": "^19",
@@ -62,6 +63,7 @@
     "@vitejs/plugin-react": "^6.0.1",
     "eslint": "^9",
     "eslint-config-next": "15.5.14",
+    "jsdom": "^29.0.1",
     "postcss": "^8",
     "tailwindcss": "^4",
     "typescript": "^5",
