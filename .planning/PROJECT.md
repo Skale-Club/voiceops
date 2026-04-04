@@ -52,14 +52,18 @@ That business logic may differ by client. The invariant is the reliability of th
 - User authentication via Supabase Auth - v1.0
 - Per-org API key management with AES-256-GCM encryption - v1.0
 
+### Validated
+
+- Per-org public widget token (no visitor login required) - v1.2, Phase 2 (INFRA-03)
+- Redis short-term memory for active chat sessions - v1.2, Phase 2 (CHAT-04)
+- Supabase long-term memory for conversation history - v1.2, Phase 2 (CHAT-05)
+- Public chat API endpoint (POST /api/chat/[token]) with session management and message persistence - v1.2, Phase 2 (CHAT-06)
+
 ### Active
 
 - Embeddable chat widget installable via script tag / GTM
 - Widget conversations backed by knowledge base and action engine
-- Redis short-term memory for active chat sessions
-- Supabase long-term memory for conversation history
 - Per-org widget configuration (name, color, welcome message)
-- Per-org public widget token (no visitor login required)
 - Admin page to configure, preview, and get embed code for the widget
 - Vapi webhook HMAC/secret validation on `/api/vapi/*` routes
 - `send_sms` action type (Twilio executor)
@@ -124,11 +128,11 @@ Renamed to Leaidear at v1.2 (2026-04-03).
 | LangChain as vector abstraction (v1.1) | Community-maintained, clean API for chunk/embed/search | Good |
 | `metadata.org_id` for vector isolation (v1.1) | Follows LangChain SupabaseVectorStore conventions | Good |
 | Widget embed as script tag (v1.2) | Works in any site without framework dependency; GTM compatible | Pending |
-| Redis for chat session memory (v1.2) | Fast in-session context without hitting Supabase on every message | Pending |
-| Public org token for widget auth (v1.2) | Visitors don't need accounts; org isolation maintained server-side | Pending |
+| Redis for chat session memory (v1.2) | Fast in-session context without hitting Supabase on every message | Validated in Phase 2 |
+| Public org token for widget auth (v1.2) | Visitors don't need accounts; org isolation maintained server-side | Validated in Phase 2 |
 
 ## Evolution
 
 Update this file whenever deployment assumptions, validated requirements, or core constraints change.
 
-*Last updated: 2026-04-03 — v1.2 Leaidear + Embedded Chatbot started*
+*Last updated: 2026-04-04 — Phase 2 chat-api complete: public chat API live with Redis sessions + Supabase persistence*
