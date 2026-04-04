@@ -1,5 +1,38 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
+// ---------------------------------------------------------------------------
+// Mock AI SDK clients so tests never hit real APIs
+// ---------------------------------------------------------------------------
+
+// Use vi.hoisted to ensure mockOpenAICreate is available inside vi.mock factory
+const { mockOpenAICreate } = vi.hoisted(() => ({
+  mockOpenAICreate: vi.fn(),
+}))
+
+// Mock OpenAI SDK — default export is a class constructor
+vi.mock('openai', () => {
+  class MockOpenAI {
+    chat = { completions: { create: mockOpenAICreate } }
+  }
+  return { default: MockOpenAI }
+})
+
+// Mock Anthropic SDK — returns a simple stream with one text_delta event
+vi.mock('@anthropic-ai/sdk', () => {
+  async function* mockEvents() {
+    yield { type: 'content_block_delta', delta: { type: 'text_delta', text: 'Hello!' } }
+    yield { type: 'message_stop' }
+  }
+  const mockStream = {
+    [Symbol.asyncIterator]: mockEvents,
+    finalMessage: vi.fn().mockResolvedValue({ stop_reason: 'end_turn', content: [] }),
+  }
+  class MockAnthropic {
+    messages = { stream: vi.fn().mockReturnValue(mockStream) }
+  }
+  return { default: MockAnthropic }
+})
+
 // Mock dependencies before dynamic import of the route
 vi.mock('@/lib/supabase/admin', () => ({
   createServiceRoleClient: vi.fn(),
@@ -24,6 +57,9 @@ vi.mock('@/lib/action-engine/execute-action', () => ({
 }))
 vi.mock('@/lib/integrations/get-provider-key', () => ({
   getProviderKey: vi.fn(),
+}))
+vi.mock('@/lib/crypto', () => ({
+  decrypt: vi.fn().mockResolvedValue('decrypted-key'),
 }))
 
 import { createServiceRoleClient } from '@/lib/supabase/admin'
@@ -60,6 +96,11 @@ describe('POST /api/chat/[token]', () => {
     ;(queryKnowledge as ReturnType<typeof vi.fn>).mockResolvedValue("I don't have information about that in my knowledge base.")
     ;(getProviderKey as ReturnType<typeof vi.fn>).mockResolvedValue(null)
     ;(executeAction as ReturnType<typeof vi.fn>).mockResolvedValue('Action completed')
+    // Default OpenAI mock: simple token stream, no tool calls
+    mockOpenAICreate.mockImplementation(async function* () {
+      yield { choices: [{ delta: { content: 'Hello!' }, finish_reason: null }] }
+      yield { choices: [{ delta: {}, finish_reason: 'stop' }] }
+    })
   })
 
   it('returns 401 for invalid token', async () => {
@@ -101,12 +142,16 @@ describe('POST /api/chat/[token]', () => {
       messages: [], createdAt: new Date().toISOString(), lastActiveAt: new Date().toISOString(),
     }
     ;(getSession as ReturnType<typeof vi.fn>).mockResolvedValue(existingCtx)
+    ;(getProviderKey as ReturnType<typeof vi.fn>).mockResolvedValue(null) // degradation path — no keys
     const { POST } = await import('@/app/api/chat/[token]/route')
     const res = await POST(makeRequest({ message: 'Follow-up', sessionId: 'existing-sess' }), {
       params: Promise.resolve({ token: 'valid-token' }),
     })
-    const body = await res.json()
-    expect(body.sessionId).toBe('existing-sess')
+    // Route now returns SSE — read session event to verify sessionId is reused
+    const lines = await readSseLines(res)
+    const sessionEvent = lines[0] as { event: string; sessionId?: string }
+    expect(sessionEvent.event).toBe('session')
+    expect(sessionEvent.sessionId).toBe('existing-sess')
     expect(ensureDbSession).not.toHaveBeenCalled()
   })
 
@@ -120,12 +165,13 @@ describe('POST /api/chat/[token]', () => {
     beforeEach(() => {
       mockSupabase.single.mockResolvedValue({ data: { id: 'org-1', name: 'Org', is_active: true }, error: null })
       // mock tool_configs query to return empty array
+      // NOTE: then() must be a proper thenable — it receives (resolve, reject) from await
       mockSupabase.from.mockImplementation((table: string) => {
         if (table === 'tool_configs') {
           return {
             select: vi.fn().mockReturnThis(),
             eq: vi.fn().mockReturnThis(),
-            then: vi.fn().mockResolvedValue({ data: [], error: null }),
+            then: (resolve: (v: unknown) => void) => resolve({ data: [], error: null }),
           }
         }
         return mockSupabase
@@ -153,9 +199,11 @@ describe('POST /api/chat/[token]', () => {
       ;(getProviderKey as ReturnType<typeof vi.fn>).mockResolvedValue('test-key')
       ;(queryKnowledge as ReturnType<typeof vi.fn>).mockResolvedValue('KB answer here')
       const { POST } = await import('@/app/api/chat/[token]/route')
-      await POST(makeRequest({ message: 'What is your return policy?' }), {
+      const res = await POST(makeRequest({ message: 'What is your return policy?' }), {
         params: Promise.resolve({ token: 'valid-token' }),
       })
+      // Must consume stream to ensure createChatStream.start() async logic completes
+      await readSseLines(res)
       expect(queryKnowledge).toHaveBeenCalledWith(
         'What is your return policy?',
         'org-1',
@@ -166,13 +214,26 @@ describe('POST /api/chat/[token]', () => {
     it('CHAT-03: tool_call SSE event emitted and executeAction called when model uses a tool', async () => {
       // Will pass after Phase 3 implementation — RED before
       ;(getProviderKey as ReturnType<typeof vi.fn>).mockResolvedValue('test-key')
-      // Simulate tool_configs returning one tool
+      // OpenAI mock: emit tool_calls finish_reason so the tool-call path is taken
+      mockOpenAICreate
+        // First call: tool call stream
+        .mockImplementationOnce(async function* () {
+          yield { choices: [{ delta: { tool_calls: [{ id: 'tc-id-1', function: { name: 'get_availability', arguments: '{}' } }] }, finish_reason: null }] }
+          yield { choices: [{ delta: {}, finish_reason: 'tool_calls' }] }
+        })
+        // Second call: final answer after tool result
+        .mockImplementationOnce(async function* () {
+          yield { choices: [{ delta: { content: 'Available slots found.' }, finish_reason: null }] }
+          yield { choices: [{ delta: {}, finish_reason: 'stop' }] }
+        })
+      // Simulate tool_configs returning one tool AND integrations returning credentials
+      // NOTE: then() must be a proper thenable — it receives (resolve, reject) from await
       mockSupabase.from.mockImplementation((table: string) => {
         if (table === 'tool_configs') {
           return {
             select: vi.fn().mockReturnThis(),
             eq: vi.fn().mockReturnThis(),
-            then: vi.fn().mockResolvedValue({
+            then: (resolve: (v: unknown) => void) => resolve({
               data: [{
                 id: 'tc-1',
                 tool_name: 'get_availability',
@@ -181,6 +242,17 @@ describe('POST /api/chat/[token]', () => {
                 fallback_message: 'Sorry',
                 integration_id: 'int-1',
               }],
+              error: null,
+            }),
+          }
+        }
+        if (table === 'integrations') {
+          return {
+            select: vi.fn().mockReturnThis(),
+            in: vi.fn().mockReturnThis(),
+            eq: vi.fn().mockReturnThis(),
+            then: (resolve: (v: unknown) => void) => resolve({
+              data: [{ id: 'int-1', encrypted_api_key: 'enc-key', location_id: 'loc-1' }],
               error: null,
             }),
           }
