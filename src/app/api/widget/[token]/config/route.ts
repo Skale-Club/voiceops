@@ -2,7 +2,7 @@ import { createServiceRoleClient } from '@/lib/supabase/admin'
 
 export const runtime = 'nodejs'
 
-export const DEFAULT_WIDGET_CONFIG = {
+const DEFAULT_WIDGET_CONFIG = {
   displayName: 'AI Assistant',
   primaryColor: '#18181B',
   welcomeMessage: 'Hi! How can I help?',

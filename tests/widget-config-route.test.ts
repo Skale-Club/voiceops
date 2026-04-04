@@ -93,12 +93,16 @@ describe('GET /api/widget/[token]/config', () => {
       error: null,
     })
 
-    const { GET, DEFAULT_WIDGET_CONFIG } = await import('@/app/api/widget/[token]/config/route')
+    const { GET } = await import('@/app/api/widget/[token]/config/route')
     const response = await GET(new Request('http://localhost/api/widget/defaults-token/config'), {
       params: Promise.resolve({ token: 'defaults-token' }),
     })
 
     expect(response.status).toBe(200)
-    expect(await response.json()).toEqual(DEFAULT_WIDGET_CONFIG)
+    expect(await response.json()).toEqual({
+      displayName: 'AI Assistant',
+      primaryColor: '#18181B',
+      welcomeMessage: 'Hi! How can I help?',
+    })
   })
 })
