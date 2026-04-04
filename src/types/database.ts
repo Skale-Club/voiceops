@@ -148,6 +148,7 @@ export interface Database {
           provider: 'gohighlevel' | 'twilio' | 'calcom' | 'custom_webhook' | 'openai' | 'anthropic' | 'openrouter' | 'vapi'
           name: string
           encrypted_api_key: string
+          key_hint: string | null
           location_id: string | null
           config: Json
           is_active: boolean
@@ -160,6 +161,7 @@ export interface Database {
           provider: 'gohighlevel' | 'twilio' | 'calcom' | 'custom_webhook' | 'openai' | 'anthropic' | 'openrouter' | 'vapi'
           name: string
           encrypted_api_key: string
+          key_hint?: string | null
           location_id?: string | null
           config?: Json
           is_active?: boolean
@@ -169,6 +171,7 @@ export interface Database {
         Update: {
           name?: string
           encrypted_api_key?: string
+          key_hint?: string | null
           location_id?: string | null
           config?: Json
           is_active?: boolean
@@ -329,7 +332,7 @@ export interface Database {
           }
         ]
       }
-      documents: {
+      knowledge_sources: {
         Row: {
           id: string
           organization_id: string
@@ -363,7 +366,7 @@ export interface Database {
         }
         Relationships: [
           {
-            foreignKeyName: 'documents_organization_id_fkey'
+            foreignKeyName: 'knowledge_sources_organization_id_fkey'
             columns: ['organization_id']
             isOneToOne: false
             referencedRelation: 'organizations'
@@ -371,41 +374,33 @@ export interface Database {
           }
         ]
       }
-      document_chunks: {
+      documents: {
         Row: {
-          id: string
-          organization_id: string
-          document_id: string
+          id: number
           content: string
-          chunk_index: number
+          metadata: Json
           embedding: number[] | null
+          knowledge_source_id: string | null
           created_at: string
         }
         Insert: {
-          id?: string
-          organization_id: string
-          document_id: string
+          id?: number
           content: string
-          chunk_index: number
+          metadata?: Json
           embedding?: number[] | null
+          knowledge_source_id?: string | null
           created_at?: string
         }
         Update: {
           embedding?: number[] | null
+          metadata?: Json
         }
         Relationships: [
           {
-            foreignKeyName: 'document_chunks_organization_id_fkey'
-            columns: ['organization_id']
+            foreignKeyName: 'documents_knowledge_source_id_fkey'
+            columns: ['knowledge_source_id']
             isOneToOne: false
-            referencedRelation: 'organizations'
-            referencedColumns: ['id']
-          },
-          {
-            foreignKeyName: 'document_chunks_document_id_fkey'
-            columns: ['document_id']
-            isOneToOne: false
-            referencedRelation: 'documents'
+            referencedRelation: 'knowledge_sources'
             referencedColumns: ['id']
           }
         ]
@@ -521,17 +516,15 @@ export interface Database {
         Args: Record<string, never>
         Returns: string | null
       }
-      match_document_chunks: {
+      match_documents: {
         Args: {
-          p_organization_id: string
           query_embedding: number[]
-          match_count?: number
-          match_threshold?: number
+          filter?: Json
         }
         Returns: Array<{
-          id: string
-          document_id: string
+          id: number
           content: string
+          metadata: Json
           similarity: number
         }>
       }

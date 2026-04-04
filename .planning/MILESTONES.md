@@ -26,3 +26,16 @@
 **Archives:** [v1.0-ROADMAP.md](milestones/v1.0-ROADMAP.md) | [v1.0-REQUIREMENTS.md](milestones/v1.0-REQUIREMENTS.md) | [v1.0-MILESTONE-AUDIT.md](milestones/v1.0-MILESTONE-AUDIT.md)
 
 ---
+
+## v1.1 Knowledge Base (In Progress: 2026-04-03)
+
+**Status:** 🚧 0 of 4 phases complete
+**Focus:** Replace stub knowledge base with LangChain + Supabase vector pipeline — files and URLs both vectorized and searchable, wired to the org's OpenAI integration.
+
+**Phases:**
+1. Data Layer — LangChain `documents` schema, `match_documents` RPC, source tracking table
+2. File Pipeline — Upload → chunk → embed → pgvector, max 5 per org
+3. URL Pipeline — Scrape → chunk → embed → pgvector, max 5 per org
+4. UI & Wiring — Document list, status indicators, OpenAI banner, AlertDialog for delete
+
+---

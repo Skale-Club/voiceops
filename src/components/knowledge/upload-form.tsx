@@ -6,6 +6,9 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { insertDocument, addUrlDocument } from '@/actions/knowledge'
 
+const FILE_LIMIT = 5
+const URL_LIMIT = 5
+
 type UploadStatus = 'idle' | 'uploading' | 'error' | 'success'
 
 function getSourceType(mimeType: string, fileName: string): 'pdf' | 'text' | 'csv' {
@@ -14,13 +17,22 @@ function getSourceType(mimeType: string, fileName: string): 'pdf' | 'text' | 'cs
   return 'text'
 }
 
-export function UploadForm() {
+interface UploadFormProps {
+  disabled?: boolean
+  fileCount?: number
+  urlCount?: number
+}
+
+export function UploadForm({ disabled = false, fileCount = 0, urlCount = 0 }: UploadFormProps) {
   const [fileStatus, setFileStatus] = useState<UploadStatus>('idle')
   const [urlStatus, setUrlStatus] = useState<UploadStatus>('idle')
   const [fileError, setFileError] = useState<string | null>(null)
   const [urlError, setUrlError] = useState<string | null>(null)
   const [isPendingFile, startFileTransition] = useTransition()
   const [isPendingUrl, startUrlTransition] = useTransition()
+
+  const fileAtLimit = fileCount >= FILE_LIMIT
+  const urlAtLimit = urlCount >= URL_LIMIT
 
   async function handleFileUpload(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
@@ -33,7 +45,6 @@ export function UploadForm() {
     setFileError(null)
 
     try {
-      // Step 1: Upload file via Route Handler
       const formData = new FormData()
       formData.append('file', file)
       const res = await fetch('/api/knowledge/upload', {
@@ -46,12 +57,10 @@ export function UploadForm() {
       }
       const { path, name } = await res.json()
 
-      // Step 2: Register document row
       startFileTransition(async () => {
         await insertDocument(path, name, getSourceType(file.type, file.name))
         setFileStatus('success')
         form.reset()
-        // Refresh page to show new document in list
         window.location.reload()
       })
     } catch (err) {
@@ -89,9 +98,12 @@ export function UploadForm() {
 
       {/* File Upload */}
       <form onSubmit={handleFileUpload} className="space-y-3">
-        <div>
-          <Label htmlFor="file" className="text-xs font-medium">Upload File</Label>
-          <p className="text-xs text-muted-foreground mt-0.5">PDF, TXT, or CSV — max 10MB</p>
+        <div className="flex items-center justify-between">
+          <div>
+            <Label htmlFor="file" className="text-xs font-medium">Upload File</Label>
+            <p className="text-xs text-muted-foreground mt-0.5">PDF, TXT, or CSV — max 10MB</p>
+          </div>
+          <span className="text-xs text-muted-foreground">{fileCount} / {FILE_LIMIT}</span>
         </div>
         <div className="flex gap-2">
           <Input
@@ -101,15 +113,19 @@ export function UploadForm() {
             accept=".pdf,.txt,.csv,text/plain,text/csv,application/pdf"
             className="text-xs"
             required
+            disabled={disabled || fileAtLimit}
           />
           <Button
             type="submit"
             size="sm"
-            disabled={fileStatus === 'uploading' || isPendingFile}
+            disabled={disabled || fileAtLimit || fileStatus === 'uploading' || isPendingFile}
           >
             {fileStatus === 'uploading' || isPendingFile ? 'Uploading...' : 'Upload'}
           </Button>
         </div>
+        {fileAtLimit && (
+          <p className="text-xs text-muted-foreground">File limit reached ({FILE_LIMIT} max).</p>
+        )}
         {fileStatus === 'error' && (
           <p className="text-xs text-destructive">{fileError}</p>
         )}
@@ -122,9 +138,12 @@ export function UploadForm() {
 
       {/* URL Addition */}
       <form onSubmit={handleUrlSubmit} className="space-y-3">
-        <div>
-          <Label htmlFor="url" className="text-xs font-medium">Add Website URL</Label>
-          <p className="text-xs text-muted-foreground mt-0.5">Content will be extracted and vectorized</p>
+        <div className="flex items-center justify-between">
+          <div>
+            <Label htmlFor="url" className="text-xs font-medium">Add Website URL</Label>
+            <p className="text-xs text-muted-foreground mt-0.5">Content will be extracted and vectorized</p>
+          </div>
+          <span className="text-xs text-muted-foreground">{urlCount} / {URL_LIMIT}</span>
         </div>
         <div className="flex gap-2">
           <Input
@@ -134,15 +153,19 @@ export function UploadForm() {
             placeholder="https://example.com/faq"
             className="text-xs"
             required
+            disabled={disabled || urlAtLimit}
           />
           <Button
             type="submit"
             size="sm"
-            disabled={urlStatus === 'uploading' || isPendingUrl}
+            disabled={disabled || urlAtLimit || urlStatus === 'uploading' || isPendingUrl}
           >
             {urlStatus === 'uploading' || isPendingUrl ? 'Adding...' : 'Add URL'}
           </Button>
         </div>
+        {urlAtLimit && (
+          <p className="text-xs text-muted-foreground">URL limit reached ({URL_LIMIT} max).</p>
+        )}
         {urlStatus === 'error' && (
           <p className="text-xs text-destructive">{urlError}</p>
         )}
