@@ -130,7 +130,7 @@ Plans:
 
 Plans:
 - [x] 05-01-PLAN.md — Wave 1: organization widget config migration + public config endpoint + route tests
-- [ ] 05-02-PLAN.md — Wave 2: `/widget` dashboard page + sidebar nav + save/token actions + live preview
+- [x] 05-02-PLAN.md — Wave 2: `/widget` dashboard page + sidebar nav + save/token actions + live preview
 - [ ] 05-03-PLAN.md — Wave 3: widget runtime config fetch + rebuilt asset + widget tests
 - [ ] 05-04-PLAN.md — Wave 4: human browser verification of admin config + token rotation flow
 
@@ -144,7 +144,7 @@ Plans:
 | 2. Chat API | 3/3 | Complete   | 2026-04-04 |
 | 3. AI Conversation Engine | 2/2 | Complete   | 2026-04-04 |
 | 4. Widget Embed Script | 3/3 | Complete   | 2026-04-04 |
-| 5. Admin Configuration | 1/4 | In Progress | - |
+| 5. Admin Configuration | 2/4 | In Progress | - |
 
 ---
 
@@ -178,4 +178,4 @@ Plans:
 
 ---
 
-*Last updated: 2026-04-04 — Phase 5 Plan 01 complete; roadmap progress synced*
+*Last updated: 2026-04-04 — Phase 5 Plan 02 complete; roadmap progress synced*

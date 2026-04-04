@@ -33,9 +33,9 @@
 ### ADMIN — Widget Configuration
 
 - [x] **ADMIN-01**: Admin can configure widget appearance per org (display name, primary color, welcome message)
-- [ ] **ADMIN-02**: Admin page shows the embed `<script>` tag ready to copy
-- [ ] **ADMIN-03**: Admin page shows a live preview of the widget with current configuration
-- [ ] **ADMIN-04**: Admin can regenerate the org's widget public token (invalidates old installs)
+- [x] **ADMIN-02**: Admin page shows the embed `<script>` tag ready to copy
+- [x] **ADMIN-03**: Admin page shows a live preview of the widget with current configuration
+- [x] **ADMIN-04**: Admin can regenerate the org's widget public token (invalidates old installs)
 
 ### INFRA — Backend Infrastructure
 
@@ -91,6 +91,6 @@
 | WIDGET-04 | Phase 4 | Complete |
 | WIDGET-05 | Phase 4 | Complete |
 | ADMIN-01 | Phase 5 | Complete |
-| ADMIN-02 | Phase 5 | pending |
-| ADMIN-03 | Phase 5 | pending |
-| ADMIN-04 | Phase 5 | pending |
+| ADMIN-02 | Phase 5 | Complete |
+| ADMIN-03 | Phase 5 | Complete |
+| ADMIN-04 | Phase 5 | Complete |

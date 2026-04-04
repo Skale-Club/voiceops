@@ -104,6 +104,12 @@ voiceops/
 └── README.md
 ```
 
+## Implemented Additions Since Planning
+
+- `src/app/(dashboard)/widget/page.tsx` — authenticated widget configuration dashboard route for the active organization
+- `src/app/(dashboard)/widget/actions.ts` — server actions for widget settings persistence and token regeneration
+- `src/components/widget/` — feature components for widget settings UX and local preview rendering
+
 ---
 
 ## Module Boundaries

@@ -2,13 +2,13 @@
 gsd_state_version: 1.0
 milestone: v1.2
 milestone_name: Leaidear + Embedded Chatbot
-status: Executing Phase 05
-last_updated: "2026-04-04T18:49:59.751Z"
+status: Ready to execute
+last_updated: "2026-04-04T19:02:10.205Z"
 progress:
   total_phases: 5
   completed_phases: 4
   total_plans: 16
-  completed_plans: 13
+  completed_plans: 14
 ---
 
 # Leaidear - State
@@ -17,15 +17,15 @@ progress:
 
 Milestone: v1.2 Leaidear + Embedded Chatbot — in progress
 Phase: 05 (admin-configuration) — EXECUTING
-Plan: 2 of 4
+Plan: 3 of 4
 
-Last session: 2026-04-04T18:49:59.739Z
+Last session: 2026-04-04T19:02:10.198Z
 
 ## Progress
 
 - v1.0 MVP: ✅ Shipped 2026-04-03
 - v1.1 Knowledge Base: ✅ Shipped 2026-04-03
-- v1.2: 🔄 In progress — [████████░░] 81% (13/16 plans complete — Phases 01-04 ✅, Phase 05 underway)
+- v1.2: 🔄 In progress — [█████████░] 88% (14/16 plans complete — Phases 01-04 ✅, Phase 05 underway)
 
 ## Project Reference
 
@@ -48,8 +48,12 @@ See `.planning/PROJECT.md` (updated 2026-04-03 after v1.1)
 - 05-discuss (2026-04-04): Widget config will live on `organizations`; Phase 5 scope is display name, primary color, welcome message, embed code, preview, public config endpoint, and token regeneration. `system_prompt` remains out of scope.
 - 05-plan (2026-04-04): Phase 5 is split into 4 plans: backend schema/config route, dashboard admin surface, widget runtime config hydration, and a blocking human verification checkpoint for token rotation + real embed behavior.
 - 05-01 (2026-04-04): Migration 013 adds `widget_display_name`, `widget_primary_color`, and `widget_welcome_message` to `organizations`; `GET /api/widget/[token]/config` now returns only normalized public widget fields and focused tests cover valid token, invalid token, inactive org, and fallback behavior.
+- 05-02 (2026-04-04): `/widget` is now a first-class dashboard page with active-org scoped server actions, live preview, canonical `https://voiceops.skale.club/widget.js` embed output, and explicit token rotation invalidation copy.
 
 ## Recent Decisions
 
 - Store widget appearance settings directly on `organizations` instead of introducing a separate widget table.
 - Keep widget boot config on a dedicated token-scoped GET route with Phase 4 defaults used when org values are null or blank.
+- Scope widget admin reads and writes through `get_current_org_id()` with cached auth helpers so the dashboard stays RLS-aligned.
+- Mirror widget appearance with a local preview component instead of loading the real `widget.js` bundle inside admin pages.
+- Normalize saved widget colors to uppercase `#RRGGBB` values so client and server validation enforce the same contract.
