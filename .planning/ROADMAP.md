@@ -44,7 +44,7 @@ See [milestones/v1.1-ROADMAP.md](milestones/v1.1-ROADMAP.md)
 
 - [x] **Phase 1: Foundation** - Redis, Supabase schema, brand rename, and static widget asset — everything downstream phases require (completed 2026-04-04)
 - [x] **Phase 2: Chat API** - Public `/api/chat/[token]` route with token validation, session management, and conversation persistence (completed 2026-04-04)
-- [ ] **Phase 3: AI Conversation Engine** - Streaming responses via plain JSON SSE, knowledge base pre-retrieval, and action engine tool calls
+- [x] **Phase 3: AI Conversation Engine** - Streaming responses via plain JSON SSE, knowledge base pre-retrieval, and action engine tool calls (completed 2026-04-04)
 - [x] **Phase 4: Widget Embed Script** - Client-side JS widget loaded via `<script>` tag with floating bubble and chat panel UI (completed 2026-04-04)
 - [ ] **Phase 5: Admin Configuration** - Widget config page with appearance settings, live preview, embed code generator, and token regen
 
@@ -125,8 +125,14 @@ Plans:
   2. The admin page shows a live preview of the widget that visually reflects any unsaved configuration changes
   3. The admin page shows a ready-to-copy embed `<script>` tag containing the org's public token
   4. An admin can regenerate the org's public token; the previously issued embed script stops working and a new one with the updated token must be installed
-**Plans**: TBD
+**Plans**: 4 plans
 **UI hint**: yes
+
+Plans:
+- [x] 05-01-PLAN.md — Wave 1: organization widget config migration + public config endpoint + route tests
+- [ ] 05-02-PLAN.md — Wave 2: `/widget` dashboard page + sidebar nav + save/token actions + live preview
+- [ ] 05-03-PLAN.md — Wave 3: widget runtime config fetch + rebuilt asset + widget tests
+- [ ] 05-04-PLAN.md — Wave 4: human browser verification of admin config + token rotation flow
 
 ---
 
@@ -136,9 +142,9 @@ Plans:
 |-------|----------------|--------|-----------|
 | 1. Foundation | 4/4 | Complete   | 2026-04-04 |
 | 2. Chat API | 3/3 | Complete   | 2026-04-04 |
-| 3. AI Conversation Engine | 0/2 | Not started | - |
+| 3. AI Conversation Engine | 2/2 | Complete   | 2026-04-04 |
 | 4. Widget Embed Script | 3/3 | Complete   | 2026-04-04 |
-| 5. Admin Configuration | 0/? | Not started | - |
+| 5. Admin Configuration | 1/4 | In Progress | - |
 
 ---
 
@@ -172,4 +178,4 @@ Plans:
 
 ---
 
-*Last updated: 2026-04-04 — Phase 4 plans created (3 plans, 3 waves)*
+*Last updated: 2026-04-04 — Phase 5 Plan 01 complete; roadmap progress synced*
