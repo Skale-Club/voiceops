@@ -23,9 +23,9 @@
 
 ### CHAT — Conversation Engine
 
-- [ ] **CHAT-01**: Visitor can send messages and receive streamed AI responses in real time (SSE)
-- [ ] **CHAT-02**: AI responses draw from the org's knowledge base (LangChain SupabaseVectorStore)
-- [ ] **CHAT-03**: AI can call org tools during conversation (action engine `executeAction`)
+- [x] **CHAT-01**: Visitor can send messages and receive streamed AI responses in real time (SSE)
+- [x] **CHAT-02**: AI responses draw from the org's knowledge base (LangChain SupabaseVectorStore)
+- [x] **CHAT-03**: AI can call org tools during conversation (action engine `executeAction`)
 - [x] **CHAT-04**: Conversation context is maintained within a session using Redis short-term memory
 - [x] **CHAT-05**: Conversation history is persisted to Supabase long-term memory (per org, per session)
 - [x] **CHAT-06**: Each conversation session is identified by a unique session ID (anonymous visitor)
@@ -82,9 +82,9 @@
 | CHAT-05 | Phase 2 | Complete |
 | CHAT-06 | Phase 2 | Complete |
 | INFRA-03 | Phase 2 | Complete |
-| CHAT-01 | Phase 3 | pending |
-| CHAT-02 | Phase 3 | pending |
-| CHAT-03 | Phase 3 | pending |
+| CHAT-01 | Phase 3 | Complete |
+| CHAT-02 | Phase 3 | Complete |
+| CHAT-03 | Phase 3 | Complete |
 | WIDGET-01 | Phase 4 | pending |
 | WIDGET-02 | Phase 4 | pending |
 | WIDGET-03 | Phase 4 | pending |

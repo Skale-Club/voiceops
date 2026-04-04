@@ -96,7 +96,7 @@ Plans:
 **Plans**: 2 plans
 
 Plans:
-- [ ] 03-01-PLAN.md — Wave 0: update test scaffolds to streaming shape and add RED streaming tests
+- [x] 03-01-PLAN.md — Wave 0: update test scaffolds to streaming shape and add RED streaming tests
 - [ ] 03-02-PLAN.md — Wave 1: stream.ts helper + route.ts step 7 replacement (full AI engine)
 
 ### Phase 4: Widget Embed Script
