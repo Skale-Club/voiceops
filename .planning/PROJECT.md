@@ -62,9 +62,13 @@ That business logic may differ by client. The invariant is the reliability of th
 - Knowledge base pre-retrieval context injection into system prompt before LLM call - v1.2, Phase 3 (CHAT-02)
 - Action engine tool invocation mid-stream (OpenRouter + Anthropic fallback, GHL credentials) - v1.2, Phase 3 (CHAT-03)
 
+### Validated
+
+- Embeddable chat widget (public/widget.js) installable via single script tag or GTM — Shadow DOM isolation, floating bubble, SSE chat panel, localStorage session persistence - v1.2, Phase 4 (WIDGET-01..05)
+- Cross-origin widget calls supported — CORS headers + OPTIONS preflight on POST /api/chat/[token] - v1.2, Phase 4 (WIDGET-04)
+
 ### Active
 
-- Embeddable chat widget installable via script tag / GTM
 - Widget conversations backed by knowledge base and action engine
 - Per-org widget configuration (name, color, welcome message)
 - Admin page to configure, preview, and get embed code for the widget
@@ -90,7 +94,7 @@ That business logic may differ by client. The invariant is the reliability of th
 ## Context
 
 Shipped v1.0 MVP on 2026-04-03. Shipped v1.1 Knowledge Base on 2026-04-03.
-Renamed to Leaidear at v1.2 (2026-04-03).
+Renamed to Leaidear at v1.2 (2026-04-03). Phase 4 complete (2026-04-04) — embeddable widget delivered.
 
 - Tech stack: Next.js 15, Supabase, Vercel Hobby, shadcn/ui, LangChain, Vercel AI SDK
 - Deployment split: Vercel Hobby for the app, Supabase for data/auth/background work, GitHub Actions for auxiliary cron
