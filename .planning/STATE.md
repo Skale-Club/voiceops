@@ -3,12 +3,12 @@ gsd_state_version: 1.0
 milestone: v1.2
 milestone_name: Leaidear + Embedded Chatbot
 status: in_progress
-last_updated: "2026-04-04T12:40:12.704Z"
+last_updated: "2026-04-04"
 progress:
   total_phases: 5
   completed_phases: 1
   total_plans: 7
-  completed_plans: 5
+  completed_plans: 6
 ---
 
 # Leaidear - State
@@ -42,3 +42,4 @@ See `.planning/PROJECT.md` (updated 2026-04-03 after v1.1)
 - 01-03 (2026-04-04): redis npm package (not @upstash/redis) for provider-agnostic URL-based connection; globalThis HMR guard mirrors supabase singleton; widget.js is a static stub replaced in Phase 4
 - 01-04 (2026-04-04): No anon-role RLS on chat tables — Phase 2 writes via service-role client bypassing RLS; organization_id denormalized on chat_messages for RLS without join; migration 011 applied to Supabase
 - 02-01 (2026-04-04): widget_token backfilled with gen_random_uuid() without pgcrypto; session_key nullable until Wave 1 creates sessions; migration 012 applied to Supabase; 3 RED test scaffolds committed
+- 02-02 (2026-04-04): session.ts + persist.ts helpers implemented; vi.hoisted() fix applied to chat-session test scaffold; 9/9 tests GREEN; build clean
