@@ -43,7 +43,7 @@ See [milestones/v1.1-ROADMAP.md](milestones/v1.1-ROADMAP.md)
 ### Phases
 
 - [x] **Phase 1: Foundation** - Redis, Supabase schema, brand rename, and static widget asset — everything downstream phases require (completed 2026-04-04)
-- [ ] **Phase 2: Chat API** - Public `/api/chat/[token]` route with token validation, session management, and conversation persistence
+- [x] **Phase 2: Chat API** - Public `/api/chat/[token]` route with token validation, session management, and conversation persistence (completed 2026-04-04)
 - [ ] **Phase 3: AI Conversation Engine** - Streaming responses via Vercel AI SDK, knowledge base retrieval, and action engine tool calls
 - [ ] **Phase 4: Widget Embed Script** - Client-side JS widget loaded via `<script>` tag with floating bubble and chat panel UI
 - [ ] **Phase 5: Admin Configuration** - Widget config page with appearance settings, live preview, embed code generator, and token regen
@@ -83,7 +83,7 @@ Plans:
 Plans:
 - [x] 02-01-PLAN.md — Wave 0: migration 012 (widget_token + session_key) and RED test scaffolds
 - [x] 02-02-PLAN.md — Wave 1: session.ts and persist.ts helper implementations
-- [ ] 02-03-PLAN.md — Wave 2: POST /api/chat/[token] route handler
+- [x] 02-03-PLAN.md — Wave 2: POST /api/chat/[token] route handler
 
 ### Phase 3: AI Conversation Engine
 **Goal**: The chat API returns streamed AI responses that draw from the org's knowledge base and can invoke the action engine during conversation
@@ -128,7 +128,7 @@ Plans:
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Foundation | 4/4 | Complete   | 2026-04-04 |
-| 2. Chat API | 2/3 | In Progress|  |
+| 2. Chat API | 3/3 | Complete   | 2026-04-04 |
 | 3. AI Conversation Engine | 0/? | Not started | - |
 | 4. Widget Embed Script | 0/? | Not started | - |
 | 5. Admin Configuration | 0/? | Not started | - |
