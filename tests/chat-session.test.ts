@@ -1,9 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 // Mock the redis singleton BEFORE importing session helpers
-const mockGet = vi.fn()
-const mockSetEx = vi.fn()
-const mockRedis = { isReady: true, get: mockGet, setEx: mockSetEx }
+const { mockGet, mockSetEx, mockRedis } = vi.hoisted(() => {
+  const mockGet = vi.fn()
+  const mockSetEx = vi.fn()
+  const mockRedis = { isReady: true, get: mockGet, setEx: mockSetEx }
+  return { mockGet, mockSetEx, mockRedis }
+})
 vi.mock('@/lib/redis', () => ({ default: mockRedis }))
 
 import { getSession, setSession } from '@/lib/chat/session'
