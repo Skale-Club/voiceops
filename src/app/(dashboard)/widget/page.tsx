@@ -3,6 +3,20 @@ import { redirect } from 'next/navigation'
 
 import { createClient, getUser } from '@/lib/supabase/server'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { WidgetSettingsForm } from '@/components/widget/widget-settings-form'
+
+const DEFAULT_WIDGET_SETTINGS = {
+  displayName: 'AI Assistant',
+  primaryColor: '#18181B',
+  welcomeMessage: 'Hi! How can I help?',
+} as const
+
+function normalizeWidgetValue(value: string | null | undefined, fallback: string): string {
+  if (typeof value !== 'string') return fallback
+
+  const trimmed = value.trim()
+  return trimmed.length > 0 ? trimmed : fallback
+}
 
 export default async function WidgetPage() {
   const user = await getUser()
@@ -55,47 +69,47 @@ export default async function WidgetPage() {
         </p>
       </div>
 
-      <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
+      <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_400px]">
+        <WidgetSettingsForm
+          initialSettings={{
+            displayName: normalizeWidgetValue(
+              organization.widget_display_name,
+              DEFAULT_WIDGET_SETTINGS.displayName
+            ),
+            primaryColor: normalizeWidgetValue(
+              organization.widget_primary_color,
+              DEFAULT_WIDGET_SETTINGS.primaryColor
+            ),
+            welcomeMessage: normalizeWidgetValue(
+              organization.widget_welcome_message,
+              DEFAULT_WIDGET_SETTINGS.welcomeMessage
+            ),
+          }}
+          widgetToken={organization.widget_token}
+        />
+
         <Card>
           <CardHeader>
-            <CardTitle>Configuration</CardTitle>
+            <CardTitle>Active organization</CardTitle>
             <CardDescription>
-              Form controls, preview, and embed installation live here in the next task.
+              Widget settings always apply to the current org selection in the dashboard.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4 text-sm">
             <div>
-              <p className="font-medium">Display name</p>
-              <p className="text-muted-foreground">
-                {organization.widget_display_name?.trim() || 'AI Assistant'}
-              </p>
+              <p className="font-medium">Organization</p>
+              <p className="text-muted-foreground">{organization.name}</p>
             </div>
             <div>
-              <p className="font-medium">Primary color</p>
-              <p className="text-muted-foreground">
-                {organization.widget_primary_color?.trim() || '#18181B'}
-              </p>
+              <p className="font-medium">Current token</p>
+              <code className="mt-1 block overflow-x-auto rounded-md bg-muted px-3 py-2 text-xs">
+                {organization.widget_token}
+              </code>
             </div>
-            <div>
-              <p className="font-medium">Welcome message</p>
-              <p className="text-muted-foreground">
-                {organization.widget_welcome_message?.trim() || 'Hi! How can I help?'}
-              </p>
+            <div className="rounded-lg border border-dashed p-4 text-muted-foreground">
+              Save changes here first, then Phase 5 Plan 03 will hydrate the live embed with this
+              config on public sites.
             </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle>Current token</CardTitle>
-            <CardDescription>
-              This is the public token currently tied to the active organization.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <code className="block overflow-x-auto rounded-md bg-muted px-3 py-2 text-xs">
-              {organization.widget_token}
-            </code>
           </CardContent>
         </Card>
       </div>
