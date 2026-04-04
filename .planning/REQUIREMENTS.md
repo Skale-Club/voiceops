@@ -73,24 +73,24 @@
 
 | REQ-ID | Phase | Status |
 |--------|-------|--------|
-| BRAND-01 | - | pending |
-| BRAND-02 | - | pending |
-| WIDGET-01 | - | pending |
-| WIDGET-02 | - | pending |
-| WIDGET-03 | - | pending |
-| WIDGET-04 | - | pending |
-| WIDGET-05 | - | pending |
-| CHAT-01 | - | pending |
-| CHAT-02 | - | pending |
-| CHAT-03 | - | pending |
-| CHAT-04 | - | pending |
-| CHAT-05 | - | pending |
-| CHAT-06 | - | pending |
-| ADMIN-01 | - | pending |
-| ADMIN-02 | - | pending |
-| ADMIN-03 | - | pending |
-| ADMIN-04 | - | pending |
-| INFRA-01 | - | pending |
-| INFRA-02 | - | pending |
-| INFRA-03 | - | pending |
-| INFRA-04 | - | pending |
+| BRAND-01 | Phase 1 | pending |
+| BRAND-02 | Phase 1 | pending |
+| INFRA-01 | Phase 1 | pending |
+| INFRA-02 | Phase 1 | pending |
+| INFRA-04 | Phase 1 | pending |
+| CHAT-04 | Phase 2 | pending |
+| CHAT-05 | Phase 2 | pending |
+| CHAT-06 | Phase 2 | pending |
+| INFRA-03 | Phase 2 | pending |
+| CHAT-01 | Phase 3 | pending |
+| CHAT-02 | Phase 3 | pending |
+| CHAT-03 | Phase 3 | pending |
+| WIDGET-01 | Phase 4 | pending |
+| WIDGET-02 | Phase 4 | pending |
+| WIDGET-03 | Phase 4 | pending |
+| WIDGET-04 | Phase 4 | pending |
+| WIDGET-05 | Phase 4 | pending |
+| ADMIN-01 | Phase 5 | pending |
+| ADMIN-02 | Phase 5 | pending |
+| ADMIN-03 | Phase 5 | pending |
+| ADMIN-04 | Phase 5 | pending |

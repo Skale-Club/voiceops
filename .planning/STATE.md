@@ -6,7 +6,7 @@ status: in_progress
 last_updated: "2026-04-03"
 last_activity: 2026-04-03
 progress:
-  total_phases: 0
+  total_phases: 5
   completed_phases: 0
   total_plans: 0
   completed_plans: 0
@@ -17,17 +17,21 @@ progress:
 ## Current Position
 
 Milestone: v1.2 Leaidear + Embedded Chatbot
-Phase: Not started (defining requirements)
+Phase: Not started (roadmap defined, awaiting Phase 1)
 Plan: —
-Status: Defining requirements
+Status: Roadmap ready
 
-Last activity: 2026-04-03 — Milestone v1.2 started
+Last activity: 2026-04-03 — Roadmap created (5 phases, 21 requirements)
 
 ## Progress
 
 - v1.0 MVP: ✅ Shipped 2026-04-03
 - v1.1 Knowledge Base: ✅ Shipped 2026-04-03
-- v1.2 Leaidear + Chatbot: 🚧 In progress
+- v1.2 Leaidear + Chatbot: 🚧 In progress — 0/5 phases complete
+
+```
+[          ] 0% — Phase 1 not started
+```
 
 ## Project Reference
 
@@ -43,3 +47,9 @@ See `.planning/PROJECT.md` (updated 2026-04-03 for v1.2)
 - Platform renamed VoiceOps → Leaidear at v1.2
 - Active known tech debt: no HMAC validation on Vapi webhooks, campaign calls don't appear in Observability, send_sms/custom_webhook are stubs
 - Chatbot reference: C:\Users\Vanildo\Dev\chatbot (Vercel AI SDK, Redis, SSE streaming)
+- v1.2 roadmap: 5 phases — Foundation → Chat API → AI Engine → Widget Script → Admin Config
+- Phase 3, 4, 5 flagged as UI phases (UI hint: yes)
+
+## Session Continuity
+
+Next action: `/gsd:plan-phase 1` to decompose Phase 1 (Foundation) into executable plans
