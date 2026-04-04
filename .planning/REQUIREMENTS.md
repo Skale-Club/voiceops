@@ -17,7 +17,7 @@
 
 - [x] **WIDGET-01**: Admin can install the chat widget on any third-party site using a single `<script>` tag (no framework dependency on host)
 - [x] **WIDGET-02**: Script tag is GTM-compatible (loads asynchronously, no blocking)
-- [ ] **WIDGET-03**: Widget renders as a floating chat bubble that expands into a full chat panel
+- [x] **WIDGET-03**: Widget renders as a floating chat bubble that expands into a full chat panel
 - [x] **WIDGET-04**: Widget is identified per-org via a public token embedded in the script tag
 - [x] **WIDGET-05**: Widget works without visitor login or authentication
 
@@ -87,7 +87,7 @@
 | CHAT-03 | Phase 3 | Complete |
 | WIDGET-01 | Phase 4 | Complete |
 | WIDGET-02 | Phase 4 | Complete |
-| WIDGET-03 | Phase 4 | pending |
+| WIDGET-03 | Phase 4 | Complete |
 | WIDGET-04 | Phase 4 | Complete |
 | WIDGET-05 | Phase 4 | Complete |
 | ADMIN-01 | Phase 5 | pending |
