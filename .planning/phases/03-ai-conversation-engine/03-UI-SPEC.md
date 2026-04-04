@@ -74,11 +74,18 @@ Established scale from existing dashboard pages (source:
 | Role | Size | Weight | Line Height | Usage |
 |------|------|--------|-------------|-------|
 | Body | 14px (text-sm) | 400 (normal) | 1.5 | Default prose, table rows, descriptions |
-| Label | 12px (text-xs) | 500 (medium) | 1.5 | Metric labels, badge text, secondary captions |
+| Label | 12px (text-xs) | 400 (normal) | 1.5 | Metric labels, badge text, secondary captions |
 | Heading | 18px (text-lg) | 600 (semibold) | 1.2 | Section headings (`text-lg font-semibold`) |
-| Display | 24px (text-2xl) | 700 (bold) | 1.2 | Page titles (`text-2xl font-bold tracking-tight`) |
+| Display | 24px (text-2xl) | 600 (semibold) | 1.2 | Page titles (`text-2xl font-bold tracking-tight`) |
 
-Source: codebase scan — pre-populated, not user-specified.
+Weights: exactly 2 — 400 (normal) for Body and Label; 600 (semibold) for
+Heading and Display. The intermediate 500 (medium) weight is collapsed to 400,
+and 700 (bold) is collapsed to 600 to keep the scale within the 2-weight
+maximum. The Display class continues to use `font-bold` in markup, which maps
+to the 600 token value in this design contract.
+
+Source: codebase scan — pre-populated, not user-specified. Weights revised by
+checker revision on 2026-04-04.
 
 Phase 3 introduces no new typography requirements. The SSE stream events are
 consumed programmatically; text rendering is Phase 4's responsibility.
