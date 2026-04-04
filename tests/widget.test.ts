@@ -5,6 +5,12 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { existsSync, readFileSync } from 'fs'
 import { resolve } from 'path'
 
+const DEFAULT_WIDGET_CONFIG = {
+  displayName: 'AI Assistant',
+  primaryColor: '#18181B',
+  welcomeMessage: 'Hi! How can I help?',
+}
+
 // jsdom's localStorage may not implement all methods — use a Map-based mock
 const localStorageMock = (() => {
   let store: Map<string, string> = new Map()
@@ -19,6 +25,9 @@ const localStorageMock = (() => {
 })()
 
 vi.stubGlobal('localStorage', localStorageMock)
+
+const fetchMock = vi.fn()
+vi.stubGlobal('fetch', fetchMock)
 
 // Compatibility wrapper — clears our mock
 function clearLocalStorage(): void {
@@ -48,10 +57,32 @@ function loadWidget(token: string, scriptSrc: string): void {
   eval(code)
 }
 
+async function flushAsyncWork(): Promise<void> {
+  await Promise.resolve()
+  await Promise.resolve()
+  await Promise.resolve()
+  await new Promise((resolve) => setTimeout(resolve, 0))
+}
+
+function getShadowRoot(): ShadowRoot {
+  const host = document.getElementById('leaidear-root')
+  expect(host).not.toBeNull()
+  expect(host!.shadowRoot).not.toBeNull()
+  return host!.shadowRoot!
+}
+
+function jsonResponse(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { 'Content-Type': 'application/json' },
+  })
+}
+
 describe('Widget — token extraction and init guard (WIDGET-02, WIDGET-04)', () => {
   beforeEach(() => {
     document.body.innerHTML = ''
     clearLocalStorage()
+    fetchMock.mockReset()
     // Remove any existing leaidear-root
     document.getElementById('leaidear-root')?.remove()
   })
@@ -100,6 +131,7 @@ describe('Widget — session localStorage (WIDGET-05, D-12, D-13)', () => {
   beforeEach(() => {
     document.body.innerHTML = ''
     clearLocalStorage()
+    fetchMock.mockReset()
     document.getElementById('leaidear-root')?.remove()
   })
 
@@ -132,6 +164,7 @@ describe('Widget — Shadow DOM isolation (WIDGET-03, D-01, D-02)', () => {
   beforeEach(() => {
     document.body.innerHTML = ''
     clearLocalStorage()
+    fetchMock.mockReset()
     document.getElementById('leaidear-root')?.remove()
   })
 
@@ -152,5 +185,87 @@ describe('Widget — Shadow DOM isolation (WIDGET-03, D-01, D-02)', () => {
     const shadow = host.shadowRoot!
     const styles = shadow.querySelectorAll('style')
     expect(styles.length).toBeGreaterThan(0)
+  })
+})
+
+describe('Widget — runtime config hydration and fallback (ADMIN-01)', () => {
+  beforeEach(() => {
+    document.body.innerHTML = ''
+    clearLocalStorage()
+    fetchMock.mockReset()
+    document.getElementById('leaidear-root')?.remove()
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+    document.getElementById('leaidear-root')?.remove()
+  })
+
+  it('hydrates display name, primary color, and welcome message from the public config endpoint', async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({
+        displayName: 'Skale Concierge',
+        primaryColor: '#22C55E',
+        welcomeMessage: 'Welcome to Skale!',
+      })
+    )
+
+    loadWidget('config-token', 'https://example.com/widget.js')
+    await flushAsyncWork()
+
+    const host = document.getElementById('leaidear-root') as HTMLDivElement
+    const shadow = getShadowRoot()
+
+    expect(fetchMock).toHaveBeenCalledWith('https://example.com/api/widget/config-token/config', {
+      method: 'GET',
+      headers: { Accept: 'application/json' },
+    })
+    expect(host.style.getPropertyValue('--leaidear-primary-color')).toBe('#22C55E')
+    expect(shadow.querySelector('.leaidear-bot-name')?.textContent).toBe('Skale Concierge')
+    expect(shadow.querySelector('.leaidear-avatar')?.textContent).toBe('S')
+    expect(shadow.querySelector('.leaidear-empty-avatar')?.textContent).toBe('S')
+    expect(shadow.querySelector('.leaidear-empty-heading')?.textContent).toBe('Welcome to Skale!')
+  })
+
+  it('falls back to Phase 4 defaults when the config request fails', async () => {
+    fetchMock.mockRejectedValueOnce(new Error('network down'))
+
+    loadWidget('fallback-token', 'https://example.com/widget.js')
+    await flushAsyncWork()
+
+    const host = document.getElementById('leaidear-root') as HTMLDivElement
+    const shadow = getShadowRoot()
+
+    expect(host.style.getPropertyValue('--leaidear-primary-color')).toBe(DEFAULT_WIDGET_CONFIG.primaryColor)
+    expect(shadow.querySelector('.leaidear-bot-name')?.textContent).toBe(DEFAULT_WIDGET_CONFIG.displayName)
+    expect(shadow.querySelector('.leaidear-empty-heading')?.textContent).toBe(DEFAULT_WIDGET_CONFIG.welcomeMessage)
+  })
+
+  it('still shows the unavailable message when chat send returns 401 after config hydration', async () => {
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse(DEFAULT_WIDGET_CONFIG))
+      .mockResolvedValueOnce(new Response(null, { status: 401 }))
+
+    loadWidget('invalid-token', 'https://example.com/widget.js')
+    await flushAsyncWork()
+
+    const shadow = getShadowRoot()
+    const bubble = shadow.querySelector('.leaidear-bubble') as HTMLButtonElement
+    bubble.click()
+
+    const input = shadow.querySelector('.leaidear-input') as HTMLInputElement
+    const sendBtn = shadow.querySelector('.leaidear-send') as HTMLButtonElement
+    input.value = 'Hello there'
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+    sendBtn.click()
+    await flushAsyncWork()
+
+    const errorBubble = shadow.querySelector('.leaidear-bubble-error')
+    expect(errorBubble?.textContent).toBe('This chat is unavailable right now.')
+    expect(fetchMock).toHaveBeenNthCalledWith(2, 'https://example.com/api/chat/invalid-token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: 'Hello there' }),
+    })
   })
 })
