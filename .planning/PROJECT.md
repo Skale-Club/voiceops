@@ -1,16 +1,31 @@
-# VoiceOps
+# Leaidear
 
 ## What This Is
 
-A multi-tenant SaaS platform that serves as the operational layer for agencies running voice AI assistants via Vapi.ai. It centralizes action execution, knowledge base workflows, outbound campaigns, and call observability in one admin panel so agencies can scale beyond a single-client setup.
+A multi-tenant SaaS platform that serves as the operational layer for agencies running AI assistants. It centralizes action execution, knowledge base workflows, outbound campaigns, call observability, and embeddable chat widgets in one admin panel so agencies can scale beyond a single-client setup.
 
-VoiceOps is not meant to encode one universal agency workflow. It is the shared integration and orchestration substrate that lets each client organization run its own operational flow on top of common primitives such as assistant mappings, provider credentials, tool execution, outbound calling, and observability.
+Leaidear is not meant to encode one universal agency workflow. It is the shared integration and orchestration substrate that lets each client organization run its own operational flow on top of common primitives such as assistant mappings, provider credentials, tool execution, outbound calling, observability, and customer-facing chat.
 
 ## Core Value
 
-**The Action Engine must work.** When Vapi triggers a tool during a live call, the platform must identify the tenant, execute the business logic, and return a result fast enough for production call flows.
+**The Action Engine must work.** When an AI assistant (voice or chat) triggers a tool during a live interaction, the platform must identify the tenant, execute the business logic, and return a result fast enough for production flows.
 
-That business logic may differ by client. The invariant is the reliability of the execution path, not that every tenant follows the same call pattern.
+That business logic may differ by client. The invariant is the reliability of the execution path, not that every tenant follows the same pattern.
+
+## Current Milestone: v1.2 Leaidear + Embedded Chatbot
+
+**Goal:** Rename the platform to Leaidear and add an embeddable chatbot widget installable on third-party sites via script tag or GTM, backed by the existing knowledge base and action engine.
+
+**Target features:**
+- Platform rename: VoiceOps → Leaidear (UI labels, branding, navigation)
+- Embeddable chat widget (script tag / GTM installable)
+- Streaming conversation engine (Vercel AI SDK, SSE)
+- Short-term memory: Redis (active session context)
+- Long-term memory: Supabase (conversation history per org)
+- Knowledge base integration (LangChain SupabaseVectorStore, existing)
+- Tool calls integration (executeAction, existing action engine)
+- Admin config page: customize widget per org (name, color, welcome message)
+- Per-org widget token for public-facing auth (no visitor login)
 
 ## Requirements
 
@@ -39,6 +54,13 @@ That business logic may differ by client. The invariant is the reliability of th
 
 ### Active
 
+- Embeddable chat widget installable via script tag / GTM
+- Widget conversations backed by knowledge base and action engine
+- Redis short-term memory for active chat sessions
+- Supabase long-term memory for conversation history
+- Per-org widget configuration (name, color, welcome message)
+- Per-org public widget token (no visitor login required)
+- Admin page to configure, preview, and get embed code for the widget
 - Vapi webhook HMAC/secret validation on `/api/vapi/*` routes
 - `send_sms` action type (Twilio executor)
 - `custom_webhook` action type (configurable URL, method, headers, body)
@@ -50,22 +72,26 @@ That business logic may differ by client. The invariant is the reliability of th
 
 - Voice processing (STT/TTS) - handled by Vapi
 - Assistant configuration - handled in Vapi
-- LLM conversation logic - handled by Vapi
+- LLM conversation logic for Vapi flows - handled by Vapi
 - Payment and billing - outside MVP
 - Mobile app
 - OAuth/social login
 - White-label branding
+- Widget visitor authentication (public token is sufficient for v1.2)
+- Widget analytics dashboard (v1.3+)
 
 ## Context
 
 Shipped v1.0 MVP on 2026-04-03. Shipped v1.1 Knowledge Base on 2026-04-03.
+Renamed to Leaidear at v1.2 (2026-04-03).
 
-- Tech stack: Next.js 15, Supabase, Vercel Hobby, shadcn/ui, LangChain
+- Tech stack: Next.js 15, Supabase, Vercel Hobby, shadcn/ui, LangChain, Vercel AI SDK
 - Deployment split: Vercel Hobby for the app, Supabase for data/auth/background work, GitHub Actions for auxiliary cron
-- Canonical production origin: `https://voiceops.skale.club`
+- Canonical production origin: `https://voiceops.skale.club` (to be updated to leaidear domain when ready)
 - Vapi webhook routes now run in Node.js route handlers instead of depending on Vercel Edge Runtime
 - Supabase Edge Functions remain the place for background processing such as embeddings
 - Knowledge base uses LangChain `SupabaseVectorStore` — `documents` table with `content/metadata/embedding`, `match_documents` RPC, `knowledge_sources` for source tracking
+- Chat widget reference implementation: `C:\Users\Vanildo\Dev\chatbot` (Vercel AI SDK, Redis streaming, SSE)
 - Product examples should be treated as tenant-specific workflows unless explicitly promoted to a reusable platform capability
 
 ## Constraints
@@ -76,6 +102,9 @@ Shipped v1.0 MVP on 2026-04-03. Shipped v1.1 Knowledge Base on 2026-04-03.
 - Encryption: integration credentials must remain encrypted with AES-256-GCM
 - Vapi webhooks: always return HTTP 200 and stay fast
 - No n8n fallback
+- Widget embed: must work as a plain `<script>` tag with no framework dependency on the host site
+- Widget auth: per-org public token only — no visitor login, no cookies on host site
+- Redis: short-term session only — Supabase is the system of record for conversations
 - Do not overfit the product model around a single client playbook when the same outcome can be represented as tenant-specific configuration or orchestration
 - First-party webhook construction must use `https://voiceops.skale.club` as the public base URL unless planning explicitly documents a different production host
 
@@ -94,9 +123,12 @@ Shipped v1.0 MVP on 2026-04-03. Shipped v1.1 Knowledge Base on 2026-04-03.
 | Per-org API keys in DB instead of env vars | Enables tenant-specific integrations | Good |
 | LangChain as vector abstraction (v1.1) | Community-maintained, clean API for chunk/embed/search | Good |
 | `metadata.org_id` for vector isolation (v1.1) | Follows LangChain SupabaseVectorStore conventions | Good |
+| Widget embed as script tag (v1.2) | Works in any site without framework dependency; GTM compatible | Pending |
+| Redis for chat session memory (v1.2) | Fast in-session context without hitting Supabase on every message | Pending |
+| Public org token for widget auth (v1.2) | Visitors don't need accounts; org isolation maintained server-side | Pending |
 
 ## Evolution
 
 Update this file whenever deployment assumptions, validated requirements, or core constraints change.
 
-*Last updated: 2026-04-03 after v1.1 Knowledge Base milestone*
+*Last updated: 2026-04-03 — v1.2 Leaidear + Embedded Chatbot started*
