@@ -1,16 +1,6 @@
 // src/widget/index.ts
 // Leaidear embeddable chat widget — standalone vanilla TypeScript, no React/Next.js imports
 
-// --- Synchronous captures — MUST be before any async boundary ---
-const _script = document.currentScript as HTMLScriptElement | null
-const _token = _script?.dataset.token ?? ''
-const _apiBase = _script?.src ? new URL(_script.src).origin : location.origin
-
-// --- Double-init guard and entry point ---
-if (_token && !document.getElementById('leaidear-root')) {
-  initWidget(_token, _apiBase)
-}
-
 // --- CSS constant (inline string, full UI-SPEC values) ---
 const WIDGET_CSS = `
 /* Reset */
@@ -288,6 +278,16 @@ const ICON_CHAT = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24
 const ICON_CLOSE = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#ffffff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>`
 
 const ICON_SEND = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#ffffff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>`
+
+// --- Synchronous captures — MUST be before any async boundary ---
+const _script = document.currentScript as HTMLScriptElement | null
+const _token = _script?.dataset.token ?? ''
+const _apiBase = _script?.src ? new URL(_script.src).origin : location.origin
+
+// --- Double-init guard and entry point ---
+if (_token && !document.getElementById('leaidear-root')) {
+  initWidget(_token, _apiBase)
+}
 
 // --- Session storage helpers (D-12, D-13, Pattern 5) ---
 function getStorageKey(token: string): string {
