@@ -405,6 +405,80 @@ export interface Database {
           }
         ]
       }
+      chat_sessions: {
+        Row: {
+          id: string
+          organization_id: string
+          widget_token: string
+          last_active_at: string
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          organization_id: string
+          widget_token: string
+          last_active_at?: string
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          organization_id?: string
+          widget_token?: string
+          last_active_at?: string
+          created_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: 'chat_sessions_organization_id_fkey'
+            columns: ['organization_id']
+            isOneToOne: false
+            referencedRelation: 'organizations'
+            referencedColumns: ['id']
+          }
+        ]
+      }
+      chat_messages: {
+        Row: {
+          id: string
+          session_id: string
+          organization_id: string
+          role: 'user' | 'assistant' | 'tool'
+          content: string
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          session_id: string
+          organization_id: string
+          role: 'user' | 'assistant' | 'tool'
+          content: string
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          session_id?: string
+          organization_id?: string
+          role?: 'user' | 'assistant' | 'tool'
+          content?: string
+          created_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: 'chat_messages_session_id_fkey'
+            columns: ['session_id']
+            isOneToOne: false
+            referencedRelation: 'chat_sessions'
+            referencedColumns: ['id']
+          },
+          {
+            foreignKeyName: 'chat_messages_organization_id_fkey'
+            columns: ['organization_id']
+            isOneToOne: false
+            referencedRelation: 'organizations'
+            referencedColumns: ['id']
+          }
+        ]
+      }
       campaigns: {
         Row: {
           id: string
