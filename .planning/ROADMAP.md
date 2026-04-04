@@ -1,66 +1,43 @@
 # VoiceOps Roadmap
 
-## Current Milestone
-**v1.1 Knowledge Base**
-Status: 🚧 In Progress
-Phases: 0 of 4 complete
+## Milestones
 
-### Theme
-Replace the stub knowledge base with a real LangChain + Supabase vector pipeline — files and URLs both become searchable knowledge, wired to the org's OpenAI integration.
+- ✅ **v1.0 MVP** — 6 phases, 30 plans (shipped 2026-04-03)
+- ✅ **v1.1 Knowledge Base** — LangChain vector pipeline (shipped 2026-04-03)
+- 📋 **v1.2** — TBD (`/gsd:new-milestone` to define)
 
----
+## Shipped
 
-## Phase Overview
+<details>
+<summary>✅ v1.0 MVP — SHIPPED 2026-04-03</summary>
 
-| Phase | Name | Plans | Status | Completed |
-|-------|------|-------|--------|-----------|
-| 1 | Data Layer | 2 | Planning | - |
-| 2 | File Pipeline | TBD | Not started | - |
-| 3 | URL Pipeline | TBD | Not started | - |
-| 4 | UI & Wiring | TBD | Not started | - |
+See [milestones/v1.0-ROADMAP.md](milestones/v1.0-ROADMAP.md)
 
----
+- [x] Phase 1: Foundation
+- [x] Phase 2: Action Engine
+- [x] Phase 3: Observability
+- [x] Phase 4: Knowledge Base
+- [x] Phase 5: Outbound Campaigns
+- [x] Phase 6: API Key Admin
 
-## Phase Details
+</details>
 
-### Phase 1: Data Layer
+<details>
+<summary>✅ v1.1 Knowledge Base — SHIPPED 2026-04-03</summary>
 
-**Focus:** Migrate to LangChain `documents` table schema + `match_documents` RPC. Add a `knowledge_sources` tracking table (files + URLs) with status, type, and org-scoped counts. Org isolation via `metadata.org_id`. All via Supabase CLI migrations.
+See [milestones/v1.1-ROADMAP.md](milestones/v1.1-ROADMAP.md)
 
-Plans: TBD (defined during /paul:plan)
+- [x] Data Layer — LangChain schema, match_documents RPC
+- [x] File Pipeline — upload → chunk → embed → pgvector
+- [x] URL Pipeline — scrape → chunk → embed → pgvector
+- [x] UI & Wiring — limits, OpenAI banner, AlertDialog, semantic search
 
-### Phase 2: File Pipeline
+</details>
 
-**Focus:** File upload → LangChain document loaders → fixed-default chunking → OpenAI embed → `SupabaseVectorStore`. Max 5 files per org enforced server-side. OpenAI key decrypted from org integrations at processing time.
+## Next Milestone
 
-Plans: TBD (defined during /paul:plan)
-
-### Phase 3: URL Pipeline
-
-**Focus:** Paste URL → fetch/scrape content → LangChain → chunk → embed → store in pgvector. Max 5 URLs per org enforced server-side. Same OpenAI key source as file pipeline.
-
-Plans: TBD (defined during /paul:plan)
-
-### Phase 4: UI & Wiring
-
-**Focus:** Document list fetched from Supabase (files + URLs unified), per-org limit enforcement in UI, status indicators (Processing / Ready / Failed), OpenAI-not-configured banner with link to Integrations, shadcn `AlertDialog` for deletions (no `window.confirm()`), semantic search wired to new schema.
-
-Plans: TBD (defined during /paul:plan)
+Run `/gsd:new-milestone` to define v1.2.
 
 ---
 
-## Constraints
-
-- LangChain `SupabaseVectorStore` as the vector layer
-- Org isolation via `metadata.org_id`
-- Max 5 files + 5 URLs per org (server-side)
-- OpenAI embeddings only — key from org integrations
-- Fixed chunking defaults — no user config
-- Vector search only
-- All DB changes via Supabase CLI (`npx supabase db push`)
-- Deletion cascades handled in migrations
-- shadcn `AlertDialog` for all destructive confirmations
-
----
-
-*Last updated: 2026-04-03 — Milestone created*
+*Last updated: 2026-04-03 — v1.1 archived*

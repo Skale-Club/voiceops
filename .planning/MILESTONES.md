@@ -1,5 +1,26 @@
 # Milestones
 
+## v1.1 Knowledge Base (Shipped: 2026-04-03)
+
+**Stats:** 1 commit, 18 files, +2191 / -334 lines
+**Timeline:** 2026-04-03 (single-session)
+**Stack:** LangChain + Supabase pgvector, Next.js 15, Deno Edge Functions
+
+**Key accomplishments:**
+
+1. **LangChain vector pipeline** — Replaced custom chunking/embedding with LangChain `RecursiveCharacterTextSplitter` + `OpenAIEmbeddings` + `SupabaseVectorStore.fromDocuments()`
+2. **Schema migration** — Renamed `documents` → `knowledge_sources` (tracking table), new LangChain-compatible `documents` table with `content/metadata/embedding vector(1536)`, `match_documents` RPC
+3. **Semantic search upgrade** — `query-knowledge.ts` uses `SupabaseVectorStore.similaritySearch()` with `org_id` metadata filter for org isolation
+4. **Per-org upload limits** — Max 5 files + 5 URLs enforced server-side; UI shows counters (X/5) and disables at limit
+5. **OpenAI integration gate** — Upload form disabled and banner shown when org has no active OpenAI integration
+6. **AlertDialog for deletions** — Replaced `window.confirm()` with shadcn `AlertDialog` across knowledge base UI
+
+**UAT:** 10/10 tests passed (code audit + migration smoke test)
+
+**Archives:** [v1.1-ROADMAP.md](milestones/v1.1-ROADMAP.md)
+
+---
+
 ## v1.0 VoiceOps MVP (Shipped: 2026-04-03)
 
 **Stats:** 6 phases, 30 plans, 95 commits, 231 files, ~44K LOC
@@ -18,24 +39,12 @@
 **Audit:** 42/42 requirements wired, 8/8 E2E flows pass, tech_debt status (no blockers)
 
 **Known gaps (accepted as tech debt):**
+
 - No Vapi webhook HMAC/secret validation
 - Campaign calls don't auto-appear in Observability call list (deployment config gap)
 - 132 todo test stubs (pre-existing)
 - send_sms / custom_webhook are v2 stubs
 
 **Archives:** [v1.0-ROADMAP.md](milestones/v1.0-ROADMAP.md) | [v1.0-REQUIREMENTS.md](milestones/v1.0-REQUIREMENTS.md) | [v1.0-MILESTONE-AUDIT.md](milestones/v1.0-MILESTONE-AUDIT.md)
-
----
-
-## v1.1 Knowledge Base (In Progress: 2026-04-03)
-
-**Status:** 🚧 0 of 4 phases complete
-**Focus:** Replace stub knowledge base with LangChain + Supabase vector pipeline — files and URLs both vectorized and searchable, wired to the org's OpenAI integration.
-
-**Phases:**
-1. Data Layer — LangChain `documents` schema, `match_documents` RPC, source tracking table
-2. File Pipeline — Upload → chunk → embed → pgvector, max 5 per org
-3. URL Pipeline — Scrape → chunk → embed → pgvector, max 5 per org
-4. UI & Wiring — Document list, status indicators, OpenAI banner, AlertDialog for delete
 
 ---

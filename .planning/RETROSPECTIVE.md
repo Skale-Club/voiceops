@@ -48,6 +48,44 @@
 
 ---
 
+## Milestone: v1.1 — Knowledge Base
+
+**Shipped:** 2026-04-03
+**Phases:** 4 (Data Layer, File Pipeline, URL Pipeline, UI & Wiring) | **Delivered as:** 1 atomic commit
+
+### What Was Built
+- LangChain `RecursiveCharacterTextSplitter` + `OpenAIEmbeddings` + `SupabaseVectorStore` replacing custom embedding logic
+- Schema migration: `documents` → `knowledge_sources` tracking table + new `documents` table (LangChain-compatible)
+- `match_documents` RPC for LangChain-compatible vector search with org_id metadata filter
+- Per-org upload limits (5 files, 5 URLs) enforced server-side
+- OpenAI-not-configured banner with gating on upload form
+- shadcn AlertDialog replacing window.confirm() for deletes
+
+### What Worked
+- Single-commit delivery for a focused upgrade — no phase boundary overhead when scope is tight and well-understood
+- LangChain abstraction made chunking/embedding/search code significantly cleaner than v1.0 raw pg calls
+- Metadata-based org isolation (`metadata.org_id`) aligns with LangChain SupabaseVectorStore conventions perfectly
+
+### What Was Inefficient
+- GSD phase tracking wasn't used — ROADMAP phases had no plan/summary files, which broke `roadmap analyze` and `milestone complete`
+- Migration push required manual workaround (Supabase dashboard) due to CLI account mismatch — not caught until end of work
+- UAT was done via code audit rather than live app testing because migration wasn't pushed until end
+
+### Patterns Established
+- For small focused upgrades (<1 day, clear scope), inline delivery without formal GSD phases is acceptable — just record what was built in STATE.md
+- Supabase CLI account must match project before starting DB migration work
+
+### Key Lessons
+1. Verify `npx supabase db push` access before writing migrations — CLI account mismatch is a silent blocker
+2. LangChain's SupabaseVectorStore is the right abstraction for pgvector — don't re-implement what it already provides
+3. Metadata-based org filtering (`metadata @> '{"org_id": "..."}'`) is cleaner than separate vector tables per tenant
+
+### Cost Observations
+- Single session, single commit delivery
+- Notable: entire pipeline (schema + edge function + server actions + UI) delivered atomically with no rework
+
+---
+
 ## Cross-Milestone Trends
 
 ### Process Evolution
@@ -55,12 +93,14 @@
 | Milestone | Timeline | Phases | Key Change |
 |-----------|----------|--------|------------|
 | v1.0 | 4 days | 6 | Initial build — established all patterns |
+| v1.1 | 1 session | 4 (inline) | LangChain upgrade — single atomic delivery |
 
 ### Cumulative Quality
 
 | Milestone | Tests | Todo Stubs | Audit Score |
 |-----------|-------|------------|-------------|
 | v1.0 | 38 passing | 132 todos | 42/42 req wired |
+| v1.1 | 10/10 UAT | — | Code audit pass |
 
 ### Top Lessons (Verified Across Milestones)
 

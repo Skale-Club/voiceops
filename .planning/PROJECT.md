@@ -28,9 +28,9 @@ That business logic may differ by client. The invariant is the reliability of th
 - Admin can view call list with filters - v1.0
 - Admin can view call detail with transcript and inline tool execution badges - v1.0
 - Admin can view dashboard metrics and recent activity - v1.0
-- Platform processes documents into vectorized chunks via OpenAI embeddings in pgvector - v1.0
-- Platform serves knowledge base queries during calls via tenant-scoped semantic search - v1.0
-- Admin can manage knowledge base documents - v1.0
+- Platform processes documents into vectorized chunks via OpenAI embeddings in pgvector - v1.0, upgraded to LangChain pipeline - v1.1
+- Platform serves knowledge base queries during calls via tenant-scoped semantic search - v1.0, LangChain SupabaseVectorStore with org_id filter - v1.1
+- Admin can manage knowledge base documents (files + URLs, 5 each per org, with status indicators) - v1.1
 - Admin can create outbound campaigns with CSV contact import - v1.0
 - Platform dials contacts via Vapi Outbound API with cadence and real-time status - v1.0
 - Multi-tenant data isolation via Supabase RLS on all tables - v1.0
@@ -58,13 +58,14 @@ That business logic may differ by client. The invariant is the reliability of th
 
 ## Context
 
-Shipped v1.0 MVP on 2026-04-03.
+Shipped v1.0 MVP on 2026-04-03. Shipped v1.1 Knowledge Base on 2026-04-03.
 
-- Tech stack: Next.js 15, Supabase, Vercel Hobby, shadcn/ui
+- Tech stack: Next.js 15, Supabase, Vercel Hobby, shadcn/ui, LangChain
 - Deployment split: Vercel Hobby for the app, Supabase for data/auth/background work, GitHub Actions for auxiliary cron
 - Canonical production origin: `https://voiceops.skale.club`
 - Vapi webhook routes now run in Node.js route handlers instead of depending on Vercel Edge Runtime
 - Supabase Edge Functions remain the place for background processing such as embeddings
+- Knowledge base uses LangChain `SupabaseVectorStore` — `documents` table with `content/metadata/embedding`, `match_documents` RPC, `knowledge_sources` for source tracking
 - Product examples should be treated as tenant-specific workflows unless explicitly promoted to a reusable platform capability
 
 ## Constraints
@@ -91,9 +92,11 @@ Shipped v1.0 MVP on 2026-04-03.
 | Supabase RLS for multi-tenant isolation | Protects data even when app code is wrong | Good |
 | pgvector for RAG instead of external vector DB | Keeps the stack simple and co-located | Good |
 | Per-org API keys in DB instead of env vars | Enables tenant-specific integrations | Good |
+| LangChain as vector abstraction (v1.1) | Community-maintained, clean API for chunk/embed/search | Good |
+| `metadata.org_id` for vector isolation (v1.1) | Follows LangChain SupabaseVectorStore conventions | Good |
 
 ## Evolution
 
 Update this file whenever deployment assumptions, validated requirements, or core constraints change.
 
-*Last updated: 2026-04-03 after Vercel Hobby deployment alignment*
+*Last updated: 2026-04-03 after v1.1 Knowledge Base milestone*
