@@ -2,13 +2,13 @@
 gsd_state_version: 1.0
 milestone: v1.2
 milestone_name: Leaidear + Embedded Chatbot
-status: Ready to execute
-last_updated: "2026-04-04T17:41:23.784Z"
+status: Phase complete — ready for verification
+last_updated: "2026-04-04T18:10:25.694Z"
 progress:
   total_phases: 5
-  completed_phases: 3
+  completed_phases: 4
   total_plans: 12
-  completed_plans: 11
+  completed_plans: 12
 ---
 
 # Leaidear - State
@@ -16,16 +16,16 @@ progress:
 ## Current Position
 
 Milestone: v1.2 Leaidear + Embedded Chatbot — in progress
-Phase: 04 (widget-embed-script) — EXECUTING
-Plan: 3 of 3
+Phase: 04 (widget-embed-script) — COMPLETE
+Plan: 3 of 3 (all plans complete)
 
-Last session: 2026-04-04T17:41:23.777Z
+Last session: 2026-04-04T18:10:25.683Z
 
 ## Progress
 
 - v1.0 MVP: ✅ Shipped 2026-04-03
 - v1.1 Knowledge Base: ✅ Shipped 2026-04-03
-- v1.2: 🔄 In progress — [██░░░░░░░░] 20% (1/5 phases complete — Phase 1 ✅)
+- v1.2: 🔄 In progress — [██████████] 100% (12/12 plans complete — Phases 01-04 ✅)
 
 ## Project Reference
 
@@ -44,3 +44,4 @@ See `.planning/PROJECT.md` (updated 2026-04-03 after v1.1)
 - 01-04 (2026-04-04): No anon-role RLS on chat tables — Phase 2 writes via service-role client bypassing RLS; organization_id denormalized on chat_messages for RLS without join; migration 011 applied to Supabase
 - 02-01 (2026-04-04): widget_token backfilled with gen_random_uuid() without pgcrypto; session_key nullable until Wave 1 creates sessions; migration 012 applied to Supabase; 3 RED test scaffolds committed
 - 02-02 (2026-04-04): session.ts + persist.ts helpers implemented; vi.hoisted() fix applied to chat-session test scaffold; 9/9 tests GREEN; build clean
+- 04-03 (2026-04-04): Plan 03 is verification-only — widget built in Plan 02 passed all 21 browser checklist items unchanged; Shadow DOM CSS fix (Plan 02) resolved all styling concerns; all 5 WIDGET requirements confirmed in live browser

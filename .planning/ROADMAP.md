@@ -45,7 +45,7 @@ See [milestones/v1.1-ROADMAP.md](milestones/v1.1-ROADMAP.md)
 - [x] **Phase 1: Foundation** - Redis, Supabase schema, brand rename, and static widget asset — everything downstream phases require (completed 2026-04-04)
 - [x] **Phase 2: Chat API** - Public `/api/chat/[token]` route with token validation, session management, and conversation persistence (completed 2026-04-04)
 - [ ] **Phase 3: AI Conversation Engine** - Streaming responses via plain JSON SSE, knowledge base pre-retrieval, and action engine tool calls
-- [ ] **Phase 4: Widget Embed Script** - Client-side JS widget loaded via `<script>` tag with floating bubble and chat panel UI
+- [x] **Phase 4: Widget Embed Script** - Client-side JS widget loaded via `<script>` tag with floating bubble and chat panel UI (completed 2026-04-04)
 - [ ] **Phase 5: Admin Configuration** - Widget config page with appearance settings, live preview, embed code generator, and token regen
 
 ---
@@ -114,7 +114,7 @@ Plans:
 Plans:
 - [x] 04-01-PLAN.md — Wave 1: CORS fix on chat route + RED test scaffolds (widget-asset + widget.test.ts)
 - [x] 04-02-PLAN.md — Wave 2: src/widget/index.ts full implementation + esbuild pipeline + widget-test.html
-- [ ] 04-03-PLAN.md — Wave 3: smoke test page prep + human browser verification checkpoint
+- [x] 04-03-PLAN.md — Wave 3: smoke test page prep + human browser verification checkpoint
 
 ### Phase 5: Admin Configuration
 **Goal**: Admins can customize, preview, and deploy the chat widget for their org from the Leaidear dashboard
@@ -137,7 +137,7 @@ Plans:
 | 1. Foundation | 4/4 | Complete   | 2026-04-04 |
 | 2. Chat API | 3/3 | Complete   | 2026-04-04 |
 | 3. AI Conversation Engine | 0/2 | Not started | - |
-| 4. Widget Embed Script | 2/3 | In Progress|  |
+| 4. Widget Embed Script | 3/3 | Complete   | 2026-04-04 |
 | 5. Admin Configuration | 0/? | Not started | - |
 
 ---
