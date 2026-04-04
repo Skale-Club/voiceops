@@ -26,9 +26,9 @@
 - [ ] **CHAT-01**: Visitor can send messages and receive streamed AI responses in real time (SSE)
 - [ ] **CHAT-02**: AI responses draw from the org's knowledge base (LangChain SupabaseVectorStore)
 - [ ] **CHAT-03**: AI can call org tools during conversation (action engine `executeAction`)
-- [ ] **CHAT-04**: Conversation context is maintained within a session using Redis short-term memory
-- [ ] **CHAT-05**: Conversation history is persisted to Supabase long-term memory (per org, per session)
-- [ ] **CHAT-06**: Each conversation session is identified by a unique session ID (anonymous visitor)
+- [x] **CHAT-04**: Conversation context is maintained within a session using Redis short-term memory
+- [x] **CHAT-05**: Conversation history is persisted to Supabase long-term memory (per org, per session)
+- [x] **CHAT-06**: Each conversation session is identified by a unique session ID (anonymous visitor)
 
 ### ADMIN — Widget Configuration
 
@@ -41,7 +41,7 @@
 
 - [x] **INFRA-01**: Redis connection configured and available for chat session storage
 - [x] **INFRA-02**: Supabase schema includes `chat_sessions` and `chat_messages` tables with RLS
-- [ ] **INFRA-03**: Public-facing chat API route (`/api/chat/[token]`) validates org token and scopes all queries to the org
+- [x] **INFRA-03**: Public-facing chat API route (`/api/chat/[token]`) validates org token and scopes all queries to the org
 - [x] **INFRA-04**: Widget asset served from the platform's own domain (no external CDN dependency required)
 
 ---
@@ -78,10 +78,10 @@
 | INFRA-01 | Phase 1 | Complete |
 | INFRA-02 | Phase 1 | Complete |
 | INFRA-04 | Phase 1 | Complete |
-| CHAT-04 | Phase 2 | pending |
-| CHAT-05 | Phase 2 | pending |
-| CHAT-06 | Phase 2 | pending |
-| INFRA-03 | Phase 2 | pending |
+| CHAT-04 | Phase 2 | Complete |
+| CHAT-05 | Phase 2 | Complete |
+| CHAT-06 | Phase 2 | Complete |
+| INFRA-03 | Phase 2 | Complete |
 | CHAT-01 | Phase 3 | pending |
 | CHAT-02 | Phase 3 | pending |
 | CHAT-03 | Phase 3 | pending |
