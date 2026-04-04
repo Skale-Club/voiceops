@@ -97,7 +97,7 @@ Plans:
 
 Plans:
 - [x] 03-01-PLAN.md — Wave 0: update test scaffolds to streaming shape and add RED streaming tests
-- [ ] 03-02-PLAN.md — Wave 1: stream.ts helper + route.ts step 7 replacement (full AI engine)
+- [x] 03-02-PLAN.md — Wave 1: stream.ts helper + route.ts step 7 replacement (full AI engine)
 
 ### Phase 4: Widget Embed Script
 **Goal**: Any third-party site can install the chat widget with a single script tag and visitors can converse without logging in
