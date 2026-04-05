@@ -3,12 +3,12 @@ gsd_state_version: 1.0
 milestone: v1.2
 milestone_name: Leaidear + Embedded Chatbot
 status: Ready to execute
-last_updated: "2026-04-05T03:51:10.405Z"
+last_updated: "2026-04-05T04:16:11.444Z"
 progress:
   total_phases: 6
   completed_phases: 5
   total_plans: 21
-  completed_plans: 18
+  completed_plans: 19
 ---
 
 # Leaidear - State
@@ -17,15 +17,15 @@ progress:
 
 Milestone: v1.2 Leaidear + Embedded Chatbot — in progress
 Phase: 06 (chat-inbox) — EXECUTING
-Plan: 3 of 5
+Plan: 4 of 5
 
-Last session: 2026-04-05T03:51:10.399Z
+Last session: 2026-04-05T04:16:11.438Z
 
 ## Progress
 
 - v1.0 MVP: ✅ Shipped 2026-04-03
 - v1.1 Knowledge Base: ✅ Shipped 2026-04-03
-- v1.2: 🔄 In progress — [████████░░] 81% (17/21 plans complete — Phases 01-05 ✅, Phase 06 in progress 1/5)
+- v1.2: 🔄 In progress — [█████████░] 90% (19/21 plans complete — Phases 01-05 ✅, Phase 06 in progress 4/5)
 
 ## Project Reference
 
@@ -66,3 +66,6 @@ See `.planning/PROJECT.md` (updated 2026-04-03 after v1.1)
 - Keep widget boot non-blocking by hydrating admin config after mount so synchronous `document.currentScript` token capture stays intact.
 - Apply widget primary color through a shared Shadow DOM CSS variable so admin theming updates the bubble, avatars, user bubble, and send button together.
 - Renamed chat_sessions/chat_messages to conversations/conversation_messages via migration 015; persistMessage now updates denormalized last_message/last_message_at/updated_at for admin inbox preview.
+- 06-03 (2026-04-05): Chat inbox UI built — ConversationList (tabbed/searchable), ChatArea (bubble thread, debug toggle, send form), AdminChatLayout (dual-polling orchestrator, ResizablePanelGroup desktop, CSS-transform mobile slide). react-resizable-panels v4 API fix applied to resizable.tsx (Group/Panel/Separator + orientation prop).
+- Use native fetch + setInterval for polling in chat UI components (no @tanstack/react-query — not installed in this project).
+- resizable.tsx wrapper maps legacy direction prop to new orientation prop for react-resizable-panels v4 compatibility.
