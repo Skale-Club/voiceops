@@ -4,7 +4,7 @@
 
 - ✅ **v1.0 MVP** — 6 phases, 30 plans (shipped 2026-04-03)
 - ✅ **v1.1 Knowledge Base** — LangChain vector pipeline (shipped 2026-04-03)
-- 🚧 **v1.2 Leaidear + Embedded Chatbot** — active (5 phases)
+- 🚧 **v1.2 Leaidear + Embedded Chatbot** — active (6 phases)
 
 ## Shipped
 
@@ -47,6 +47,7 @@ See [milestones/v1.1-ROADMAP.md](milestones/v1.1-ROADMAP.md)
 - [x] **Phase 3: AI Conversation Engine** - Streaming responses via plain JSON SSE, knowledge base pre-retrieval, and action engine tool calls (completed 2026-04-04)
 - [x] **Phase 4: Widget Embed Script** - Client-side JS widget loaded via `<script>` tag with floating bubble and chat panel UI (completed 2026-04-04)
 - [ ] **Phase 5: Admin Configuration** - Widget config page with appearance settings, live preview, embed code generator, and token regen
+- [ ] **Phase 6: Chat Inbox** - Admin inbox to view, filter, and reply to widget conversations; widget settings relocated under Chat in sidebar
 
 ---
 
@@ -134,6 +135,19 @@ Plans:
 - [x] 05-03-PLAN.md — Wave 3: widget runtime config fetch + rebuilt asset + widget tests
 - [ ] 05-04-PLAN.md — Wave 4: human browser verification of admin config + token rotation flow
 
+### Phase 6: Chat Inbox
+**Goal**: Admins can view, filter, and reply to widget conversations from the dashboard; widget settings move under the Chat section in the sidebar
+**Depends on**: Phase 5
+**Requirements**: INBOX-01, INBOX-02, INBOX-03, INBOX-04, INBOX-05, INBOX-06, INBOX-07
+**Plans**: 5 plans
+
+Plans:
+- [ ] 06-01-PLAN.md — Wave 1: migration 015 (rename chat_sessions/messages to conversations/conversation_messages), update persist.ts and types
+- [ ] 06-02-PLAN.md — Wave 2: TypeScript types (ConversationSummary, ConversationMessage) + all admin API endpoints
+- [ ] 06-03-PLAN.md — Wave 3: ConversationList + ChatArea + AdminChatLayout components
+- [ ] 06-04-PLAN.md — Wave 4: /chat page + sidebar Chat group (Inbox + Settings)
+- [ ] 06-05-PLAN.md — Wave 5: human browser verification checkpoint
+
 ---
 
 ## Progress
@@ -145,6 +159,7 @@ Plans:
 | 3. AI Conversation Engine | 2/2 | Complete   | 2026-04-04 |
 | 4. Widget Embed Script | 3/3 | Complete   | 2026-04-04 |
 | 5. Admin Configuration | 3/4 | In Progress | - |
+| 6. Chat Inbox | 0/5 | Not started | - |
 
 ---
 
@@ -173,18 +188,16 @@ Plans:
 | ADMIN-02 | Phase 5 |
 | ADMIN-03 | Phase 5 |
 | ADMIN-04 | Phase 5 |
+| INBOX-01 | Phase 6 |
+| INBOX-02 | Phase 6 |
+| INBOX-03 | Phase 6 |
+| INBOX-04 | Phase 6 |
+| INBOX-05 | Phase 6 |
+| INBOX-06 | Phase 6 |
+| INBOX-07 | Phase 6 |
 
-**Total: 21/21 requirements mapped.**
-
-### Phase 6: Chat Inbox
-**Goal**: Admins can view, filter, and reply to widget conversations from the dashboard; widget settings move under the Chat section in the sidebar
-**Depends on**: Phase 5
-**Requirements**: TBD
-**Plans**: 0 plans
-
-Plans:
-- [ ] TBD (run /gsd:plan-phase 6 to break down)
+**Total: 28/28 requirements mapped.**
 
 ---
 
-*Last updated: 2026-04-04 — Phase 5 Plan 03 complete; roadmap progress synced*
+*Last updated: 2026-04-05 — Phase 6 Chat Inbox planned (5 plans, 5 waves)*
