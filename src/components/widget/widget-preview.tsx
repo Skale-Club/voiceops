@@ -2,12 +2,14 @@ interface WidgetPreviewProps {
   displayName: string
   primaryColor: string
   welcomeMessage: string
+  avatarUrl?: string | null
 }
 
 export function WidgetPreview({
   displayName,
   primaryColor,
   welcomeMessage,
+  avatarUrl,
 }: WidgetPreviewProps) {
   const initials = displayName.trim().slice(0, 2).toUpperCase() || 'AI'
 

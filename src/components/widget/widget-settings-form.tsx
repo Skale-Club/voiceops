@@ -54,6 +54,7 @@ const widgetSettingsSchema = z.object({
     .trim()
     .min(1, 'Welcome message is required.')
     .max(280, 'Welcome message must be 280 characters or fewer.'),
+  avatarUrl: z.string().trim().optional().nullable(),
 })
 
 type WidgetSettingsFormValues = z.infer<typeof widgetSettingsSchema>
@@ -309,25 +310,6 @@ export function WidgetSettingsForm({
                     void handleRegenerateToken()
                   }}
                   className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                >
-                  {isRegenerating ? (
-                    <>
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      Regenerating...
-                    </>
-                  ) : (
-                    'Regenerate token'
-                  )}
-                </AlertDialogAction>
-              </AlertDialogFooter>
-            </AlertDialogContent>
-          </AlertDialog>
-        </CardContent>
-      </Card>
-    </div>
-  )
-}
-sName="bg-destructive text-destructive-foreground hover:bg-destructive/90"
                 >
                   {isRegenerating ? (
                     <>

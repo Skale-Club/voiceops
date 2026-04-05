@@ -66,6 +66,11 @@ export async function getDashboardMetrics(): Promise<{
   toolSuccessRate: number | null
   recentCalls: CallRow[]
   recentFailures: Database['public']['Tables']['action_logs']['Row'][]
+  trends: {
+    today: { date: string; value: number }[]
+    week: { date: string; value: number }[]
+    month: { date: string; value: number }[]
+  }
 }> {
   const supabase = await createClient()
   const now = new Date()
@@ -76,9 +81,9 @@ export async function getDashboardMetrics(): Promise<{
 
   const [todayRes, weekRes, monthRes, successRateRes, recentCallsRes, recentFailuresRes] =
     await Promise.all([
-      supabase.from('calls').select('*', { count: 'exact', head: true }).gte('created_at', todayStart),
-      supabase.from('calls').select('*', { count: 'exact', head: true }).gte('created_at', weekStart),
-      supabase.from('calls').select('*', { count: 'exact', head: true }).gte('created_at', monthStart),
+      supabase.from('calls').select('created_at').gte('created_at', todayStart),
+      supabase.from('calls').select('created_at').gte('created_at', weekStart),
+      supabase.from('calls').select('created_at').gte('created_at', monthStart),
       supabase.from('action_logs').select('status').gte('created_at', monthStart),
       supabase.from('calls').select('*').order('created_at', { ascending: false }).limit(10),
       supabase
@@ -90,18 +95,67 @@ export async function getDashboardMetrics(): Promise<{
         .limit(20),
     ])
 
+  const todayCalls = todayRes.data ?? []
+  const weekCalls = weekRes.data ?? []
+  const monthCalls = monthRes.data ?? []
+
   const logs = successRateRes.data ?? []
   const successRate =
-    logs.length === 0
+    logs.length === 0 || monthCalls.length === 0
       ? null
       : Math.round((logs.filter((l) => l.status === 'success').length * 100) / logs.length)
 
+  // Today buckets (24 hours)
+  const todayTrend = Array.from({ length: 24 }, (_, i) => ({
+    date: `${String(i).padStart(2, '0')}:00`,
+    value: 0
+  }))
+  todayCalls.forEach(call => {
+    const hour = new Date(call.created_at).getHours()
+    if (hour >= 0 && hour < 24) {
+      todayTrend[hour].value++
+    }
+  })
+
+  // Week buckets (7 days)
+  const weekTrend = Array.from({ length: 7 }, (_, i) => {
+    const d = new Date(now.getTime() - (6 - i) * 24 * 60 * 60 * 1000)
+    return {
+      date: `${d.getMonth() + 1}/${d.getDate()}`,
+      value: 0,
+      timestamp: d.setHours(0,0,0,0)
+    }
+  })
+  weekCalls.forEach(call => {
+    const ts = new Date(call.created_at).setHours(0,0,0,0)
+    const bucket = weekTrend.find(b => b.timestamp === ts)
+    if (bucket) bucket.value++
+  })
+
+  // Month buckets (current month days)
+  const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate()
+  const monthTrend = Array.from({ length: daysInMonth }, (_, i) => ({
+    date: `${i + 1}`,
+    value: 0
+  }))
+  monthCalls.forEach(call => {
+    const date = new Date(call.created_at).getDate()
+    if (date >= 1 && date <= daysInMonth) {
+      monthTrend[date - 1].value++
+    }
+  })
+
   return {
-    callsToday: todayRes.count ?? 0,
-    callsWeek: weekRes.count ?? 0,
-    callsMonth: monthRes.count ?? 0,
+    callsToday: todayCalls.length,
+    callsWeek: weekCalls.length,
+    callsMonth: monthCalls.length,
     toolSuccessRate: successRate,
     recentCalls: recentCallsRes.data ?? [],
     recentFailures: recentFailuresRes.data ?? [],
+    trends: {
+      today: todayTrend.map(t => ({ date: t.date, value: t.value })),
+      week: weekTrend.map(t => ({ date: t.date, value: t.value })),
+      month: monthTrend.map(t => ({ date: t.date, value: t.value }))
+    }
   }
 }

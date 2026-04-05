@@ -37,18 +37,13 @@ export function AppBreadcrumb() {
   return (
     <Breadcrumb>
       <BreadcrumbList>
-        <BreadcrumbItem>
-          <BreadcrumbLink asChild>
-            <Link href="/">Dashboard</Link>
-          </BreadcrumbLink>
-        </BreadcrumbItem>
         {segments.map((segment, index) => {
           const isLast = index === segments.length - 1
           const href = `/${segments.slice(0, index + 1).join('/')}`
 
           return (
             <React.Fragment key={href}>
-              <BreadcrumbSeparator />
+              {index > 0 && <BreadcrumbSeparator />}
               <BreadcrumbItem>
                 {isLast ? (
                   <BreadcrumbPage>{toTitleCase(segment)}</BreadcrumbPage>

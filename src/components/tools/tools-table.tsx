@@ -60,9 +60,10 @@ const ACTION_TYPE_LABELS: Record<string, string> = {
 interface ToolsTableProps {
   toolConfigs: ToolConfigWithIntegration[]
   integrations: IntegrationForDisplay[]
+  children?: React.ReactNode
 }
 
-export function ToolsTable({ toolConfigs: initialToolConfigs, integrations }: ToolsTableProps) {
+export function ToolsTable({ toolConfigs: initialToolConfigs, integrations, children }: ToolsTableProps) {
   const [toolConfigs, setToolConfigs] = useState<ToolConfigWithIntegration[]>(initialToolConfigs)
   const [sorting, setSorting] = useState<SortingState>([])
   const [isSheetOpen, setIsSheetOpen] = useState(false)
@@ -203,10 +204,11 @@ export function ToolsTable({ toolConfigs: initialToolConfigs, integrations }: To
 
   return (
     <>
-      <div className="flex items-center justify-between mb-4">
-        <span className="sr-only">Loading tool configurations...</span>
-        <div />
-        <Button onClick={openCreateSheet}>Add Tool</Button>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-4">
+        <div>{children}</div>
+        <div className="flex items-center gap-4">
+          <Button onClick={openCreateSheet}>Add Tool</Button>
+        </div>
       </div>
 
       {toolConfigs.length === 0 ? (

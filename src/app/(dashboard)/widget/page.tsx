@@ -51,7 +51,7 @@ export default async function WidgetPage() {
   const { data: organization, error } = await supabase
     .from('organizations')
     .select(
-      'id, name, widget_display_name, widget_primary_color, widget_welcome_message, widget_token'
+      'id, name, widget_display_name, widget_primary_color, widget_welcome_message, widget_token, widget_avatar_url'
     )
     .eq('id', activeOrgId)
     .single()

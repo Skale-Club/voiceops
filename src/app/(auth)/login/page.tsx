@@ -69,7 +69,7 @@ export default function LoginPage() {
       }
 
       router.refresh()
-      router.push('/organizations')
+      router.push('/')
     } catch {
       setAuthError('Unable to connect. Check your internet connection and try again.')
     }

@@ -25,6 +25,11 @@ interface DashboardMetricsProps {
     toolSuccessRate: number | null
     recentCalls: CallRow[]
     recentFailures: ActionLogRow[]
+    trends: {
+      today: { date: string; value: number }[]
+      week: { date: string; value: number }[]
+      month: { date: string; value: number }[]
+    }
   }
 }
 
@@ -64,17 +69,7 @@ function SuccessRateValue({ rate }: { rate: number | null }) {
   return <span className={`text-2xl font-bold tracking-tight ${colorClass}`}>{rate}%</span>
 }
 
-// Generates placeholder data for the sparklines to enhance visual polish
-function generateSparklineData(baseValue: number, days: number) {
-  const data = []
-  for (let i = days; i >= 0; i--) {
-    data.push({
-      date: format(new Date(Date.now() - i * 24 * 60 * 60 * 1000), 'MMM d'),
-      value: Math.max(0, Math.floor(baseValue / days + (Math.random() * 10 - 5))),
-    })
-  }
-  return data
-}
+// (generateSparklineData removed since we now use real data)
 
 function MetricSparkline({ data, color }: { data: any[]; color: string }) {
   const id = useId()
@@ -96,7 +91,7 @@ function MetricSparkline({ data, color }: { data: any[]; color: string }) {
               return null
             }}
           />
-          <Bar dataKey="value" fill={color} radius={[2, 2, 0, 0]} />
+          <Bar dataKey="value" fill={color} radius={[2, 2, 0, 0]} minPointSize={2} />
         </BarChart>
       </ResponsiveContainer>
     </div>
@@ -104,11 +99,12 @@ function MetricSparkline({ data, color }: { data: any[]; color: string }) {
 }
 
 export function DashboardMetrics({ metrics }: DashboardMetricsProps) {
-  const { callsToday, callsWeek, callsMonth, toolSuccessRate, recentCalls, recentFailures } =
+  const { callsToday, callsWeek, callsMonth, toolSuccessRate, recentCalls, recentFailures, trends } =
     metrics
 
-  const weekData = generateSparklineData(callsWeek, 7)
-  const monthData = generateSparklineData(callsMonth, 30)
+  const todayData = trends.today
+  const weekData = trends.week
+  const monthData = trends.month
 
   return (
     <div className="space-y-8 animate-in fade-in duration-500">
@@ -122,6 +118,7 @@ export function DashboardMetrics({ metrics }: DashboardMetricsProps) {
           </CardHeader>
           <CardContent>
             <span className="text-3xl font-bold tracking-tight">{callsToday}</span>
+            <MetricSparkline data={todayData} color="var(--color-primary)" />
           </CardContent>
         </Card>
         <Card className="hover:shadow-sm transition-shadow">

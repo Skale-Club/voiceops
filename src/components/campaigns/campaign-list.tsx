@@ -40,9 +40,10 @@ function CampaignStatusBadge({ status }: CampaignStatusBadgeProps) {
 
 interface CampaignListProps {
   campaigns: CampaignListItem[]
+  children?: React.ReactNode
 }
 
-export function CampaignList({ campaigns }: CampaignListProps) {
+export function CampaignList({ campaigns, children }: CampaignListProps) {
   const [deleting, setDeleting] = useState<string | null>(null)
 
   async function handleDelete(campaignId: string) {
@@ -57,14 +58,19 @@ export function CampaignList({ campaigns }: CampaignListProps) {
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex items-center justify-between">
-        <p className="text-sm text-muted-foreground">{campaigns.length} campaign{campaigns.length !== 1 ? 's' : ''}</p>
-        <Button asChild size="sm">
-          <Link href="/outbound/new">
-            <Plus className="h-4 w-4 mr-1" />
-            New Campaign
-          </Link>
-        </Button>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-2">
+        <div>{children}</div>
+        <div className="flex items-center gap-4">
+          <p className="text-sm text-muted-foreground whitespace-nowrap">
+            {campaigns.length} campaign{campaigns.length !== 1 ? 's' : ''}
+          </p>
+          <Button asChild size="sm">
+            <Link href="/outbound/new">
+              <Plus className="h-4 w-4 mr-1" />
+              New Campaign
+            </Link>
+          </Button>
+        </div>
       </div>
 
       {campaigns.length === 0 ? (

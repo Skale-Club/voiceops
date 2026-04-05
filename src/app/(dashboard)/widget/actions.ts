@@ -10,6 +10,7 @@ export interface WidgetSettingsInput {
   displayName: string
   primaryColor: string
   welcomeMessage: string
+  avatarUrl?: string | null
 }
 
 export interface WidgetActionResult {
@@ -20,6 +21,7 @@ function normalizeWidgetSettings(input: WidgetSettingsInput): WidgetSettingsInpu
   const displayName = input.displayName.trim()
   const primaryColor = input.primaryColor.trim().toUpperCase()
   const welcomeMessage = input.welcomeMessage.trim()
+  const avatarUrl = input.avatarUrl?.trim() || null
 
   if (!displayName) {
     return null
@@ -37,6 +39,7 @@ function normalizeWidgetSettings(input: WidgetSettingsInput): WidgetSettingsInpu
     displayName,
     primaryColor,
     welcomeMessage,
+    avatarUrl,
   }
 }
 
