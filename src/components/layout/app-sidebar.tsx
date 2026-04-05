@@ -10,8 +10,6 @@ import {
   BookOpen,
   Phone,
   MessageSquare,
-  Inbox,
-  Settings2,
   ChevronUp,
   LogOut,
   Settings,
@@ -26,7 +24,6 @@ import {
   SidebarFooter,
   SidebarGroup,
   SidebarGroupContent,
-  SidebarGroupLabel,
   SidebarHeader,
   SidebarMenu,
   SidebarMenuButton,
@@ -49,11 +46,7 @@ const navItems = [
   { icon: BookOpen, label: 'Knowledge', href: '/knowledge', active: true },
   { icon: Bot, label: 'Assistants', href: '/assistants', active: true },
   { icon: Plug2, label: 'Integrations', href: '/integrations', active: true },
-]
-
-const chatItems = [
-  { icon: Inbox, label: 'Inbox', href: '/chat' },
-  { icon: Settings2, label: 'Settings', href: '/widget' },
+  { icon: MessageSquare, label: 'Chat', href: '/chat', active: true },
 ]
 
 function getInitials(user: User): string {
@@ -114,7 +107,11 @@ export function AppSidebar({ user }: AppSidebarProps) {
             <SidebarMenu>
               {navItems.map((item) => {
                 const Icon = item.icon
-                const isCurrentPage = pathname === item.href || pathname.startsWith(item.href + '/')
+                const isChatItem = item.href === '/chat'
+                const isCurrentPage =
+                  pathname === item.href ||
+                  pathname.startsWith(item.href + '/') ||
+                  (isChatItem && pathname === '/widget')
 
                 if (!item.active) {
                   return (
@@ -149,34 +146,6 @@ export function AppSidebar({ user }: AppSidebarProps) {
           </SidebarGroupContent>
         </SidebarGroup>
 
-        <SidebarGroup>
-          <SidebarGroupLabel className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground px-2 mb-1">
-            <MessageSquare className="h-3.5 w-3.5" />
-            Chat
-          </SidebarGroupLabel>
-          <SidebarGroupContent>
-            <SidebarMenu>
-              {chatItems.map((item) => {
-                const Icon = item.icon
-                const isCurrentPage = pathname === item.href || pathname.startsWith(item.href + '/')
-                return (
-                  <SidebarMenuItem key={item.href}>
-                    <SidebarMenuButton
-                      asChild
-                      isActive={isCurrentPage}
-                      data-active={isCurrentPage}
-                    >
-                      <Link href={item.href}>
-                        <Icon className="h-4 w-4" />
-                        <span>{item.label}</span>
-                      </Link>
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-                )
-              })}
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
       </SidebarContent>
 
       <SidebarFooter className="px-2 py-2">

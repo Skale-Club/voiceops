@@ -230,7 +230,7 @@ export function ChatArea({
                 // Visitor: right-aligned, blue
                 return (
                   <div key={message.id} className="flex justify-end">
-                    <div className="bg-blue-600 text-white rounded-2xl px-4 py-2 max-w-[75%] text-sm">
+                    <div className="bg-primary text-primary-foreground rounded-2xl px-4 py-2 max-w-[75%] text-sm">
                       {message.content}
                     </div>
                   </div>
@@ -243,7 +243,7 @@ export function ChatArea({
                   <Avatar className="h-6 w-6 shrink-0">
                     <AvatarFallback className="text-xs">A</AvatarFallback>
                   </Avatar>
-                  <div className="bg-white dark:bg-slate-800 border rounded-2xl px-4 py-2 max-w-[75%] text-sm">
+                  <div className="bg-muted border rounded-2xl px-4 py-2 max-w-[75%] text-sm">
                     {message.content}
                   </div>
                 </div>

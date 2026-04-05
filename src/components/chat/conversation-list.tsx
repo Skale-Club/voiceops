@@ -1,8 +1,9 @@
 'use client'
 
 import { useState } from 'react'
-import { Search, Archive, ArchiveRestore, Trash2 } from 'lucide-react'
+import { Search, Archive, ArchiveRestore, Trash2, Settings2 } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
+import Link from 'next/link'
 
 import { ConversationSummary } from '@/types/chat'
 import { Input } from '@/components/ui/input'
@@ -105,9 +106,9 @@ export function ConversationList({
 
   return (
     <div className="flex flex-col h-full border-r">
-      {/* Search */}
-      <div className="p-3 border-b">
-        <div className="relative">
+      {/* Search + Settings */}
+      <div className="p-3 border-b flex items-center gap-2">
+        <div className="relative flex-1">
           <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
           <Input
             placeholder="Search conversations..."
@@ -116,6 +117,11 @@ export function ConversationList({
             className="pl-8 h-8 text-sm"
           />
         </div>
+        <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0" asChild>
+          <Link href="/widget" title="Chat Settings">
+            <Settings2 className="h-4 w-4" />
+          </Link>
+        </Button>
       </div>
 
       {/* Tabs */}
@@ -146,8 +152,8 @@ export function ConversationList({
                   className={[
                     'rounded-md border p-3 cursor-pointer transition-colors',
                     isSelected
-                      ? 'bg-slate-100 border-slate-300 dark:bg-slate-800/80 dark:border-slate-700'
-                      : 'border-transparent hover:bg-slate-100 dark:hover:bg-slate-800/70',
+                      ? 'bg-accent border-border'
+                      : 'border-transparent hover:bg-accent/50',
                   ].join(' ')}
                 >
                   {/* Name + time row */}
