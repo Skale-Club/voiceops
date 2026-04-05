@@ -5,8 +5,8 @@
 import { createServiceRoleClient } from '@/lib/supabase/admin'
 
 /**
- * Create a new chat_sessions row in Supabase.
- * Returns the UUID of the newly created row (chat_sessions.id).
+ * Create a new conversations row in Supabase.
+ * Returns the UUID of the newly created row (conversations.id).
  * Throws on DB error — caller must handle.
  */
 export async function ensureDbSession(opts: {
@@ -16,9 +16,9 @@ export async function ensureDbSession(opts: {
 }): Promise<string> {
   const supabase = createServiceRoleClient()
   const { data, error } = await supabase
-    .from('chat_sessions')
+    .from('conversations')
     .insert({
-      organization_id: opts.orgId,
+      org_id: opts.orgId,
       widget_token: opts.widgetToken,
       session_key: opts.sessionId,
     })
@@ -30,7 +30,9 @@ export async function ensureDbSession(opts: {
 }
 
 /**
- * Persist a single message turn to chat_messages.
+ * Persist a single message turn to conversation_messages.
+ * Also updates conversations.last_message, last_message_at, and updated_at
+ * so the admin inbox preview row stays current for every visitor message.
  * Throws on DB error — caller should use after() so errors don't block the response.
  */
 export async function persistMessage(opts: {
@@ -40,11 +42,23 @@ export async function persistMessage(opts: {
   content: string
 }): Promise<void> {
   const supabase = createServiceRoleClient()
-  const { error } = await supabase.from('chat_messages').insert({
-    session_id: opts.dbSessionId,
-    organization_id: opts.orgId,
+
+  const { error: insertError } = await supabase.from('conversation_messages').insert({
+    conversation_id: opts.dbSessionId,
+    org_id: opts.orgId,
     role: opts.role,
     content: opts.content,
   })
-  if (error) throw error
+  if (insertError) throw insertError
+
+  const now = new Date().toISOString()
+  const { error: updateError } = await supabase
+    .from('conversations')
+    .update({
+      last_message: opts.content,
+      last_message_at: now,
+      updated_at: now,
+    })
+    .eq('id', opts.dbSessionId)
+  if (updateError) throw updateError
 }
