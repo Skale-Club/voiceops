@@ -142,7 +142,7 @@ Plans:
 **Plans**: 5 plans
 
 Plans:
-- [ ] 06-01-PLAN.md — Wave 1: migration 015 (rename chat_sessions/messages to conversations/conversation_messages), update persist.ts and types
+- [x] 06-01-PLAN.md — Wave 1: migration 015 (rename chat_sessions/messages to conversations/conversation_messages), update persist.ts and types
 - [ ] 06-02-PLAN.md — Wave 2: TypeScript types (ConversationSummary, ConversationMessage) + all admin API endpoints
 - [ ] 06-03-PLAN.md — Wave 3: ConversationList + ChatArea + AdminChatLayout components
 - [ ] 06-04-PLAN.md — Wave 4: /chat page + sidebar Chat group (Inbox + Settings)
@@ -159,7 +159,7 @@ Plans:
 | 3. AI Conversation Engine | 2/2 | Complete   | 2026-04-04 |
 | 4. Widget Embed Script | 3/3 | Complete   | 2026-04-04 |
 | 5. Admin Configuration | 3/4 | In Progress | - |
-| 6. Chat Inbox | 0/5 | Not started | - |
+| 6. Chat Inbox | 1/5 | In Progress|  |
 
 ---
 

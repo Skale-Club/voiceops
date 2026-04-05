@@ -2,13 +2,13 @@
 gsd_state_version: 1.0
 milestone: v1.2
 milestone_name: Leaidear + Embedded Chatbot
-status: Milestone complete
-last_updated: "2026-04-05T03:22:16.850Z"
+status: Ready to execute
+last_updated: "2026-04-05T03:45:07.254Z"
 progress:
-  total_phases: 5
+  total_phases: 6
   completed_phases: 5
-  total_plans: 16
-  completed_plans: 16
+  total_plans: 21
+  completed_plans: 17
 ---
 
 # Leaidear - State
@@ -16,23 +16,23 @@ progress:
 ## Current Position
 
 Milestone: v1.2 Leaidear + Embedded Chatbot — in progress
-Phase: 05
-Plan: Not started
+Phase: 06 (chat-inbox) — EXECUTING
+Plan: 2 of 5
 
-Last session: 2026-04-04T19:11:59.904Z
+Last session: 2026-04-05T03:45:07.249Z
 
 ## Progress
 
 - v1.0 MVP: ✅ Shipped 2026-04-03
 - v1.1 Knowledge Base: ✅ Shipped 2026-04-03
-- v1.2: 🔄 In progress — [█████████░] 94% (15/16 plans complete — Phases 01-04 ✅, Phase 05 verification remaining)
+- v1.2: 🔄 In progress — [████████░░] 81% (17/21 plans complete — Phases 01-05 ✅, Phase 06 in progress 1/5)
 
 ## Project Reference
 
 See `.planning/PROJECT.md` (updated 2026-04-03 after v1.1)
 
 **Core value:** The Action Engine must work reliably for every tenant
-**Current focus:** Phase 05 — admin-configuration
+**Current focus:** Phase 06 — chat-inbox
 
 ## Accumulated Context
 
@@ -50,6 +50,7 @@ See `.planning/PROJECT.md` (updated 2026-04-03 after v1.1)
 - 05-01 (2026-04-04): Migration 013 adds `widget_display_name`, `widget_primary_color`, and `widget_welcome_message` to `organizations`; `GET /api/widget/[token]/config` now returns only normalized public widget fields and focused tests cover valid token, invalid token, inactive org, and fallback behavior.
 - 05-02 (2026-04-04): `/widget` is now a first-class dashboard page with active-org scoped server actions, live preview, canonical `https://voiceops.skale.club/widget.js` embed output, and explicit token rotation invalidation copy.
 - 05-03 (2026-04-04): `public/widget.js` now hydrates display name, primary color, and welcome message from `GET /api/widget/[token]/config` after mount with Phase 4 defaults preserved on fetch failure; widget tests now cover hydration success, fallback boot, and invalid-token chat behavior.
+- 06-01 (2026-04-05): Migration 015 renames chat_sessions → conversations and chat_messages → conversation_messages; adds admin-inbox columns (status, visitor_*, last_message, memory); persist.ts now updates conversations.last_message/last_message_at/updated_at after each message insert; database.ts types updated to new schema.
 
 ### Roadmap Evolution
 
@@ -64,3 +65,4 @@ See `.planning/PROJECT.md` (updated 2026-04-03 after v1.1)
 - Normalize saved widget colors to uppercase `#RRGGBB` values so client and server validation enforce the same contract.
 - Keep widget boot non-blocking by hydrating admin config after mount so synchronous `document.currentScript` token capture stays intact.
 - Apply widget primary color through a shared Shadow DOM CSS variable so admin theming updates the bubble, avatars, user bubble, and send button together.
+- Renamed chat_sessions/chat_messages to conversations/conversation_messages via migration 015; persistMessage now updates denormalized last_message/last_message_at/updated_at for admin inbox preview.
