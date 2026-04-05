@@ -143,7 +143,7 @@ Plans:
 
 Plans:
 - [x] 06-01-PLAN.md — Wave 1: migration 015 (rename chat_sessions/messages to conversations/conversation_messages), update persist.ts and types
-- [ ] 06-02-PLAN.md — Wave 2: TypeScript types (ConversationSummary, ConversationMessage) + all admin API endpoints
+- [x] 06-02-PLAN.md — Wave 2: TypeScript types (ConversationSummary, ConversationMessage) + all admin API endpoints
 - [ ] 06-03-PLAN.md — Wave 3: ConversationList + ChatArea + AdminChatLayout components
 - [ ] 06-04-PLAN.md — Wave 4: /chat page + sidebar Chat group (Inbox + Settings)
 - [ ] 06-05-PLAN.md — Wave 5: human browser verification checkpoint
