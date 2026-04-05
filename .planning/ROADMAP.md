@@ -176,6 +176,15 @@ Plans:
 
 **Total: 21/21 requirements mapped.**
 
+### Phase 6: Chat Inbox
+**Goal**: Admins can view, filter, and reply to widget conversations from the dashboard; widget settings move under the Chat section in the sidebar
+**Depends on**: Phase 5
+**Requirements**: TBD
+**Plans**: 0 plans
+
+Plans:
+- [ ] TBD (run /gsd:plan-phase 6 to break down)
+
 ---
 
 *Last updated: 2026-04-04 — Phase 5 Plan 03 complete; roadmap progress synced*

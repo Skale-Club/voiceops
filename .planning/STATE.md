@@ -51,6 +51,10 @@ See `.planning/PROJECT.md` (updated 2026-04-03 after v1.1)
 - 05-02 (2026-04-04): `/widget` is now a first-class dashboard page with active-org scoped server actions, live preview, canonical `https://voiceops.skale.club/widget.js` embed output, and explicit token rotation invalidation copy.
 - 05-03 (2026-04-04): `public/widget.js` now hydrates display name, primary color, and welcome message from `GET /api/widget/[token]/config` after mount with Phase 4 defaults preserved on fetch failure; widget tests now cover hydration success, fallback boot, and invalid-token chat behavior.
 
+### Roadmap Evolution
+
+- Phase 6 added: Chat Inbox — admin inbox to view/filter/reply to widget conversations; widget settings relocated under Chat in sidebar
+
 ## Recent Decisions
 
 - Store widget appearance settings directly on `organizations` instead of introducing a separate widget table.
