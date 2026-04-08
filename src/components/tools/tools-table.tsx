@@ -10,13 +10,31 @@ import {
   type SortingState,
   type ColumnDef,
 } from '@tanstack/react-table'
-import { Wrench, MoreHorizontal } from 'lucide-react'
+import {
+  DndContext,
+  closestCenter,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from '@dnd-kit/core'
+import {
+  SortableContext,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+  arrayMove,
+} from '@dnd-kit/sortable'
+import { CSS } from '@dnd-kit/utilities'
+import { Wrench, MoreHorizontal, FolderPlus, GripVertical } from 'lucide-react'
 import { toast } from 'sonner'
 import type { ToolConfigWithIntegration } from '@/app/(dashboard)/tools/actions'
 import type { IntegrationForDisplay } from '@/app/(dashboard)/integrations/actions'
-import { deleteToolConfig } from '@/app/(dashboard)/tools/actions'
+import { deleteToolConfig, saveFolderOrder } from '@/app/(dashboard)/tools/actions'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
+import { Input } from '@/components/ui/input'
 import { Skeleton } from '@/components/ui/skeleton'
 import {
   Table,
@@ -60,38 +78,135 @@ const ACTION_TYPE_LABELS: Record<string, string> = {
 interface ToolsTableProps {
   toolConfigs: ToolConfigWithIntegration[]
   integrations: IntegrationForDisplay[]
+  folderOrder: string[]
   children?: React.ReactNode
 }
 
-export function ToolsTable({ toolConfigs: initialToolConfigs, integrations, children }: ToolsTableProps) {
+// ─── Sortable folder header row ───────────────────────────────────────────────
+
+function SortableFolderHeader({
+  id,
+  label,
+  count,
+  colSpan,
+}: {
+  id: string
+  label: string
+  count: number
+  colSpan: number
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
+    useSortable({ id })
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : 1,
+  }
+  return (
+    <TableRow ref={setNodeRef} style={style} className="bg-muted/30 hover:bg-muted/40">
+      <TableCell colSpan={colSpan} className="py-1.5 px-4">
+        <div className="flex items-center gap-2">
+          <span
+            {...attributes}
+            {...listeners}
+            className="cursor-grab active:cursor-grabbing text-muted-foreground hover:text-foreground"
+            aria-label="Drag to reorder folder"
+          >
+            <GripVertical className="h-3.5 w-3.5" />
+          </span>
+          <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+            {label}
+          </span>
+          <span className="text-xs text-muted-foreground">({count})</span>
+        </div>
+      </TableCell>
+    </TableRow>
+  )
+}
+
+// ─── Static folder header (for "Other" — not draggable) ───────────────────────
+
+function StaticFolderHeader({ label, count, colSpan }: { label: string; count: number; colSpan: number }) {
+  return (
+    <TableRow className="bg-muted/30 hover:bg-muted/30">
+      <TableCell colSpan={colSpan} className="py-1.5 px-4">
+        <div className="flex items-center gap-2">
+          <span className="w-3.5" />
+          <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+            {label}
+          </span>
+          <span className="text-xs text-muted-foreground">({count})</span>
+        </div>
+      </TableCell>
+    </TableRow>
+  )
+}
+
+// ─── Main component ───────────────────────────────────────────────────────────
+
+export function ToolsTable({
+  toolConfigs: initialToolConfigs,
+  integrations,
+  folderOrder: initialFolderOrder,
+  children,
+}: ToolsTableProps) {
   const [toolConfigs, setToolConfigs] = useState<ToolConfigWithIntegration[]>(initialToolConfigs)
   const [sorting, setSorting] = useState<SortingState>([])
   const [isSheetOpen, setIsSheetOpen] = useState(false)
   const [editingTool, setEditingTool] = useState<ToolConfigWithIntegration | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<ToolConfigWithIntegration | null>(null)
   const [isPending, startTransition] = useTransition()
+  const [addingFolder, setAddingFolder] = useState(false)
+  const [newFolderName, setNewFolderName] = useState('')
+
+  // Canonical ordered folder list: initialFolderOrder first, then any extras from toolConfigs
+  const [orderedFolders, setOrderedFolders] = useState<string[]>(() => {
+    const allToolFolders = [
+      ...new Set(initialToolConfigs.map((t) => t.folder).filter((f): f is string => !!f)),
+    ]
+    const fromOrder = initialFolderOrder.filter(
+      (f) => allToolFolders.includes(f) || initialFolderOrder.includes(f)
+    )
+    const extras = allToolFolders.filter((f) => !fromOrder.includes(f)).sort()
+    return [...fromOrder, ...extras]
+  })
 
   const existingFolders = useMemo(
     () => [...new Set(toolConfigs.map((t) => t.folder).filter((f): f is string => !!f))],
     [toolConfigs]
   )
 
-  // Group tools by folder; null folder → '__other__' at bottom
-  const grouped = useMemo(() => {
-    const map = new Map<string, ToolConfigWithIntegration[]>()
-    for (const tool of toolConfigs) {
-      const key = tool.folder ?? '__other__'
-      if (!map.has(key)) map.set(key, [])
-      map.get(key)!.push(tool)
-    }
-    return [...map.entries()].sort(([a], [b]) => {
-      if (a === '__other__') return 1
-      if (b === '__other__') return -1
-      return a.localeCompare(b)
-    })
-  }, [toolConfigs])
+  // DnD sensors
+  const sensors = useSensors(
+    useSensor(PointerSensor),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
+  )
 
-  const multipleGroups = grouped.length > 1 || (grouped.length === 1 && grouped[0][0] !== '__other__')
+  function handleDragEnd(event: DragEndEvent) {
+    const { active, over } = event
+    if (!over || active.id === over.id) return
+    const oldIndex = orderedFolders.indexOf(active.id as string)
+    const newIndex = orderedFolders.indexOf(over.id as string)
+    if (oldIndex === -1 || newIndex === -1) return
+    const next = arrayMove(orderedFolders, oldIndex, newIndex)
+    setOrderedFolders(next)
+    saveFolderOrder(next)
+  }
+
+  function handleAddFolder(e: React.FormEvent) {
+    e.preventDefault()
+    const name = newFolderName.trim()
+    if (!name || orderedFolders.includes(name)) {
+      setAddingFolder(false)
+      setNewFolderName('')
+      return
+    }
+    const next = [...orderedFolders, name]
+    setOrderedFolders(next)
+    saveFolderOrder(next)
+    setAddingFolder(false)
+    setNewFolderName('')
+  }
 
   function openCreateSheet() {
     setEditingTool(null)
@@ -165,10 +280,9 @@ export function ToolsTable({ toolConfigs: initialToolConfigs, integrations, chil
     {
       id: 'integration',
       header: () => <span className="text-xs font-medium">Integration</span>,
-      cell: ({ row }) => {
-        const tool = row.original
-        return <span className="text-sm">{tool.integrations?.name ?? '—'}</span>
-      },
+      cell: ({ row }) => (
+        <span className="text-sm">{row.original.integrations?.name ?? '—'}</span>
+      ),
     },
     {
       accessorKey: 'fallback_message',
@@ -235,20 +349,90 @@ export function ToolsTable({ toolConfigs: initialToolConfigs, integrations, chil
     getSortedRowModel: getSortedRowModel(),
   })
 
+  // Build a row lookup by tool id for efficient rendering
+  const rowById = useMemo(() => {
+    const map = new Map(table.getRowModel().rows.map((r) => [r.original.id, r]))
+    return map
+  }, [table])
+
+  // Tools grouped by folder key
+  const toolsByFolder = useMemo(() => {
+    const map = new Map<string, ToolConfigWithIntegration[]>()
+    for (const tool of toolConfigs) {
+      const key = tool.folder ?? '__other__'
+      if (!map.has(key)) map.set(key, [])
+      map.get(key)!.push(tool)
+    }
+    return map
+  }, [toolConfigs])
+
+  const otherTools = toolsByFolder.get('__other__') ?? []
+
+  // Show section headers when there's more than one distinct group
+  // (at least one named folder, or named folder + ungrouped)
+  const showHeaders =
+    orderedFolders.length > 1 ||
+    (orderedFolders.length === 1 && otherTools.length > 0) ||
+    (orderedFolders.length === 0 && otherTools.length > 0 && toolConfigs.some((t) => t.folder))
+
   if (isPending && toolConfigs.length === 0) {
     return <ToolsTableSkeleton />
   }
 
   return (
     <>
+      {/* Toolbar */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-4">
         <div>{children}</div>
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-2">
+          {addingFolder ? (
+            <form onSubmit={handleAddFolder} className="flex items-center gap-1">
+              <Input
+                autoFocus
+                value={newFolderName}
+                onChange={(e) => setNewFolderName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Escape') {
+                    setAddingFolder(false)
+                    setNewFolderName('')
+                  }
+                }}
+                placeholder="Folder name"
+                className="h-8 w-40 text-sm"
+              />
+              <Button type="submit" size="sm" variant="outline" className="h-8">
+                Add
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                className="h-8"
+                onClick={() => {
+                  setAddingFolder(false)
+                  setNewFolderName('')
+                }}
+              >
+                Cancel
+              </Button>
+            </form>
+          ) : (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setAddingFolder(true)}
+              aria-label="Add folder"
+              className="h-9 w-9 p-0"
+            >
+              <FolderPlus className="h-4 w-4" />
+            </Button>
+          )}
           <Button onClick={openCreateSheet}>Add Tool</Button>
         </div>
       </div>
 
-      {toolConfigs.length === 0 ? (
+      {/* Empty state */}
+      {toolConfigs.length === 0 && orderedFolders.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-12 gap-4 text-center">
           <Wrench className="h-12 w-12 text-muted-foreground" />
           <div>
@@ -276,20 +460,60 @@ export function ToolsTable({ toolConfigs: initialToolConfigs, integrations, chil
               ))}
             </TableHeader>
             <TableBody>
-              {grouped.map(([folderKey, tools]) => (
+              {/* Named folder groups — sortable */}
+              <DndContext
+                sensors={sensors}
+                collisionDetection={closestCenter}
+                onDragEnd={handleDragEnd}
+              >
+                <SortableContext
+                  items={orderedFolders}
+                  strategy={verticalListSortingStrategy}
+                >
+                  {orderedFolders.map((folderName) => {
+                    const tools = toolsByFolder.get(folderName) ?? []
+                    return (
+                      <>
+                        {showHeaders && (
+                          <SortableFolderHeader
+                            key={`header-${folderName}`}
+                            id={folderName}
+                            label={folderName}
+                            count={tools.length}
+                            colSpan={columns.length}
+                          />
+                        )}
+                        {tools.map((tool) => {
+                          const row = rowById.get(tool.id)
+                          if (!row) return null
+                          return (
+                            <TableRow key={row.id}>
+                              {row.getVisibleCells().map((cell) => (
+                                <TableCell key={cell.id}>
+                                  {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                                </TableCell>
+                              ))}
+                            </TableRow>
+                          )
+                        })}
+                      </>
+                    )
+                  })}
+                </SortableContext>
+              </DndContext>
+
+              {/* "Other" group — not sortable, always last */}
+              {otherTools.length > 0 && (
                 <>
-                  {multipleGroups && (
-                    <TableRow key={`group-${folderKey}`} className="bg-muted/30 hover:bg-muted/30">
-                      <TableCell colSpan={columns.length} className="py-1.5 px-4">
-                        <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-                          {folderKey === '__other__' ? 'Other' : folderKey}
-                        </span>
-                        <span className="ml-2 text-xs text-muted-foreground">({tools.length})</span>
-                      </TableCell>
-                    </TableRow>
+                  {showHeaders && (
+                    <StaticFolderHeader
+                      label="Other"
+                      count={otherTools.length}
+                      colSpan={columns.length}
+                    />
                   )}
-                  {tools.map((tool) => {
-                    const row = table.getRowModel().rows.find((r) => r.original.id === tool.id)
+                  {otherTools.map((tool) => {
+                    const row = rowById.get(tool.id)
                     if (!row) return null
                     return (
                       <TableRow key={row.id}>
@@ -302,11 +526,12 @@ export function ToolsTable({ toolConfigs: initialToolConfigs, integrations, chil
                     )
                   })}
                 </>
-              ))}
-              {table.getRowModel().rows.length === 0 && (
+              )}
+
+              {toolConfigs.length === 0 && orderedFolders.length > 0 && (
                 <TableRow>
-                  <TableCell colSpan={columns.length} className="h-24 text-center">
-                    No results.
+                  <TableCell colSpan={columns.length} className="h-16 text-center text-sm text-muted-foreground">
+                    No tools yet. Add a tool and assign it to a folder.
                   </TableCell>
                 </TableRow>
               )}

@@ -17,6 +17,9 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.82.0",
+    "@dnd-kit/core": "^6.3.1",
+    "@dnd-kit/sortable": "^10.0.0",
+    "@dnd-kit/utilities": "^3.2.2",
     "@hookform/resolvers": "^5.2.2",
     "@langchain/community": "^1.1.27",
     "@langchain/core": "^1.1.39",

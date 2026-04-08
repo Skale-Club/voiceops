@@ -103,6 +103,29 @@ export async function updateToolConfig(
   revalidatePath('/tools')
 }
 
+export async function getFolderOrder(): Promise<string[]> {
+  const supabase = await createClient()
+  const { data } = await supabase
+    .from('organizations')
+    .select('tool_folder_order')
+    .single()
+  return data?.tool_folder_order ?? []
+}
+
+export async function saveFolderOrder(order: string[]): Promise<{ error?: string } | void> {
+  const user = await getUser()
+  if (!user) return { error: 'Not authenticated.' }
+  const supabase = await createClient()
+  const { data: orgId } = await supabase.rpc('get_current_org_id')
+  if (!orgId) return { error: 'No organization found.' }
+  const { error } = await supabase
+    .from('organizations')
+    .update({ tool_folder_order: order })
+    .eq('id', orgId)
+  if (error) return { error: error.message }
+  revalidatePath('/tools')
+}
+
 export async function getToolConfigs(): Promise<ToolConfigWithIntegration[]> {
   const supabase = await createClient()
 

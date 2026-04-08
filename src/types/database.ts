@@ -31,6 +31,7 @@ export interface Database {
           widget_avatar_url: string | null
           widget_primary_color: string | null
           widget_welcome_message: string | null
+          tool_folder_order: string[]
           created_at: string
           updated_at: string
         }
@@ -44,6 +45,7 @@ export interface Database {
           widget_avatar_url?: string | null
           widget_primary_color?: string | null
           widget_welcome_message?: string | null
+          tool_folder_order?: string[]
           created_at?: string
           updated_at?: string
         }
@@ -57,6 +59,7 @@ export interface Database {
           widget_avatar_url?: string | null
           widget_primary_color?: string | null
           widget_welcome_message?: string | null
+          tool_folder_order?: string[]
           updated_at?: string
         }
         Relationships: []
