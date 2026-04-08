@@ -1,4 +1,4 @@
-# VoiceOps — Code Conventions & Patterns
+# Operator — Code Conventions & Patterns
 
 **Last updated:** 2026-04-03
 

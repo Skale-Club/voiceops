@@ -122,7 +122,7 @@ export default async function ToolDetailPage({
         <CardHeader className="pb-3">
           <CardTitle className="text-base">Configuration</CardTitle>
           <CardDescription>
-            This is the Opps mapping used when Vapi calls this tool name.
+            This is the platform mapping used when Vapi calls this tool name.
           </CardDescription>
         </CardHeader>
         <CardContent>

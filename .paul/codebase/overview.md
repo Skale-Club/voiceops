@@ -1,10 +1,10 @@
-# VoiceOps — Codebase Overview
+# Operator — Codebase Overview
 
 **Last updated:** 2026-04-03
 
 ## What It Is
 
-VoiceOps is a **multi-tenant AI voice automation platform** that lets businesses manage Vapi-powered AI phone assistants. Organizations can configure assistants, build knowledge bases, run outbound call campaigns, and integrate with CRMs like GoHighLevel — all through a Next.js 15 web dashboard.
+Operator is a **multi-tenant AI voice automation platform** that lets businesses manage Vapi-powered AI phone assistants. Organizations can configure assistants, build knowledge bases, run outbound call campaigns, and integrate with CRMs like GoHighLevel — all through a Next.js 15 web dashboard.
 
 ## Core Value Proposition
 

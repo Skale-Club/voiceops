@@ -1,4 +1,4 @@
-# VoiceOps — Testing Strategy
+# Operator — Testing Strategy
 
 **Last updated:** 2026-04-03
 

@@ -1,11 +1,11 @@
-# VoiceOps — Architecture & Structure
+# Operator — Architecture & Structure
 
 **Last updated:** 2026-04-03
 
 ## Directory Map
 
 ```
-voiceops/
+operator/
 ├── src/
 │   ├── app/
 │   │   ├── (auth)/login/          # Login page

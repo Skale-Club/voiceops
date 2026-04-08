@@ -1,4 +1,4 @@
-# VoiceOps — Concerns & Technical Debt
+# Operator — Concerns & Technical Debt
 
 **Last updated:** 2026-04-03
 

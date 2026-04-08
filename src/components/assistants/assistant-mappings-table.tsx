@@ -229,7 +229,7 @@ export function AssistantMappingsTable({ mappings: initialMappings }: AssistantM
           <Bot className="h-12 w-12 text-muted-foreground mb-4" />
           <h3 className="text-base font-semibold mb-1">No assistants linked</h3>
           <p className="text-sm text-muted-foreground mb-4">
-            Add a Vapi assistant with a friendly name so webhook routing stays clear inside Opps.
+            Add a Vapi assistant with a friendly name so webhook routing stays clear.
           </p>
           <Button onClick={() => setAddDialogOpen(true)}>
             <Plus className="h-4 w-4 mr-2" />

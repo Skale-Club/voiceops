@@ -1,28 +1,5 @@
-import { createClient, getUser } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
-import { AssistantMappingsTable } from '@/components/assistants/assistant-mappings-table'
 
-export default async function AssistantsPage() {
-  const user = await getUser()
-  if (!user) redirect('/login')
-  const supabase = await createClient()
-
-  const { data: mappings, error } = await supabase
-    .from('assistant_mappings')
-    .select('*')
-    .order('created_at', { ascending: false })
-
-  if (error) throw new Error(error.message)
-
-  return (
-    <div className="p-6 space-y-5">
-      <div>
-        <h1 className="text-lg font-semibold">Assistants</h1>
-        <p className="text-sm text-muted-foreground mt-0.5">
-          Link Vapi assistants to this organization and keep a friendly name your team can recognize.
-        </p>
-      </div>
-      <AssistantMappingsTable mappings={mappings ?? []} />
-    </div>
-  )
+export default function AssistantsPage() {
+  redirect('/phone?tab=assistants')
 }

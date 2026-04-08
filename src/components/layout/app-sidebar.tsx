@@ -3,12 +3,10 @@
 import { usePathname, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import {
-  Bot,
   Zap,
   Plug2,
-  PhoneCall,
-  BookOpen,
   Phone,
+  BookOpen,
   MessageSquare,
   ChevronUp,
   LogOut,
@@ -18,6 +16,7 @@ import {
 import type { User } from '@supabase/supabase-js'
 
 import { createClient } from '@/lib/supabase/client'
+import { APP_NAME } from '@/lib/config'
 import {
   Sidebar,
   SidebarContent,
@@ -40,11 +39,9 @@ import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 
 const navItems = [
   { icon: LayoutDashboard, label: 'Dashboard', href: '/', active: true },
-  { icon: PhoneCall, label: 'Calls', href: '/calls', active: true },
-  { icon: Phone, label: 'Campaigns', href: '/outbound', active: true },
+  { icon: Phone, label: 'Phone', href: '/phone', active: true },
   { icon: Zap, label: 'Tools', href: '/tools', active: true },
   { icon: BookOpen, label: 'Knowledge', href: '/knowledge', active: true },
-  { icon: Bot, label: 'Assistants', href: '/assistants', active: true },
   { icon: Plug2, label: 'Integrations', href: '/integrations', active: true },
   { icon: MessageSquare, label: 'Chat', href: '/chat', active: true },
 ]
@@ -94,7 +91,7 @@ export function AppSidebar({ user }: AppSidebarProps) {
     <Sidebar>
       <SidebarHeader className="px-4 py-4">
         <div className="flex items-center gap-2">
-          <span className="text-[14px] font-semibold tracking-tight">Operator</span>
+          <span className="text-[14px] font-semibold tracking-tight">{APP_NAME}</span>
           <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-primary/10 text-primary leading-tight">
             beta
           </span>
@@ -108,10 +105,16 @@ export function AppSidebar({ user }: AppSidebarProps) {
               {navItems.map((item) => {
                 const Icon = item.icon
                 const isChatItem = item.href === '/chat'
+                const isPhoneItem = item.href === '/phone'
                 const isCurrentPage =
                   pathname === item.href ||
                   pathname.startsWith(item.href + '/') ||
-                  (isChatItem && pathname === '/widget')
+                  (isChatItem && pathname === '/widget') ||
+                  (isPhoneItem && (
+                    pathname.startsWith('/calls') ||
+                    pathname.startsWith('/outbound') ||
+                    pathname.startsWith('/assistants')
+                  ))
 
                 if (!item.active) {
                   return (

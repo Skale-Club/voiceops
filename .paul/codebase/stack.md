@@ -1,4 +1,4 @@
-# VoiceOps — Technology Stack & Integrations
+# Operator — Technology Stack & Integrations
 
 **Last updated:** 2026-04-03
 

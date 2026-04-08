@@ -1,4 +1,4 @@
-# VoiceOps — External Integrations
+# Operator — External Integrations
 
 **Last updated:** 2026-04-03
 
@@ -24,7 +24,7 @@ integrations table
 
 **Auth**: `VAPI_API_KEY` env var (server-side)
 
-**Inbound webhooks** (VoiceOps receives):
+**Inbound webhooks** (Operator receives):
 
 | Endpoint | Event | Runtime |
 |----------|-------|---------|
@@ -33,13 +33,13 @@ integrations table
 | `POST /api/vapi/campaigns` | Campaign call completion | Edge |
 | `POST /api/vapi/phone-numbers` | Phone number events | Edge |
 
-**Outbound calls** (VoiceOps sends):
+**Outbound calls** (Operator sends):
 ```
 POST https://api.vapi.ai/call
   { assistantId, phoneNumberId, customer: { number, name } }
 ```
 
-**Key constraint**: Tool call webhooks have a **500ms total budget** — VoiceOps must respond within this window including DB lookups, decryption, external API calls, and response formation.
+**Key constraint**: Tool call webhooks have a **500ms total budget** — Operator must respond within this window including DB lookups, decryption, external API calls, and response formation.
 
 **Key files**: `src/app/api/vapi/`, `src/lib/campaigns/outbound.ts`, `src/types/vapi.ts`
 

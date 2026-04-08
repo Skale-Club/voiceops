@@ -137,7 +137,7 @@ export function AssistantMappingForm({
                     <Input placeholder="paste assistant ID from Vapi dashboard" {...field} />
                   </FormControl>
                   <FormDescription>
-                    This ID is used for routing. The assistant name above is what people should read in Opps.
+                    This ID is used for routing. The assistant name above is what people should read in the platform.
                   </FormDescription>
                   <FormMessage />
                 </FormItem>

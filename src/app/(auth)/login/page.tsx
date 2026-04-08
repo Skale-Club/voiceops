@@ -8,6 +8,7 @@ import { useRouter } from 'next/navigation'
 import { Eye, EyeOff, Loader2 } from 'lucide-react'
 
 import { createClient } from '@/lib/supabase/client'
+import { APP_NAME } from '@/lib/config'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import {
@@ -85,7 +86,7 @@ export default function LoginPage() {
             className="text-[28px] font-semibold leading-[1.1] tracking-tight"
             style={{ lineHeight: '1.1' }}
           >
-            Operator
+            {APP_NAME}
           </h1>
           <p className="text-[14px] font-normal text-muted-foreground mt-1">
             AI Operations Platform

@@ -1,4 +1,4 @@
-# VoiceOps — Database Schema
+# Operator — Database Schema
 
 **Last updated:** 2026-04-03  
 **Database**: Supabase (PostgreSQL 15 + pgvector)  
