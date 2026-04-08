@@ -44,7 +44,7 @@ export async function createCampaign(
     .single()
 
   if (error) throw new Error(error.message)
-  revalidatePath('/outbound')
+  revalidatePath('/phone')
   return { id: data.id }
 }
 
@@ -191,5 +191,5 @@ export async function deleteCampaign(campaignId: string): Promise<void> {
     .in('status', ['draft', 'completed', 'stopped']) // cannot delete active campaigns
 
   if (error) throw new Error(error.message)
-  revalidatePath('/outbound')
+  revalidatePath('/phone')
 }

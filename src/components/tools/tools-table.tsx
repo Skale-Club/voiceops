@@ -1,7 +1,8 @@
 'use client'
 
-import { useState, useTransition, useMemo } from 'react'
+import { useState, useTransition, useMemo, Fragment } from 'react'
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import {
   useReactTable,
   getCoreRowModel,
@@ -156,6 +157,7 @@ export function ToolsTable({
   const [editingTool, setEditingTool] = useState<ToolConfigWithIntegration | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<ToolConfigWithIntegration | null>(null)
   const [isPending, startTransition] = useTransition()
+  const router = useRouter()
   const [addingFolder, setAddingFolder] = useState(false)
   const [newFolderName, setNewFolderName] = useState('')
 
@@ -221,7 +223,7 @@ export function ToolsTable({
   function handleSheetSuccess() {
     setIsSheetOpen(false)
     setEditingTool(null)
-    window.location.reload()
+    router.refresh()
   }
 
   function handleDeleteConfirm() {
@@ -473,10 +475,9 @@ export function ToolsTable({
                   {orderedFolders.map((folderName) => {
                     const tools = toolsByFolder.get(folderName) ?? []
                     return (
-                      <>
+                      <Fragment key={`folder-${folderName}`}>
                         {showHeaders && (
                           <SortableFolderHeader
-                            key={`header-${folderName}`}
                             id={folderName}
                             label={folderName}
                             count={tools.length}
@@ -496,7 +497,7 @@ export function ToolsTable({
                             </TableRow>
                           )
                         })}
-                      </>
+                      </Fragment>
                     )
                   })}
                 </SortableContext>

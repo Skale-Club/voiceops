@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import {
   useReactTable,
   getCoreRowModel,
@@ -66,6 +67,7 @@ interface AssistantMappingsTableProps {
 }
 
 export function AssistantMappingsTable({ mappings: initialMappings }: AssistantMappingsTableProps) {
+  const router = useRouter()
   const [optimisticMappings, setOptimisticMappings] = useState(initialMappings)
   const [addDialogOpen, setAddDialogOpen] = useState(false)
   const [editMapping, setEditMapping] = useState<AssistantMapping | null>(null)
@@ -271,7 +273,7 @@ export function AssistantMappingsTable({ mappings: initialMappings }: AssistantM
         mode="create"
         open={addDialogOpen}
         onOpenChange={setAddDialogOpen}
-        onSuccess={() => window.location.reload()}
+        onSuccess={() => router.refresh()}
       />
 
       {editMapping && (
@@ -282,7 +284,7 @@ export function AssistantMappingsTable({ mappings: initialMappings }: AssistantM
           onOpenChange={(open) => {
             if (!open) setEditMapping(null)
           }}
-          onSuccess={() => setEditMapping(null)}
+          onSuccess={() => { setEditMapping(null); router.refresh() }}
         />
       )}
 

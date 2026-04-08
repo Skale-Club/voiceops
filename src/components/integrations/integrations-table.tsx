@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { ChevronRight } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Sheet, SheetContent } from '@/components/ui/sheet'
@@ -24,6 +25,7 @@ interface IntegrationsTableProps {
 }
 
 export function IntegrationsTable({ integrations }: IntegrationsTableProps) {
+  const router = useRouter()
   const [selectedProvider, setSelectedProvider] = useState<Provider | null>(null)
   const [isSheetOpen, setIsSheetOpen] = useState(false)
 
@@ -41,7 +43,7 @@ export function IntegrationsTable({ integrations }: IntegrationsTableProps) {
 
   function handleSuccess() {
     handleSheetClose()
-    window.location.reload()
+    router.refresh()
   }
 
   const selectedIntegration = selectedProvider ? connectedMap.get(selectedProvider) : undefined

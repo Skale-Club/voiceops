@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useTransition } from 'react'
+import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import {
   AlertDialog,
@@ -53,13 +54,14 @@ interface SourceRowProps {
 }
 
 function SourceRow({ source }: SourceRowProps) {
+  const router = useRouter()
   const [isPending, startTransition] = useTransition()
   const [showConfirm, setShowConfirm] = useState(false)
 
   function handleDeleteConfirmed() {
     startTransition(async () => {
       await deleteDocument(source.id)
-      window.location.reload()
+      router.refresh()
     })
   }
 

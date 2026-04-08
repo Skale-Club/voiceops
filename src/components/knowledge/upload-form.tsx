@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useTransition } from 'react'
+import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -28,6 +29,7 @@ export function UploadForm({ disabled = false, fileCount = 0, urlCount = 0 }: Up
   const [urlStatus, setUrlStatus] = useState<UploadStatus>('idle')
   const [fileError, setFileError] = useState<string | null>(null)
   const [urlError, setUrlError] = useState<string | null>(null)
+  const router = useRouter()
   const [isPendingFile, startFileTransition] = useTransition()
   const [isPendingUrl, startUrlTransition] = useTransition()
 
@@ -61,7 +63,7 @@ export function UploadForm({ disabled = false, fileCount = 0, urlCount = 0 }: Up
         await insertDocument(path, name, getSourceType(file.type, file.name))
         setFileStatus('success')
         form.reset()
-        window.location.reload()
+        router.refresh()
       })
     } catch (err) {
       setFileStatus('error')
@@ -84,7 +86,7 @@ export function UploadForm({ disabled = false, fileCount = 0, urlCount = 0 }: Up
         await addUrlDocument(url)
         setUrlStatus('success')
         form.reset()
-        window.location.reload()
+        router.refresh()
       } catch (err) {
         setUrlStatus('error')
         setUrlError(err instanceof Error ? err.message : 'Failed to add URL')

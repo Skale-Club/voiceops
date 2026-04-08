@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useTransition } from 'react'
+import { useRouter } from 'next/navigation'
 import {
   useReactTable,
   getCoreRowModel,
@@ -50,6 +51,7 @@ interface OrganizationsTableProps {
 }
 
 export function OrganizationsTable({ organizations: initialOrganizations }: OrganizationsTableProps) {
+  const router = useRouter()
   const [organizations, setOrganizations] = useState<Organization[]>(initialOrganizations)
   const [sorting, setSorting] = useState<SortingState>([])
   const [isSheetOpen, setIsSheetOpen] = useState(false)
@@ -69,8 +71,7 @@ export function OrganizationsTable({ organizations: initialOrganizations }: Orga
   function handleSheetSuccess() {
     setIsSheetOpen(false)
     setEditingOrg(null)
-    // Page will be revalidated by server action — force a reload to pick up changes
-    window.location.reload()
+    router.refresh()
   }
 
   function handleToggleStatus(org: Organization) {
