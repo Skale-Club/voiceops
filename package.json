@@ -8,6 +8,8 @@
     "build": "npm run build:widget && next build",
     "start": "next start",
     "lint": "next lint",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "vercel:pull": "vercel pull --yes --environment preview --scope skaleclub",
     "vercel:build": "vercel build --yes --scope skaleclub",
     "vercel:build:prod": "vercel build --prod --yes --scope skaleclub",

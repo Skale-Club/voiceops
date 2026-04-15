@@ -8,6 +8,7 @@ import { after } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import type { Database } from '@/types/database'
 import { mapEndedReasonToStatus } from '@/lib/campaigns/engine'
+import { verifyVapiSecret } from '@/lib/vapi/verify-signature'
 
 export const runtime = 'nodejs'
 
@@ -61,6 +62,11 @@ async function updateContactStatus(
 
 export async function POST(request: Request): Promise<Response> {
   try {
+    if (!verifyVapiSecret(request)) {
+      console.warn('[vapi/campaigns] Rejected request with invalid or missing X-Vapi-Secret')
+      return new Response(null, { status: 200 })
+    }
+
     let body: unknown
     try {
       body = await request.json()

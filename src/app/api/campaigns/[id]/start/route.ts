@@ -4,7 +4,7 @@
 // Called from UI via fetch() in client component.
 
 import { createClient as createServiceClient } from '@supabase/supabase-js'
-import { createClient } from '@/lib/supabase/server'
+import { createClient, getUser } from '@/lib/supabase/server'
 import { startCampaignBatch } from '@/lib/campaigns/engine'
 import { getProviderKey } from '@/lib/integrations/get-provider-key'
 import type { Database } from '@/types/database'
@@ -13,10 +13,9 @@ export async function POST(
   _request: Request,
   { params }: { params: Promise<{ id: string }> }
 ): Promise<Response> {
-  // Verify auth
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
+  const user = await getUser()
   if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 })
+  const supabase = await createClient()
 
   // Get user's org — scope all campaign operations to it
   const { data: member } = await supabase

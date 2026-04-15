@@ -12,6 +12,7 @@ import { resolveTool } from '@/lib/action-engine/resolve-tool'
 import { executeAction } from '@/lib/action-engine/execute-action'
 import { logAction } from '@/lib/action-engine/log-action'
 import { decrypt } from '@/lib/crypto'
+import { verifyVapiSecret } from '@/lib/vapi/verify-signature'
 
 export const runtime = 'nodejs'
 
@@ -20,6 +21,11 @@ export async function POST(request: Request): Promise<Response> {
 
   // Outer catch: prevents ANY uncaught error from returning non-200 to Vapi
   try {
+    if (!verifyVapiSecret(request)) {
+      console.warn('[vapi/tools] Rejected request with invalid or missing X-Vapi-Secret')
+      return Response.json({ results: [] }, { status: 200 })
+    }
+
     // 1. Parse + validate Vapi payload
     let body: unknown
     try {

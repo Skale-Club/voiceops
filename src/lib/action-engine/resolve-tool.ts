@@ -30,14 +30,16 @@ export async function resolveTool(
   toolName: string,
   supabase: SupabaseClient<Database>
 ): Promise<ToolConfigWithIntegration | null> {
+  // !inner forces the join to be non-optional, so `integrations` is a single object
+  // rather than `object | null` in the inferred response type.
   const { data, error } = await supabase
     .from('tool_configs')
-    .select('*, integrations(*)')
+    .select('*, integrations!inner(*)')
     .eq('organization_id', orgId)
     .eq('tool_name', toolName)
     .eq('is_active', true)
-    .single()
+    .single<ToolConfigWithIntegration>()
 
-  if (error || !data || !data.integrations) return null
-  return data as unknown as ToolConfigWithIntegration
+  if (error || !data?.integrations?.encrypted_api_key) return null
+  return data
 }

@@ -31,9 +31,10 @@ export async function queryKnowledge(
       model: 'text-embedding-3-small',
     })
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    // LangChain's SupabaseVectorStore types against an untyped SupabaseClient,
+    // but it only uses .from()/.rpc() at runtime — both work with our typed client.
     const vectorStore = new SupabaseVectorStore(embeddings, {
-      client: supabase as any,
+      client: supabase as unknown as SupabaseClient,
       tableName: 'documents',
       queryName: 'match_documents',
     })

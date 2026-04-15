@@ -5,11 +5,17 @@
 import { createClient } from '@supabase/supabase-js'
 import type { Database } from '@/types/database'
 import { VapiEndOfCallMessageSchema } from '@/types/vapi'
+import { verifyVapiSecret } from '@/lib/vapi/verify-signature'
 
 export const runtime = 'nodejs'
 
 export async function POST(request: Request): Promise<Response> {
   try {
+    if (!verifyVapiSecret(request)) {
+      console.warn('[vapi/calls] Rejected request with invalid or missing X-Vapi-Secret')
+      return new Response(null, { status: 200 })
+    }
+
     let body: unknown
     try {
       body = await request.json()

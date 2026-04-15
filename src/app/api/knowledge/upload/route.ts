@@ -3,7 +3,7 @@
 // DOES NOT run embedding inline — returns immediately with storagePath.
 // Caller (client component) then invokes insertDocument server action.
 
-import { createClient as createServerClient } from '@/lib/supabase/server'
+import { createClient as createServerClient, getUser } from '@/lib/supabase/server'
 import { createClient } from '@supabase/supabase-js'
 import type { Database } from '@/types/database'
 import { randomUUID } from 'crypto'
@@ -19,14 +19,12 @@ const ALLOWED_MIME_TYPES = new Set([
 ])
 
 export async function POST(request: Request): Promise<Response> {
-  // Auth check: must be logged in
-  const supabaseUser = await createServerClient()
-  const { data: { user } } = await supabaseUser.auth.getUser()
+  const user = await getUser()
   if (!user) {
     return Response.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
-  // Get org_id from org_members
+  const supabaseUser = await createServerClient()
   const { data: membership } = await supabaseUser
     .from('org_members')
     .select('organization_id')

@@ -17,9 +17,9 @@ function generateSlug(name: string): string {
 }
 
 export async function getUserOrgs(): Promise<{ id: string; name: string }[]> {
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
+  const user = await getUser()
   if (!user) return []
+  const supabase = await createClient()
 
   const { data } = await supabase
     .from('org_members')

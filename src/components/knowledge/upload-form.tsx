@@ -39,7 +39,8 @@ export function UploadForm({ disabled = false, fileCount = 0, urlCount = 0 }: Up
   async function handleFileUpload(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
     const form = e.currentTarget
-    const fileInput = form.elements.namedItem('file') as HTMLInputElement
+    const fileInput = form.elements.namedItem('file')
+    if (!(fileInput instanceof HTMLInputElement)) return
     const file = fileInput.files?.[0]
     if (!file) return
 
@@ -74,7 +75,8 @@ export function UploadForm({ disabled = false, fileCount = 0, urlCount = 0 }: Up
   async function handleUrlSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
     const form = e.currentTarget
-    const urlInput = form.elements.namedItem('url') as HTMLInputElement
+    const urlInput = form.elements.namedItem('url')
+    if (!(urlInput instanceof HTMLInputElement)) return
     const url = urlInput.value.trim()
     if (!url) return
 

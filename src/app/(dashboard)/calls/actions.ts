@@ -77,35 +77,64 @@ export async function getDashboardMetrics(): Promise<{
   const supabase = await createClient()
   const now = new Date()
   const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString()
-  const weekStart = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString()
+  const weekStartTs = now.getTime() - 7 * 24 * 60 * 60 * 1000
+  const weekStart = new Date(weekStartTs).toISOString()
   const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString()
   const dayAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString()
+  // Limits trend payload; displayed counts come from head:true counts below (accurate).
+  const TREND_FETCH_LIMIT = 5000
+  const rangeStart = monthStart < weekStart ? monthStart : weekStart
 
-  const [todayRes, weekRes, monthRes, successRateRes, recentCallsRes, recentFailuresRes] =
-    await Promise.all([
-      supabase.from('calls').select('created_at').gte('created_at', todayStart),
-      supabase.from('calls').select('created_at').gte('created_at', weekStart),
-      supabase.from('calls').select('created_at').gte('created_at', monthStart),
-      supabase.from('action_logs').select('status').gte('created_at', monthStart),
-      supabase.from('calls').select('*').order('created_at', { ascending: false }).limit(10),
-      supabase
-        .from('action_logs')
-        .select('*')
-        .in('status', ['error', 'timeout'])
-        .gte('created_at', dayAgo)
-        .order('created_at', { ascending: false })
-        .limit(20),
-    ])
+  const [
+    trendRes,
+    monthCountRes,
+    weekCountRes,
+    todayCountRes,
+    actionLogsTotalRes,
+    actionLogsSuccessRes,
+    recentCallsRes,
+    recentFailuresRes,
+  ] = await Promise.all([
+    supabase
+      .from('calls')
+      .select('created_at')
+      .gte('created_at', rangeStart)
+      .order('created_at', { ascending: false })
+      .limit(TREND_FETCH_LIMIT),
+    supabase.from('calls').select('*', { count: 'exact', head: true }).gte('created_at', monthStart),
+    supabase.from('calls').select('*', { count: 'exact', head: true }).gte('created_at', weekStart),
+    supabase.from('calls').select('*', { count: 'exact', head: true }).gte('created_at', todayStart),
+    supabase
+      .from('action_logs')
+      .select('*', { count: 'exact', head: true })
+      .gte('created_at', monthStart),
+    supabase
+      .from('action_logs')
+      .select('*', { count: 'exact', head: true })
+      .gte('created_at', monthStart)
+      .eq('status', 'success'),
+    supabase.from('calls').select('*').order('created_at', { ascending: false }).limit(10),
+    supabase
+      .from('action_logs')
+      .select('*')
+      .in('status', ['error', 'timeout'])
+      .gte('created_at', dayAgo)
+      .order('created_at', { ascending: false })
+      .limit(20),
+  ])
 
-  const todayCalls = todayRes.data ?? []
-  const weekCalls = weekRes.data ?? []
-  const monthCalls = monthRes.data ?? []
+  const trendRows = trendRes.data ?? []
+  const monthCalls = trendRows.filter((c) => c.created_at >= monthStart)
+  const weekCalls = trendRows.filter((c) => new Date(c.created_at).getTime() >= weekStartTs)
+  const todayCalls = monthCalls.filter((c) => c.created_at >= todayStart)
 
-  const logs = successRateRes.data ?? []
+  const totalLogs = actionLogsTotalRes.count ?? 0
+  const successLogs = actionLogsSuccessRes.count ?? 0
+  const monthCount = monthCountRes.count ?? 0
   const successRate =
-    logs.length === 0 || monthCalls.length === 0
+    totalLogs === 0 || monthCount === 0
       ? null
-      : Math.round((logs.filter((l) => l.status === 'success').length * 100) / logs.length)
+      : Math.round((successLogs * 100) / totalLogs)
 
   // Today buckets (24 hours)
   const todayTrend = Array.from({ length: 24 }, (_, i) => ({
@@ -148,9 +177,9 @@ export async function getDashboardMetrics(): Promise<{
   })
 
   return {
-    callsToday: todayCalls.length,
-    callsWeek: weekCalls.length,
-    callsMonth: monthCalls.length,
+    callsToday: todayCountRes.count ?? 0,
+    callsWeek: weekCountRes.count ?? 0,
+    callsMonth: monthCount,
     toolSuccessRate: successRate,
     recentCalls: recentCallsRes.data ?? [],
     recentFailures: recentFailuresRes.data ?? [],
