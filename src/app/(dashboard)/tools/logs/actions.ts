@@ -100,23 +100,44 @@ export async function getToolOptions(): Promise<Array<{ id: string; tool_name: s
   return (data ?? []) as Array<{ id: string; tool_name: string }>
 }
 
+// Average is computed over the most recent AVG_SAMPLE_SIZE executions so the
+// query is bounded as the log table grows; counts stay exact via head:true.
+const AVG_SAMPLE_SIZE = 500
+
 export async function getLogStats(toolConfigId: string): Promise<{
   total: number
   successCount: number
   averageMs: number | null
 }> {
   const supabase = await createClient()
-  const { data } = await supabase
-    .from('action_logs')
-    .select('status, execution_ms')
-    .eq('tool_config_id', toolConfigId)
-  const logs = data ?? []
+
+  const [totalRes, successRes, recentRes] = await Promise.all([
+    supabase
+      .from('action_logs')
+      .select('*', { count: 'exact', head: true })
+      .eq('tool_config_id', toolConfigId),
+    supabase
+      .from('action_logs')
+      .select('*', { count: 'exact', head: true })
+      .eq('tool_config_id', toolConfigId)
+      .eq('status', 'success'),
+    supabase
+      .from('action_logs')
+      .select('execution_ms')
+      .eq('tool_config_id', toolConfigId)
+      .order('created_at', { ascending: false })
+      .limit(AVG_SAMPLE_SIZE),
+  ])
+
+  const recent = recentRes.data ?? []
+  const averageMs =
+    recent.length > 0
+      ? Math.round(recent.reduce((s, l) => s + l.execution_ms, 0) / recent.length)
+      : null
+
   return {
-    total: logs.length,
-    successCount: logs.filter((l) => l.status === 'success').length,
-    averageMs:
-      logs.length > 0
-        ? Math.round(logs.reduce((s, l) => s + l.execution_ms, 0) / logs.length)
-        : null,
+    total: totalRes.count ?? 0,
+    successCount: successRes.count ?? 0,
+    averageMs,
   }
 }
