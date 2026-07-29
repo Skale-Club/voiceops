@@ -380,6 +380,12 @@ function PreviewCarousel({
     <div className="relative">
       <button type="button" onClick={() => scrollDir(-1)} className={cn(btnClass, 'left-1.5')} aria-label="Previous">‹</button>
       <button type="button" onClick={() => scrollDir(1)} className={cn(btnClass, 'right-1.5')} aria-label="Next">›</button>
+      {/* pb-2 (8px) is enough HERE because PreviewCard uses `shadow-sm` (~3px
+          reach). The live widget's card uses --orw-shadow (0 10px 30px, 40px
+          reach) and therefore carries 56px of padding with a -48px pull-back —
+          see .orw-carousel-viewport in src/reviews-widget/index.ts. The two are
+          in lock-step on the visible card->CTA gap (32px), NOT on this number.
+          If you change the shadow on either side, redo that arithmetic. */}
       <div
         ref={viewportRef}
         className="overflow-x-auto pb-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden cursor-grab active:cursor-grabbing select-none"

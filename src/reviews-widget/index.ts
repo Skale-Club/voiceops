@@ -159,14 +159,37 @@ const CSS = `
 .orw-grid { display: grid; gap: 16px; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); }
 .orw-list { display: flex; flex-direction: column; gap: 14px; }
 .orw-carousel-wrap { position: relative; }
+/* Pull the footer back up by exactly the shadow allowance added below, so the
+   card->CTA gap stays 32px. Scoped with :has() on purpose: with no footer there
+   is nothing to pull up, and the document must instead END 48px lower so the
+   shadow still has somewhere to paint inside the iframe. */
+.orw-carousel-wrap:has(+ .orw-footer-cta) { margin-bottom: -48px; }
 .orw-carousel-viewport {
   overflow-x: auto; scroll-snap-type: x mandatory; scrollbar-width: none;
   -webkit-overflow-scrolling: touch; cursor: grab;
-  /* 16px gutter on left so the first card never touches the edge;
-     8px bottom to EXACTLY match the dashboard preview's pb-2 (8px) — the gap
-     from the cards to the footer CTA is then 8 + 24 (footer margin) = 32px in
-     both the live widget and the preview. Keep these two in lock-step. */
-  padding: 0 0 8px 16px;
+  /* This scroller CLIPS ON BOTH AXES: declaring overflow-x as auto makes
+     overflow-y compute to auto as well (CSS Overflow — a 'visible' axis becomes
+     'auto' when the other axis is not visible). So the card shadow only survives
+     if it fits INSIDE this box.
+
+     --orw-shadow reaches 40px below a card (0 10px 30px) and :hover reaches 56px
+     (0 16px 40px), but this padding used to be 8px — the shadow was sliced off
+     flat. Now: 8px of real gap + 48px of shadow room = 56px, with an equal -48px
+     pulled back on .orw-carousel-wrap above.
+
+     PARITY WITH THE DASHBOARD PREVIEW IS ON THE GAP, NOT ON THIS NUMBER. The
+     card->CTA gap stays 8 + 24 (footer margin) = 32px, matching the preview's
+     pb-2. Do not "resync" this to the preview's 8px — the preview's card uses
+     Tailwind shadow-sm (~3px reach), which fits in 8px; this one does not. That
+     mismatch is what silently clipped the live widget.
+
+     The left gutter stays 16px. The horizontal shadow (30px blur, no x-offset)
+     is still partly clipped and deliberately left alone: .orw-root has no
+     padding, so a negative horizontal margin would push the scroller outside the
+     document and give the iframe a horizontal scrollbar. The left edge already
+     covers 16 of the 30px, and the right edge is where cards scroll out of view,
+     so the visible cost is small — fixing it properly needs root padding. */
+  padding: 0 0 56px 16px;
   scroll-padding-left: 16px;
   user-select: none; -webkit-user-select: none;
 }
@@ -299,7 +322,10 @@ const CSS = `
 .orw-carousel-viewport.orw-auto {
   overflow: hidden;
   cursor: default;
-  padding-bottom: 0;
+  /* Deliberately does NOT reset padding-bottom. It used to zero it, which made
+     the marquee mode clip card shadows even harder than the manual carousel;
+     inheriting the 56px allowance keeps both modes identical (and the -48px pull
+     on .orw-carousel-wrap applies to both). */
 }
 .orw-carousel-viewport.orw-auto .orw-carousel-track {
   display: flex;
