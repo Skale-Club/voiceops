@@ -76,17 +76,20 @@ export async function POST(request: Request): Promise<Response> {
     let errorDetail: string | null = null
 
     try {
-      const apiKey = await decrypt(toolConfig.integrations.encrypted_api_key)
-      const credentials = {
-        apiKey,
-        locationId: toolConfig.integrations.location_id ?? '',
-      }
+      // Native actions (create_task, knowledge_base, contact_create, ...) carry
+      // no integration row — there is nothing to decrypt and executeAction
+      // ignores `credentials` for them.
+      const integration = toolConfig.integrations
+      const credentials = integration
+        ? { apiKey: await decrypt(integration.encrypted_api_key), locationId: integration.location_id ?? '' }
+        : { apiKey: '', locationId: '' }
       const args = getToolArguments(toolCall)
       result = await executeAction(toolConfig.action_type, args, credentials, {
         organizationId: orgId,
         supabase,
         toolConfig: toolConfig.config,
-        integrationProvider: toolConfig.integrations.provider,
+        integrationProvider: integration?.provider,
+        callerNumber: call.customer?.number,
       })
     } catch (err) {
       // GHL executor threw (error, timeout, or unsupported action type)

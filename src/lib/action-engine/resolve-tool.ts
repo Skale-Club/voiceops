@@ -25,13 +25,19 @@ export type ToolConfigWithIntegration = {
   config: Database['public']['Tables']['_legacy_tool_configs']['Row']['config']
   fallback_message: string
   is_active: boolean
+  /**
+   * null when the tool's action runs natively inside Xphere (create_task,
+   * knowledge_base, pipeline_*, ...) and has no external credential to resolve.
+   * Callers MUST NOT decrypt blindly — see the Vapi tools webhook for the
+   * expected shape of the guard.
+   */
   integrations: {
     id: string
     encrypted_api_key: string
     location_id: string | null
     provider: Database['public']['Enums']['integration_provider']
     config: Database['public']['Tables']['integrations']['Row']['config']
-  }
+  } | null
 }
 
 export async function resolveTool(

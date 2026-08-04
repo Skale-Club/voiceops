@@ -32,6 +32,7 @@ import {
   executePipelineCreateOpportunity,
 } from '@/lib/action-engine/executors/pipeline-actions'
 import { executeCreateTask, executeCreateNote } from '@/lib/action-engine/executors/create-task'
+import { executeCreateCrmContact } from '@/lib/action-engine/executors/create-crm-contact'
 import { executeUpdateContact } from '@/lib/action-engine/executors/update-contact'
 import { executeContactAddTag } from '@/lib/action-engine/executors/contact-tag-actions'
 import { executeUpdateBookingStatus } from '@/lib/action-engine/executors/update-booking-status'
@@ -86,6 +87,12 @@ export interface ActionContext {
   delegationChain?: string[]
   /** Phase 1085 DND: contact id to check before sending outbound messages */
   contactId?: string
+  /**
+   * Caller ID of the live phone call this action was invoked from, when the
+   * action engine was reached through a voice tool-call. Lets executors trust
+   * the network's number instead of one the LLM heard over the phone.
+   */
+  callerNumber?: string
   /** Phase 1085 DND: conversation id to write DND-blocked timeline events into */
   conversationId?: string
   /**
@@ -192,6 +199,19 @@ async function _executeActionInner(
       throw new Error('contact_add_tag requires ctx.organizationId and ctx.supabase')
     }
     return executeContactAddTag(params, ctx)
+  }
+
+  // Native CRM contact create/update | not in the action_type DB enum either.
+  if ((actionType as string) === 'contact_create') {
+    if (!ctx?.organizationId) {
+      throw new Error('contact_create requires ctx.organizationId')
+    }
+    return executeCreateCrmContact(params, ctx.organizationId, {
+      // On the tool-call path `params` are the LLM's arguments, so static
+      // values (source, tags) live on the node config instead. Arguments win.
+      defaults: ctx.toolConfig,
+      callerNumber: ctx.callerNumber,
+    })
   }
 
   if ((actionType as string) === 'update_booking_status') {

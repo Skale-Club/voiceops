@@ -69,15 +69,33 @@ async function projectToToolConfig(
 
   const action = extractActionNode(version.definition)
   if (!action) return null
-  if (!action.credential_ref) return null
 
-  const { data: integration, error: iErr } = await supabase
-    .from('integrations')
-    .select('id, encrypted_api_key, location_id, provider, config')
-    .eq('id', action.credential_ref)
-    .single()
+  // A tool's action either calls an external provider (credential_ref points at
+  // the org's integration row) or runs natively inside Xphere — create_task,
+  // create_note, knowledge_base, pipeline_*, contact_create. Native actions have
+  // nothing to decrypt, so requiring a credential here silently made every one
+  // of them unresolvable as an agent tool ("Tool not configured.").
+  let integration: {
+    id: string
+    encrypted_api_key: string
+    location_id: string | null
+    provider: Database['public']['Enums']['integration_provider']
+    config: Database['public']['Tables']['integrations']['Row']['config']
+  } | null = null
 
-  if (iErr || !integration?.encrypted_api_key) return null
+  if (action.credential_ref) {
+    const { data, error: iErr } = await supabase
+      .from('integrations')
+      .select('id, encrypted_api_key, location_id, provider, config')
+      .eq('id', action.credential_ref)
+      .single()
+
+    // An action that DOES name a credential but whose integration is missing or
+    // keyless stays unresolvable — that's a real misconfiguration, not a native
+    // action.
+    if (iErr || !data?.encrypted_api_key) return null
+    integration = data
+  }
 
   // The legacy ToolConfigWithIntegration shape: project the workflow row
   // back into it so existing webhook/dispatcher callsites stay unchanged.
@@ -88,19 +106,21 @@ async function projectToToolConfig(
     id: workflow.legacy_tool_config_id ?? workflow.id,
     workflow_id: workflow.id,
     organization_id: workflow.org_id,
-    integration_id: integration.id,
+    integration_id: integration?.id ?? '',
     tool_name: workflow.tool_name,
     action_type: action.action_type as ActionType,
     config: action.config as unknown as Json,
     fallback_message: action.fallback_message ?? '',
     is_active: workflow.is_active,
-    integrations: {
-      id: integration.id,
-      encrypted_api_key: integration.encrypted_api_key,
-      location_id: integration.location_id,
-      provider: integration.provider,
-      config: integration.config,
-    },
+    integrations: integration
+      ? {
+          id: integration.id,
+          encrypted_api_key: integration.encrypted_api_key,
+          location_id: integration.location_id,
+          provider: integration.provider,
+          config: integration.config,
+        }
+      : null,
   }
 }
 

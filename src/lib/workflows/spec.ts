@@ -636,6 +636,38 @@ export const NODES: NodeSpec[] = [
     },
   },
   {
+    type: 'contact_create',
+    kind: 'action',
+    description:
+      "Create or update a contact in Xphere's own CRM. Deduplicates by phone, then email. " +
+      'Emits contact.created on a real insert. Needs no integration — use this instead of ' +
+      'create_contact when the org has no external CRM connected.',
+    params_schema: {
+      type: 'object',
+      properties: {
+        name:       { type: 'string', description: 'Full name. Falls back to first_name + last_name.' },
+        first_name: { type: 'string' },
+        last_name:  { type: 'string' },
+        phone:      { type: 'string', description: 'Any format; normalized to E.164' },
+        email:      { type: 'string' },
+        company:    { type: 'string' },
+        notes:      { type: 'string', description: 'Appended to existing notes on a known contact' },
+        country:    { type: 'string', description: 'ISO 3166-1 alpha-2 hint for parsing a national-format phone' },
+        source: {
+          type: 'string',
+          enum: [
+            'manual', 'whatsapp', 'sms', 'instagram', 'facebook',
+            'messenger', 'csv_import', 'ghl_sync', 'api', 'voice_call',
+          ],
+          description: "Origin channel. Use 'voice_call' when captured during a phone call. Defaults to 'manual'.",
+        },
+      },
+    },
+    examples: [
+      { name: '{{input.name}}', phone: '{{input.phone}}', notes: '{{input.reason}}', source: 'voice_call' },
+    ],
+  },
+  {
     type: 'google_contacts_create',
     kind: 'action',
     description: 'Create a contact in the connected Google account.',

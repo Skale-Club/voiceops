@@ -154,11 +154,11 @@ async function dispatchLegacyPath(
   let errorDetail: string | null = null
 
   try {
-    const apiKey = await decrypt(tool.integrations.encrypted_api_key)
-    const credentials = {
-      apiKey,
-      locationId: tool.integrations.location_id ?? '',
-    }
+    // Native actions carry no integration row | nothing to decrypt.
+    const integration = tool.integrations
+    const credentials = integration
+      ? { apiKey: await decrypt(integration.encrypted_api_key), locationId: integration.location_id ?? '' }
+      : { apiKey: '', locationId: '' }
     result = await executeAction(
       tool.action_type,
       input.payload,
@@ -167,7 +167,7 @@ async function dispatchLegacyPath(
         organizationId: input.orgId,
         supabase,
         toolConfig: tool.config,
-        integrationProvider: tool.integrations.provider,
+        integrationProvider: integration?.provider,
       }
     )
   } catch (err) {

@@ -23,6 +23,13 @@ export const VapiToolCallMessageSchema = z.object({
       id: z.string(),
       assistantId: z.string(),   // camelCase | confirmed from Vapi API reference
       orgId: z.string().optional(),
+      // Caller ID. Trustworthy identity for the person on the line — unlike a
+      // phone number the assistant transcribed from speech — so executors get
+      // it via ActionContext.callerNumber instead of relying on the LLM.
+      customer: z.object({
+        number: z.string().optional(),
+        name: z.string().optional(),
+      }).passthrough().optional(),
     }).passthrough(),            // allow additional Vapi fields without validation failure
     toolCallList: z.array(VapiToolCallSchema),
   }),
