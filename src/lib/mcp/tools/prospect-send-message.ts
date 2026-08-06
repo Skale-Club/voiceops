@@ -20,6 +20,7 @@ import { isXmailConfigured, xmailSendMessage } from '@/lib/xmail/client'
 import { sendSms } from '@/lib/twilio/send-sms'
 import type { ActionContext } from '@/lib/action-engine/execute-action'
 import { emailFromCustomFields } from './prospects'
+import { verifyProspectEmail, isSendable } from '@/lib/email-verification/verify'
 import type { McpToolDef } from '../tool-types'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -184,6 +185,29 @@ export const prospectSendMessageTools: McpToolDef[] = [
       const to = channel === 'email' ? (target.email as string) : (target.phone as string)
       const fromEmail = from_email || DEFAULT_FROM_EMAIL
 
+      // Email is verified (cache-first) before it is ever previewed as sendable
+      // or actually sent — this is the prospect's source of truth, checked once
+      // and reused across every channel/campaign for 90 days.
+      let emailStatus: string | undefined
+      if (channel === 'email') {
+        const verification = await verifyProspectEmail(orgId, kind, target.id, to)
+        if ('blocked' in verification) {
+          return {
+            error: 'verification_unavailable',
+            verification_unavailable: true,
+            detail: `Email verification is unavailable right now (no verification credits) for ${to} — refusing to send unverified. ${verification.detail ?? ''}`.trim(),
+          }
+        }
+        if (!isSendable(verification.status)) {
+          return {
+            error: 'email_not_sendable',
+            detail: `Prospect ${target.name ?? target.id}'s email (${to}) verified as '${verification.status}' — not safe to send to.`,
+            email_status: verification.status,
+          }
+        }
+        emailStatus = verification.status
+      }
+
       if (!confirmed) {
         return {
           dry_run: true,
@@ -192,6 +216,7 @@ export const prospectSendMessageTools: McpToolDef[] = [
           subject: channel === 'email' ? subject : undefined,
           body_preview: body.slice(0, 200),
           from_email: channel === 'email' ? fromEmail : undefined,
+          email_status: emailStatus,
           message: 'Nothing was sent (confirmed was not true). Show the human this preview, then call again with confirmed:true to send.',
         }
       }
@@ -205,8 +230,8 @@ export const prospectSendMessageTools: McpToolDef[] = [
         if (!result.ok) {
           return { sent: false, channel, to, error: result.error }
         }
-        await markContacted(orgId, target, 'email', { subject, message_id: result.messageId })
-        return { sent: true, channel, to, message_id: result.messageId }
+        await markContacted(orgId, target, 'email', { subject, message_id: result.messageId, email_status: emailStatus })
+        return { sent: true, channel, to, message_id: result.messageId, email_status: emailStatus }
       }
 
       // channel === 'sms'

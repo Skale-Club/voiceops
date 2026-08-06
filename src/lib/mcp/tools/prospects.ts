@@ -20,6 +20,7 @@ import {
   xmailActivateCampaign,
   type XmailLead,
 } from '@/lib/xmail/client'
+import { verifyProspectsBatch, type BatchAggregate, type EmailVerified, type ProspectKind } from '@/lib/email-verification/verify'
 import type { McpToolDef } from '../tool-types'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -77,17 +78,44 @@ export function emailFromCustomFields(cf: unknown): string | null {
   return typeof e === 'string' && e.includes('@') ? e.trim() : null
 }
 
-function toXmailLead(p: ResolvedProspect): XmailLead {
+/** ResolvedProspect.kind ('person'|'company') -> the verification/resolver vocabulary ('contact'|'account'). */
+function verificationKind(kind: 'person' | 'company'): ProspectKind {
+  return kind === 'company' ? 'account' : 'contact'
+}
+
+function toXmailLead(p: ResolvedProspect, verification: EmailVerified): XmailLead {
   // xphere_kind must use the resolver's vocabulary ('contact' | 'account'), not
   // the prospect's own 'person' | 'company' kind — see resolveProspectEntity in
   // src/lib/prospects/events.ts.
-  const xphereKind = p.kind === 'company' ? 'account' : 'contact'
-  const customFields = { xphere_id: p.id, xphere_kind: xphereKind, score: p.score, source_type: p.source_type }
+  const xphereKind = verificationKind(p.kind)
+  // Contract with Xmail: these 4 fields map onto leads.emailVerificationStatus
+  // (ok -> verified; catch_all|unknown -> likely; invalid|disposable|bounced -> invalid).
+  const customFields = {
+    xphere_id: p.id,
+    xphere_kind: xphereKind,
+    score: p.score,
+    source_type: p.source_type,
+    email_status: verification.status,
+    email_verified_at: verification.verifiedAt,
+    email_verification_provider: verification.provider,
+    email_risk: verification.risk,
+  }
   if (p.kind === 'company') {
     return { email: p.email as string, companyName: p.name ?? undefined, website: p.website ?? undefined, customFields }
   }
   const { firstName, lastName } = splitName(p.name)
   return { email: p.email as string, firstName: firstName ?? undefined, lastName: lastName ?? undefined, website: p.website ?? undefined, customFields }
+}
+
+/** Shape the enroll/dry-run response's verification breakdown from a batch aggregate. */
+function summarizeAggregate(aggregate: BatchAggregate) {
+  return {
+    verified_ok: aggregate.ok,
+    catch_all: aggregate.catch_all,
+    unknown: aggregate.unknown,
+    blocked_invalid: aggregate.invalid + aggregate.disposable + aggregate.bounced,
+    blocked_no_credits: aggregate.blocked,
+  }
 }
 
 async function resolveProspects(
@@ -265,12 +293,23 @@ export const prospectsTools: McpToolDef[] = [
 
       if (!confirmed) {
         const preview = await resolveProspects(auth.orgId, filters, { requireEmail: true })
+        const capped = preview.slice(0, max ?? DEFAULT_MAX)
+        const batch = await verifyProspectsBatch(
+          auth.orgId,
+          capped.map((p) => ({ kind: verificationKind(p.kind), id: p.id, email: p.email as string })),
+        )
+        const verification = summarizeAggregate(batch.aggregate)
+        const wouldEnroll = verification.verified_ok + verification.catch_all + verification.unknown
         return {
           dry_run: true,
-          would_enroll: Math.min(preview.length, max ?? DEFAULT_MAX),
+          would_enroll: wouldEnroll,
           matched_with_email: preview.length,
+          verification: { total_checked: capped.length, ...verification },
+          verification_unavailable: verification.blocked_no_credits > 0 ? true : undefined,
           message:
-            'Nothing was enrolled (confirmed was not true). Show the human the count and which campaign, then call again with confirmed:true.',
+            verification.blocked_no_credits > 0
+              ? `WARNING: email verification is unavailable (no verification credits) for ${verification.blocked_no_credits} of ${capped.length} matching prospect(s) — they will be skipped, not sent unverified. Nothing was enrolled (confirmed was not true).`
+              : 'Nothing was enrolled (confirmed was not true). Show the human the count and which campaign, then call again with confirmed:true.',
           sample: preview.slice(0, 5).map((p) => ({ name: p.name, email: p.email, score: p.score })),
         }
       }
@@ -281,9 +320,34 @@ export const prospectsTools: McpToolDef[] = [
 
       const cap = Math.min(max ?? DEFAULT_MAX, HARD_MAX)
       const allWithEmail = await resolveProspects(auth.orgId, filters, { requireEmail: true })
-      const recipients = allWithEmail.slice(0, cap)
-      if (recipients.length === 0) {
+      const candidates = allWithEmail.slice(0, cap)
+      if (candidates.length === 0) {
         return { enrolled: 0, message: 'No matching prospects have an email to enrol.' }
+      }
+
+      // Verify every candidate's email before it ever reaches Xmail — this is
+      // the prospect's source of truth, checked (and cached) once here.
+      const batch = await verifyProspectsBatch(
+        auth.orgId,
+        candidates.map((p) => ({ kind: verificationKind(p.kind), id: p.id, email: p.email as string })),
+      )
+      const verification = summarizeAggregate(batch.aggregate)
+      const recipients: Array<{ prospect: ResolvedProspect; verified: EmailVerified }> = []
+      candidates.forEach((p, i) => {
+        const r = batch.results[i]
+        if (r.sendable) recipients.push({ prospect: p, verified: r.result as EmailVerified })
+      })
+
+      if (recipients.length === 0) {
+        return {
+          enrolled: 0,
+          verification: { total_checked: candidates.length, ...verification },
+          verification_unavailable: verification.blocked_no_credits > 0 ? true : undefined,
+          message:
+            verification.blocked_no_credits > 0
+              ? `No prospects were enrolled: email verification is unavailable (no verification credits) for ${verification.blocked_no_credits} of ${candidates.length} matching prospect(s), and none of the remainder verified as sendable.`
+              : 'No matching prospects passed email verification as sendable (all invalid/disposable/bounced).',
+        }
       }
 
       // Resolve a sending inbox if none was provided (Xmail requires one to activate).
@@ -293,14 +357,14 @@ export const prospectsTools: McpToolDef[] = [
         if (accts.ok && accts.accounts.length > 0) inboxId = accts.accounts[0].id
       }
 
-      const imp = await xmailBulkImportLeads(recipients.map(toXmailLead))
+      const imp = await xmailBulkImportLeads(recipients.map((r) => toXmailLead(r.prospect, r.verified)))
       if (!imp.ok) return { error: `Xmail lead import failed: ${imp.error}` }
 
       const add = await xmailAddLeadsToCampaign(campaign_id, imp.leadIds, inboxId)
       if (!add.ok) return { error: `Enrolment failed: ${add.error}`, imported: imp.imported }
 
       const act = await xmailActivateCampaign(campaign_id)
-      if (act.ok) await markEnrolled(auth.orgId, recipients, campaign_id)
+      if (act.ok) await markEnrolled(auth.orgId, recipients.map((r) => r.prospect), campaign_id)
 
       return {
         matched: recipients.length,
@@ -310,11 +374,17 @@ export const prospectsTools: McpToolDef[] = [
         activation_note: act.ok
           ? undefined
           : `Leads enrolled, but the campaign could not be activated: ${act.error}. Fix it in Xmail (needs a sequence + a sending inbox per lead), then activate.`,
+        verification: { total_checked: candidates.length, ...verification },
+        verification_unavailable: verification.blocked_no_credits > 0 ? true : undefined,
         capped:
           allWithEmail.length > cap
             ? { total_matched: allWithEmail.length, cap, remaining: allWithEmail.length - cap }
             : undefined,
-        message: `Enrolled ${add.added} prospect(s) into the campaign${act.ok ? ' and activated it — Xmail will start sending.' : ' (activation pending — see activation_note).'}`,
+        message:
+          `Enrolled ${add.added} prospect(s) into the campaign${act.ok ? ' and activated it — Xmail will start sending.' : ' (activation pending — see activation_note).'}` +
+          (verification.blocked_no_credits > 0
+            ? ` WARNING: ${verification.blocked_no_credits} matching prospect(s) were skipped — email verification is unavailable (no verification credits).`
+            : ''),
       }
     },
   },
