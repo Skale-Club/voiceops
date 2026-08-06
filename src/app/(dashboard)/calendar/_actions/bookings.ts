@@ -8,6 +8,7 @@ import { revalidatePath } from 'next/cache'
 import { addMinutes, startOfDay, endOfDay, addDays } from 'date-fns'
 import { fromZonedTime } from 'date-fns-tz'
 import { generateSlots, generateSlotsWithReasons, type DebugTimeSlot } from '@/lib/calendar/slots'
+import { lookBusyConfigFor } from '@/lib/calendar/look-busy'
 import { fetchBusyTimes } from '@/lib/calendar/google-calendar'
 import { resolveAndValidateSlot } from '@/lib/calendar/booking-validation'
 import { rateLimit } from '@/lib/rate-limit'
@@ -308,6 +309,36 @@ async function sendCancellationEmailForBooking(bookingId: string): Promise<void>
   }
 }
 
+// ─── Look busy ────────────────────────────────────────────────────────────────
+
+// May the caller be told that a free slot is being withheld? The
+// troubleshooting view is reachable by ANY visitor via ?debug=1 on the public
+// booking page, so revealing the 'look_busy' reason there would hand the
+// mechanism to the very bookers it is meant to be invisible to. Only an
+// authenticated member of the event type's own org gets the reveal; everyone
+// else sees exactly what a booker sees.
+//
+// Deliberately uses the authenticated client, never the service-role client
+// this action otherwise runs on — the whole point is to check the caller's own
+// identity and membership.
+async function canRevealLookBusy(orgId: string): Promise<boolean> {
+  try {
+    const user = await getUser()
+    if (!user) return false
+    const authed = await createClient()
+    const { data } = await authed
+      .from('org_members')
+      .select('organization_id')
+      .eq('user_id', user.id)
+      .eq('organization_id', orgId)
+      .maybeSingle()
+    return Boolean(data)
+  } catch {
+    // Never let an auth hiccup fail open into a public reveal.
+    return false
+  }
+}
+
 // ─── Public: get available slots for a date ───────────────────────────────────
 // Called server-side from the public booking page (no auth needed).
 
@@ -348,15 +379,17 @@ export async function getAvailableSlots(params: {
   const dateObj = new Date(year, month - 1, day)
   const dow = dateObj.getDay()
 
-  // Fetch availability for that day
+  // Fetch availability for that day. Selected as an array (never
+  // .maybeSingle()) — a weekday can have 2+ windows since migration 1140, and
+  // the look-busy hide-set is keyed on the whole day's grid, so passing only
+  // the first window would desync this from resolveAndValidateSlot.
   const { data: avail } = await supabase
     .from('user_availability')
     .select('start_time, end_time')
     .eq('user_id', userId)
     .eq('day_of_week', dow)
-    .maybeSingle()
 
-  if (!avail) return { ok: true, data: [] }
+  if (!avail || avail.length === 0) return { ok: true, data: [] }
 
   // Fetch existing bookings for that day (in UTC range)
   const dayStartUtc = fromZonedTime(
@@ -399,6 +432,8 @@ export async function getAvailableSlots(params: {
     busyTimes,
     bufferMinutes: 0,
     minAdvanceMinutes: 60,
+    eventTypeId: et.id,
+    lookBusy: lookBusyConfigFor(et),
   })
 
   return { ok: true, data: slots }
@@ -440,14 +475,14 @@ export async function getDebugSlots(params: {
   const dateObj = new Date(year, month - 1, day)
   const dow = dateObj.getDay()
 
+  // Array, not .maybeSingle() — see the note in getAvailableSlots.
   const { data: avail } = await supabase
     .from('user_availability')
     .select('start_time, end_time')
     .eq('user_id', userId)
     .eq('day_of_week', dow)
-    .maybeSingle()
 
-  if (!avail) return { ok: true, data: [] }
+  if (!avail || avail.length === 0) return { ok: true, data: [] }
 
   const dayStartUtc = fromZonedTime(new Date(year, month - 1, day, 0, 0, 0), timezone)
   const dayEndUtc = fromZonedTime(new Date(year, month - 1, day, 23, 59, 59), timezone)
@@ -472,6 +507,9 @@ export async function getDebugSlots(params: {
     busyTimes,
     bufferMinutes: 0,
     minAdvanceMinutes: 60,
+    eventTypeId: et.id,
+    lookBusy: lookBusyConfigFor(et),
+    revealLookBusy: await canRevealLookBusy(orgId),
   })
 
   return { ok: true, data: slots }

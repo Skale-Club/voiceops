@@ -13,6 +13,8 @@ vi.mock('@/lib/calendar/google-calendar', () => ({
 
 import { fetchBusyTimes } from '@/lib/calendar/google-calendar'
 import { resolveAndValidateSlot } from '@/lib/calendar/booking-validation'
+import { computeHiddenSlotStarts, type LookBusyConfig } from '@/lib/calendar/look-busy'
+import { generateSlots } from '@/lib/calendar/slots'
 
 // ─── Test-data fixtures ─────────────────────────────────────────────────────
 
@@ -290,5 +292,155 @@ describe('resolveAndValidateSlot', () => {
       USER_ID, ORG_ID, expect.any(String), expect.any(String),
       ['primary'],
     )
+  })
+})
+
+// ─── Look busy enforcement ──────────────────────────────────────────────────
+//
+// The display path hides slots; this is the gate that stops the hidden ones
+// being booked anyway via MCP bookings_create or a hand-rolled POST. If these
+// tests fail the feature is cosmetic.
+
+describe('resolveAndValidateSlot — look busy', () => {
+  // 08:00-12:00 at 30 min = 8 grid positions.
+  const WINDOWS = [{ start_time: '08:00:00', end_time: '12:00:00' }]
+  const GRID = Array.from({ length: 8 }, (_, i) => {
+    const total = 8 * 60 + i * 30
+    const h = String(Math.floor(total / 60)).padStart(2, '0')
+    const m = String(total % 60).padStart(2, '0')
+    return `${FUTURE_DATE}T${h}:${m}:00.000Z`
+  })
+
+  function withLookBusy(config: { mode: string; percent?: number | null; maxPerDay?: number | null }) {
+    return buildFakeSupabase({
+      eventType: {
+        data: {
+          ...eventTypeRow,
+          look_busy_mode: config.mode,
+          look_busy_percent: config.percent ?? null,
+          look_busy_max_per_day: config.maxPerDay ?? null,
+        },
+        error: null,
+      },
+      windows: { data: WINDOWS, error: null },
+    })
+  }
+
+  // Derive the real hide-set from the engine rather than hardcoding a slot —
+  // hardcoding would silently stop testing anything if the hash ever changed.
+  function partitionGrid(config: LookBusyConfig) {
+    const hidden = computeHiddenSlotStarts({
+      eventTypeId: EVENT_TYPE_ID,
+      date: FUTURE_DATE,
+      gridStarts: GRID,
+      config,
+    })
+    return {
+      hidden: GRID.filter((s) => hidden.has(s)),
+      visible: GRID.filter((s) => !hidden.has(s)),
+    }
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('rejects a slot withheld by hide_percent, as outside_availability', async () => {
+    const config: LookBusyConfig = { mode: 'hide_percent', percent: 50, maxPerDay: null }
+    const { hidden } = partitionGrid(config)
+    expect(hidden.length).toBeGreaterThan(0)
+
+    const { client } = withLookBusy({ mode: 'hide_percent', percent: 50 })
+    const result = await resolveAndValidateSlot(client as any, {
+      eventTypeId: EVENT_TYPE_ID,
+      startAtIso: hidden[0],
+    })
+    expect(result.ok).toBe(false)
+    // Deliberately the same error a real conflict produces — a distinct code
+    // would disclose that the slot is free but withheld.
+    if (!result.ok) expect(result.error).toBe('outside_availability')
+  })
+
+  it('still accepts a visible slot while hide_percent is active', async () => {
+    const config: LookBusyConfig = { mode: 'hide_percent', percent: 50, maxPerDay: null }
+    const { visible } = partitionGrid(config)
+    expect(visible.length).toBeGreaterThan(0)
+
+    const { client } = withLookBusy({ mode: 'hide_percent', percent: 50 })
+    const result = await resolveAndValidateSlot(client as any, {
+      eventTypeId: EVENT_TYPE_ID,
+      startAtIso: visible[0],
+    })
+    expect(result.ok).toBe(true)
+  })
+
+  it('rejects every withheld slot under max_per_day and accepts the survivors', async () => {
+    const config: LookBusyConfig = { mode: 'max_per_day', percent: null, maxPerDay: 2 }
+    const { hidden, visible } = partitionGrid(config)
+    expect(visible.length).toBe(2)
+    expect(hidden.length).toBe(6)
+
+    for (const start of hidden) {
+      const { client } = withLookBusy({ mode: 'max_per_day', maxPerDay: 2 })
+      const result = await resolveAndValidateSlot(client as any, {
+        eventTypeId: EVENT_TYPE_ID,
+        startAtIso: start,
+      })
+      expect(result.ok).toBe(false)
+    }
+    for (const start of visible) {
+      const { client } = withLookBusy({ mode: 'max_per_day', maxPerDay: 2 })
+      const result = await resolveAndValidateSlot(client as any, {
+        eventTypeId: EVENT_TYPE_ID,
+        startAtIso: start,
+      })
+      expect(result.ok).toBe(true)
+    }
+  })
+
+  it('accepts every grid slot when the mode is off (no behaviour change)', async () => {
+    for (const start of GRID) {
+      const { client } = withLookBusy({ mode: 'off' })
+      const result = await resolveAndValidateSlot(client as any, {
+        eventTypeId: EVENT_TYPE_ID,
+        startAtIso: start,
+      })
+      expect(result.ok).toBe(true)
+    }
+  })
+
+  it('treats a null mode (row selected before migration 1266) as off', async () => {
+    const { client } = buildFakeSupabase({
+      eventType: { data: { ...eventTypeRow, look_busy_mode: null }, error: null },
+      windows: { data: WINDOWS, error: null },
+    })
+    const result = await resolveAndValidateSlot(client as any, {
+      eventTypeId: EVENT_TYPE_ID,
+      startAtIso: GRID[0],
+    })
+    expect(result.ok).toBe(true)
+  })
+
+  it('agrees with the display path: exactly the slots generateSlots offers are accepted', async () => {
+    const config: LookBusyConfig = { mode: 'hide_percent', percent: 40, maxPerDay: null }
+    const displayed = generateSlots({
+      date: FUTURE_DATE,
+      timezone: 'UTC',
+      durationMinutes: 30,
+      availability: WINDOWS,
+      existingBookings: [],
+      busyTimes: [],
+      eventTypeId: EVENT_TYPE_ID,
+      lookBusy: config,
+    }).map((s) => s.start)
+
+    for (const start of GRID) {
+      const { client } = withLookBusy({ mode: 'hide_percent', percent: 40 })
+      const result = await resolveAndValidateSlot(client as any, {
+        eventTypeId: EVENT_TYPE_ID,
+        startAtIso: start,
+      })
+      expect(result.ok).toBe(displayed.includes(start))
+    }
   })
 })
