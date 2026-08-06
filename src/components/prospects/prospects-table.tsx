@@ -20,6 +20,7 @@ import {
   type ProspectRef,
   type ProspectRow,
 } from '@/app/(dashboard)/prospects/actions'
+import { EmailVerificationBadge } from '@/components/prospects/email-verification-badge'
 import { ProspectDetailSheet } from '@/components/prospects/prospect-detail-sheet'
 import { VoiceCampaignDialog } from '@/components/prospects/voice-campaign-dialog'
 import { WhatsAppBulkDialog } from '@/components/prospects/whatsapp-bulk-dialog'
@@ -277,6 +278,18 @@ export function ProspectsTable({
             ...QUALIFICATION_OPTIONS.map((s) => ({ value: s, label: statusLabel(s) })),
           ]}
         />
+        <FilterSelect
+          value={filters.emailStatus ?? ALL}
+          onChange={(v) => updateParam({ emailStatus: v })}
+          placeholder="Email"
+          options={[
+            { value: ALL, label: 'Any email' },
+            { value: 'ok', label: 'Verificado' },
+            { value: 'catch_all', label: 'Catch-all' },
+            { value: 'unverified', label: 'Não verificado' },
+            { value: 'invalid', label: 'Inválido' },
+          ]}
+        />
         <form onSubmit={submitCity}>
           <Input
             value={cityValue}
@@ -433,22 +446,35 @@ export function ProspectsTable({
                       >
                         {row.name || <span className="italic text-text-tertiary">Unnamed prospect</span>}
                       </button>
-                      {row.website ? (
-                        <a
-                          href={toHref(row.website)}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          title={`Open ${cleanDomain(row.website)} in a new tab`}
-                          className="flex max-w-full items-center gap-1 text-[11.5px] text-text-tertiary hover:text-accent hover:underline"
-                        >
-                          <span className="truncate">{cleanDomain(row.website)}</span>
-                          <ExternalLink className="h-3 w-3 shrink-0 opacity-60" />
-                        </a>
-                      ) : (
-                        <div className="truncate text-[11.5px] text-text-tertiary">
-                          {row.company || row.email || row.phone || (row.kind === 'company' ? 'Company' : 'Person')}
-                        </div>
-                      )}
+                      <div className="flex min-w-0 items-center gap-1.5">
+                        {row.website ? (
+                          <a
+                            href={toHref(row.website)}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            title={`Open ${cleanDomain(row.website)} in a new tab`}
+                            className="flex max-w-full items-center gap-1 text-[11.5px] text-text-tertiary hover:text-accent hover:underline"
+                          >
+                            <span className="truncate">{cleanDomain(row.website)}</span>
+                            <ExternalLink className="h-3 w-3 shrink-0 opacity-60" />
+                          </a>
+                        ) : (
+                          <div className="truncate text-[11.5px] text-text-tertiary">
+                            {row.company || row.email || row.phone || (row.kind === 'company' ? 'Company' : 'Person')}
+                          </div>
+                        )}
+                        {row.email && (
+                          <EmailVerificationBadge
+                            status={row.emailStatus}
+                            risk={row.emailRisk}
+                            verifiedAt={row.emailVerifiedAt}
+                            provider={row.emailVerificationProvider}
+                            size="sm"
+                            showLabel={false}
+                            className="shrink-0"
+                          />
+                        )}
+                      </div>
                     </div>
                   </div>
                   <div className="hidden truncate text-[12.5px] text-text-secondary sm:block">

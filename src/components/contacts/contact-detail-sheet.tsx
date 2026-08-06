@@ -37,6 +37,7 @@ import { isValidEmail } from '@/lib/contacts/zod-schemas'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Button } from '@/components/ui/button'
 import { ChannelBadge, type Channel } from '@/components/design-system/channel-badge'
+import { EmailVerificationBadge } from '@/components/prospects/email-verification-badge'
 import { ContactForm } from './contact-form'
 import { CustomFieldsDisplay } from '@/components/custom-fields/custom-fields-display'
 import {
@@ -256,6 +257,17 @@ export function ContactDetailSheet({ contactId, onOpenChange, initialEditing = f
                         ? 'Invalid email format — open this contact to fix it'
                         : undefined
                     }
+                    endContent={
+                      contact.email ? (
+                        <EmailVerificationBadge
+                          status={contact.email_status}
+                          risk={contact.email_risk}
+                          verifiedAt={contact.email_verified_at}
+                          provider={contact.email_verification_provider}
+                          size="sm"
+                        />
+                      ) : null
+                    }
                   />
                   <InfoRow icon={Building2} label="Company" value={contact.account?.name ?? contact.company} />
                   <InfoRow
@@ -413,6 +425,7 @@ function InfoRow({
   onClick,
   title,
   warning,
+  endContent,
 }: {
   icon: React.ComponentType<{ className?: string }>
   label: string
@@ -421,6 +434,8 @@ function InfoRow({
   title?: string
   /** When set, renders an amber AlertTriangle next to the value and uses amber text color. */
   warning?: string
+  /** Optional trailing content (e.g. a status badge) shown next to the value. */
+  endContent?: React.ReactNode
 }) {
   const interactive = Boolean(onClick && value)
   const Inner = (
@@ -443,6 +458,7 @@ function InfoRow({
         >
           {warning && <AlertTriangle className="h-3 w-3 shrink-0 text-amber-400" />}
           <span className="truncate">{value || 'Not set'}</span>
+          {endContent}
         </div>
       </div>
     </>

@@ -34,6 +34,7 @@ import {
 } from '@/app/(dashboard)/prospects/actions'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { EmailVerificationBadge } from '@/components/prospects/email-verification-badge'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { formatPhoneDisplay } from '@/lib/phone-numbers/format'
@@ -232,7 +233,21 @@ export function ProspectDetailSheet({ prospect, onOpenChange, onChanged }: Prosp
             {/* Details */}
             <Section icon={Activity} title="Details">
               <dl className="grid gap-1.5 text-[13px]">
-                <DetailRow label="Email" value={detail.email} />
+                <DetailRow
+                  label="Email"
+                  value={detail.email}
+                  endContent={
+                    detail.email || detail.emailStatus ? (
+                      <EmailVerificationBadge
+                        status={detail.emailStatus}
+                        risk={detail.emailRisk}
+                        verifiedAt={detail.emailVerifiedAt}
+                        provider={detail.emailVerificationProvider}
+                        size="sm"
+                      />
+                    ) : null
+                  }
+                />
                 <DetailRow label="Phone" value={formatPhoneDisplay(detail.phone) || null} />
                 <DetailRow label="Company" value={detail.company} />
                 <DetailRow
@@ -390,11 +405,23 @@ function Section({
   )
 }
 
-function DetailRow({ label, value }: { label: string; value: string | null }) {
+function DetailRow({
+  label,
+  value,
+  endContent,
+}: {
+  label: string
+  value: string | null
+  /** Optional trailing content (e.g. a status badge) shown next to the value. */
+  endContent?: React.ReactNode
+}) {
   return (
     <div className="grid grid-cols-[110px_minmax(0,1fr)] gap-2">
       <span className="text-text-tertiary">{label}</span>
-      <span className="truncate text-text-primary">{value || '—'}</span>
+      <span className="flex min-w-0 items-center gap-1.5">
+        <span className="truncate text-text-primary">{value || '—'}</span>
+        {endContent}
+      </span>
     </div>
   )
 }
