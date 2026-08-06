@@ -35,6 +35,8 @@ jobs:
           XMAIL_USER_ID: ${{ secrets.XMAIL_USER_ID }}
           XMAIL_ORG_ID: ${{ secrets.XMAIL_ORG_ID }}
           XMAIL_SERVICE_KEY: ${{ secrets.XMAIL_SERVICE_KEY }}
+          MILLIONVERIFIER_API_KEY: ${{ secrets.MILLIONVERIFIER_API_KEY }}
+          NEVERBOUNCE_API_KEY: ${{ secrets.NEVERBOUNCE_API_KEY }}
         run: |
           set -euo pipefail
           if [ -z "${COOLIFY_TOKEN}" ]; then
@@ -83,6 +85,8 @@ jobs:
           upsert XMAIL_USER_ID                        "${XMAIL_USER_ID}"
           upsert XMAIL_ORG_ID                         "${XMAIL_ORG_ID}"
           upsert XMAIL_SERVICE_KEY                    "${XMAIL_SERVICE_KEY}"
+          upsert MILLIONVERIFIER_API_KEY              "${MILLIONVERIFIER_API_KEY}"
+          upsert NEVERBOUNCE_API_KEY                  "${NEVERBOUNCE_API_KEY}"
 
           echo "==> Triggering redeploy so new env vars take effect"
           curl --fail-with-body -sS --retry 3 --retry-all-errors \
