@@ -284,10 +284,10 @@ export function ProspectsTable({
           placeholder="Email"
           options={[
             { value: ALL, label: 'Any email' },
-            { value: 'ok', label: 'Verificado' },
+            { value: 'ok', label: 'Verified' },
             { value: 'catch_all', label: 'Catch-all' },
-            { value: 'unverified', label: 'Não verificado' },
-            { value: 'invalid', label: 'Inválido' },
+            { value: 'unverified', label: 'Not verified' },
+            { value: 'invalid', label: 'Invalid' },
           ]}
         />
         <form onSubmit={submitCity}>

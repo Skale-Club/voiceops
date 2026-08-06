@@ -9,7 +9,7 @@
  * user can see, at a glance, whether that address is safe to send to.
  *
  * Unlike IdentityStatusBadge (src/components/contacts/identity-status-badge.tsx),
- * a null/absent status is NOT hidden here — it renders a neutral "Não
+ * a null/absent status is NOT hidden here — it renders a neutral "Not
  * verificado" badge, because "never checked" is meaningfully different from
  * "checked and fine" for a deliverability signal the user is about to act on.
  *
@@ -65,7 +65,7 @@ interface StatusConfig {
 const CONFIG: Record<EmailVerificationStatus, StatusConfig> = {
   ok: {
     variant: 'success',
-    label: 'Verificado',
+    label: 'Verified',
     icon: CheckCircle2,
     description: 'E-mail verificado — a caixa existe e aceita mensagens.',
   },
@@ -74,39 +74,39 @@ const CONFIG: Record<EmailVerificationStatus, StatusConfig> = {
     label: 'Catch-all',
     icon: ShieldAlert,
     description:
-      'O domínio aceita qualquer endereço — não dá para confirmar a caixa. Enviável, com risco.',
+      'The domain accepts any address, so the mailbox cannot be confirmed. Sendable, with risk.',
   },
   unknown: {
     variant: 'warning',
-    label: 'Não confirmado',
+    label: 'Unconfirmed',
     icon: HelpCircle,
-    description: 'O verificador não conseguiu confirmar (greylisting/timeout). Enviável.',
+    description: 'The verifier could not confirm this address (greylisting/timeout). Sendable.',
   },
   disposable: {
     variant: 'danger',
-    label: 'Descartável',
+    label: 'Disposable',
     icon: ShieldX,
-    description: 'Domínio de e-mail descartável/temporário — bloqueado para envio.',
+    description: 'Disposable/temporary email domain — blocked from sending.',
   },
   invalid: {
     variant: 'danger',
-    label: 'Inválido',
+    label: 'Invalid',
     icon: XCircle,
-    description: 'Endereço inválido — a caixa não existe. Bloqueado para envio.',
+    description: 'Invalid address — the mailbox does not exist. Blocked from sending.',
   },
   bounced: {
     variant: 'danger',
     label: 'Bounce',
     icon: XCircle,
-    description: 'Este endereço retornou bounce — bloqueado permanentemente.',
+    description: 'This address bounced — permanently blocked.',
   },
 }
 
 const UNVERIFIED: StatusConfig = {
   variant: 'outline',
-  label: 'Não verificado',
+  label: 'Not verified',
   icon: HelpCircle,
-  description: 'Este e-mail ainda não foi verificado.',
+  description: 'This email has not been verified yet.',
 }
 
 const PROVIDER_LABEL: Record<string, string> = {
@@ -153,7 +153,7 @@ export function EmailVerificationBadge({
             <p>{cfg.description}</p>
             {verifiedAt && (
               <p className="text-text-tertiary">
-                Verificado em {formatDateTime(verifiedAt, timezone)}
+                Verified on {formatDateTime(verifiedAt, timezone)}
                 {providerLabel ? ` via ${providerLabel}` : ''}
               </p>
             )}
