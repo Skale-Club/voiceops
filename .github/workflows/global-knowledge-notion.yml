@@ -22,6 +22,22 @@ jobs:
           SITE_URL: ${{ secrets.SITE_URL }}
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
         run: |
-          curl --fail --silent --show-error \
+          URL="${SITE_URL:-https://xphere.app}/api/cron/global-knowledge-notion"
+
+          # This drain regularly runs 88-103s. Cloudflare's proxy drops any
+          # origin request that takes over 100s (524), so we pin the request
+          # to the origin IP and skip the edge. Host header and TLS SNI stay
+          # unchanged, so Traefik routes it and the cert still validates.
+          # See docs/ops/cloudflare-cdn.md.
+          HOST=$(echo "$URL" | sed -E 's#^https?://([^/]+).*#\1#')
+          ORIGIN_IP=$(getent hosts origin.xphere.app | awk '{print $1; exit}')
+          RESOLVE=""
+          if [ -n "$ORIGIN_IP" ]; then
+            RESOLVE="--resolve ${HOST}:443:${ORIGIN_IP}"
+          else
+            echo "WARNING: origin.xphere.app did not resolve — falling back to the edge (524 risk)"
+          fi
+
+          curl --fail --silent --show-error $RESOLVE \
             -H "Authorization: Bearer ${CRON_SECRET}" \
-            "${SITE_URL:-https://xphere.app}/api/cron/global-knowledge-notion"
+            "$URL"

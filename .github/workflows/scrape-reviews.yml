@@ -46,7 +46,22 @@ jobs:
           fi
           URL="${{ secrets.OPERATOR_BASE_URL }}/api/reviews/scrape${QS}"
           echo "POSTing to: $URL"
-          RESPONSE=$(curl -s -w "\n%{http_code}" -X POST \
+
+          # The scrape loops every active profile before responding and has
+          # already hit 95s. Cloudflare's proxy drops origin requests over
+          # 100s (524), so pin to the origin IP and skip the edge. Host header
+          # and TLS SNI are unchanged, so Traefik routes it and the cert still
+          # validates. See docs/ops/cloudflare-cdn.md.
+          HOST=$(echo "$URL" | sed -E 's#^https?://([^/]+).*#\1#')
+          ORIGIN_IP=$(getent hosts origin.xphere.app | awk '{print $1; exit}')
+          RESOLVE=""
+          if [ -n "$ORIGIN_IP" ]; then
+            RESOLVE="--resolve ${HOST}:443:${ORIGIN_IP}"
+          else
+            echo "WARNING: origin.xphere.app did not resolve — falling back to the edge (524 risk)"
+          fi
+
+          RESPONSE=$(curl -s -w "\n%{http_code}" -X POST $RESOLVE \
             "$URL" \
             -H "Authorization: Bearer ${{ secrets.OPERATOR_AUTOMATION_SECRET }}" \
             -H "Content-Type: application/json")
