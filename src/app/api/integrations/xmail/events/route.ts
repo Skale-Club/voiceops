@@ -81,5 +81,24 @@ export async function POST(request: Request): Promise<Response> {
     await supabase.from(table).update(patch).eq('id', ref.entityId).eq('org_id', key.orgId)
   }
 
+  // A real bounce is the strongest deliverability signal there is — permanently
+  // mark the address non-sendable across every channel/campaign, not just this
+  // one. See src/lib/email-verification (email_status is the prospect's source
+  // of truth, cache-first) and riskForStatus/isSendable in verify.ts.
+  if (mapped.eventType === 'bounced') {
+    const table = ref.entityType === 'account' ? 'accounts' : 'contacts'
+    await supabase
+      .from(table)
+      .update({
+        email_status: 'bounced',
+        email_risk: 'high',
+        email_verified_at: now,
+        email_verification_provider: 'bounce',
+        updated_at: now,
+      })
+      .eq('id', ref.entityId)
+      .eq('org_id', key.orgId)
+  }
+
   return Response.json({ ok: true })
 }

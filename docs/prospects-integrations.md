@@ -26,6 +26,61 @@ deliberate.
 - `prospect_audiences` — saved segments (Audiences module).
 - `prospect_conversions` — conversion history (Conversions module).
 - `prospect_engagement_events` — the timeline fed by every integration.
+- `contacts` / `accounts` also gain `email_status`, `email_verified_at`,
+  `email_verification_provider`, `email_risk` (migration 1264) — email
+  verification lives ON the prospect, not per-campaign, so it's checked once
+  and every channel benefits. See "Email verification" below.
+
+## Email verification (`src/lib/email-verification/`)
+
+Verification status is the prospect's source of truth: `email_status` /
+`email_verified_at` / `email_verification_provider` / `email_risk` live on the
+`contacts`/`accounts` row itself (companies still keep the raw address in
+`custom_fields.email` — only the verification *status* got real columns).
+
+**Provider chain** (`providers.ts`): MillionVerifier (primary) → NeverBounce
+(fallback). Each call normalizes onto `EmailStatus = ok | catch_all | unknown
+| disposable | invalid | bounced`, or degrades to a typed failure
+(`no_credits | unauthorized | unreachable | rate_limited`) — **never throws**.
+`verifyEmail()` (`verify.ts`) tries MillionVerifier, falls through to
+NeverBounce on any provider failure, and if both are unavailable returns
+`{ blocked: true, reason: 'no_verification_credits' }` rather than guessing a
+status. Env: `MILLIONVERIFIER_API_KEY`, `NEVERBOUNCE_API_KEY`, optional
+`EMAIL_VERIFICATION_LOW_CREDIT_THRESHOLD` (default 500).
+
+**Cache-first** (mandatory — this costs real money per call):
+`verifyProspectEmail(orgId, kind, id, email, { force })` returns the row's
+existing `email_status` untouched if it was verified within the last 90 days
+and isn't `unknown`, without calling any provider. Otherwise it verifies and
+persists all four columns. `verifyProspectsBatch()` runs this over many
+prospects with a small (~5) concurrency cap and returns an aggregate count by
+status plus a `blocked` count.
+
+**Risk / sendability policy** (`risk-policy.ts`, re-exported from
+`verify.ts` — change it in exactly one place):
+`riskForStatus`: ok→low, catch_all/unknown→medium, disposable/invalid/bounced→high.
+`isSendable`: ok/catch_all/unknown→true (catch_all and unknown are
+deliberately sendable), disposable/invalid/bounced→false.
+
+**Wired into outreach**: `prospects_enroll_in_campaign` verifies every
+candidate before importing to Xmail and filters out non-sendable ones; its
+dry-run preview reports `{ verified_ok, catch_all, unknown, blocked_invalid,
+blocked_no_credits }` so the human approves knowing exactly what will send.
+`prospect_send_message` verifies the single prospect (cache-first) before
+sending on `channel: 'email'`. In both tools, if verification is blocked for
+lack of credits the response sets `verification_unavailable: true` with a
+loud warning — nothing is sent unverified.
+
+**`email_verification_status`** (MCP tool) returns
+`getVerificationCreditStatus()` (per-provider configured/credits/ok, plus
+`anyAvailable`/`lowCredit`) and a breakdown of the org's prospects by
+`email_status`. Poll this on a schedule to alert on low credits.
+
+**Bounce feedback loop**: `/api/integrations/xmail/events` already logs
+`bounced` events to the timeline; it now also stamps the prospect's
+`email_status='bounced'`, `email_risk='high'`, `email_verified_at=now()`,
+`email_verification_provider='bounce'` — a real bounce permanently marks the
+address non-sendable across every channel and campaign, not just Xmail.
 
 ## Inbound — how external systems reach Xphere
 
