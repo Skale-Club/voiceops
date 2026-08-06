@@ -58,8 +58,8 @@ function slotHash(eventTypeId: string, date: string, slotStartIso: string): numb
   return fnv1a(`${eventTypeId}|${date}|${slotStartIso}`)
 }
 
-// Narrow an event_types row to a config. Anything other than a recognised mode
-// (including null from a row selected before migration 1266) reads as off.
+// Narrow a calendar_profiles row to a config. Anything other than a recognised
+// mode (including null, e.g. a host with no profile row yet) reads as off.
 export function lookBusyConfigFor(row: {
   look_busy_mode?: string | null
   look_busy_percent?: number | null

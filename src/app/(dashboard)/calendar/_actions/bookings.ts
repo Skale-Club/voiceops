@@ -365,7 +365,7 @@ export async function getAvailableSlots(params: {
   // Fetch calendar profile for timezone
   const { data: profile } = await supabase
     .from('calendar_profiles')
-    .select('timezone, conflict_calendar_ids')
+    .select('timezone, conflict_calendar_ids, look_busy_mode, look_busy_percent, look_busy_max_per_day')
     .eq('user_id', userId)
     .single()
 
@@ -433,7 +433,7 @@ export async function getAvailableSlots(params: {
     bufferMinutes: 0,
     minAdvanceMinutes: 60,
     eventTypeId: et.id,
-    lookBusy: lookBusyConfigFor(et),
+    lookBusy: lookBusyConfigFor(profile ?? {}),
   })
 
   return { ok: true, data: slots }
@@ -462,7 +462,7 @@ export async function getDebugSlots(params: {
 
   const { data: profile } = await supabase
     .from('calendar_profiles')
-    .select('timezone, conflict_calendar_ids')
+    .select('timezone, conflict_calendar_ids, look_busy_mode, look_busy_percent, look_busy_max_per_day')
     .eq('user_id', userId)
     .single()
 
@@ -508,7 +508,7 @@ export async function getDebugSlots(params: {
     bufferMinutes: 0,
     minAdvanceMinutes: 60,
     eventTypeId: et.id,
-    lookBusy: lookBusyConfigFor(et),
+    lookBusy: lookBusyConfigFor(profile ?? {}),
     revealLookBusy: await canRevealLookBusy(orgId),
   })
 

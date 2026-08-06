@@ -14,12 +14,13 @@
 //      that generateSlots would never have offered as a displayed slot.
 //      Checks ALL windows for that day (a host can configure more than one
 //      window per day since migration 1140 — see Pitfall 5).
-//   4. The interval must not be withheld by the event type's "look busy"
-//      configuration — without this check every slot hidden from the booking
-//      page would still be bookable by anyone POSTing a start time directly or
-//      asking the AI agent (MCP bookings_create) to book it, which makes the
-//      whole feature cosmetic. Uses the same pure hide-set engine the display
-//      path uses (src/lib/calendar/look-busy.ts) over the same candidate grid.
+//   4. The interval must not be withheld by the host calendar's "look busy"
+//      configuration (calendar_profiles, migration 1267) — without this check
+//      every slot hidden from the booking page would still be bookable by
+//      anyone POSTing a start time directly or asking the AI agent (MCP
+//      bookings_create) to book it, which makes the whole feature cosmetic.
+//      Uses the same pure hide-set engine the display path uses
+//      (src/lib/calendar/look-busy.ts) over the same candidate grid.
 //   5. The interval must not overlap any other CONFIRMED, native
 //      (external_source IS NULL) booking for the same organizer, across ANY
 //      event type — mirrors the CAL-02 database exclusion constraint.
@@ -94,7 +95,7 @@ export async function resolveAndValidateSlot(
 
   let etQuery = supabase
     .from('event_types')
-    .select('id, org_id, user_id, title, duration_minutes, location_type, location_value, allowed_location_kinds, look_busy_mode, look_busy_percent, look_busy_max_per_day')
+    .select('id, org_id, user_id, title, duration_minutes, location_type, location_value, allowed_location_kinds')
     .eq('id', params.eventTypeId)
     .eq('active', true)
   if (params.orgId) etQuery = etQuery.eq('org_id', params.orgId)
@@ -114,7 +115,7 @@ export async function resolveAndValidateSlot(
 
   const { data: profile } = await supabase
     .from('calendar_profiles')
-    .select('timezone, conflict_calendar_ids')
+    .select('timezone, conflict_calendar_ids, look_busy_mode, look_busy_percent, look_busy_max_per_day')
     .eq('user_id', et.user_id)
     .maybeSingle()
   const hostTimezone = profile?.timezone ?? 'UTC'
@@ -160,7 +161,7 @@ export async function resolveAndValidateSlot(
   // Returns the existing 'outside_availability' rather than a dedicated error
   // on purpose: a distinct code would tell a probing booker "this time is free
   // but withheld", which is precisely what the feature must not disclose.
-  const lookBusy = lookBusyConfigFor(et)
+  const lookBusy = lookBusyConfigFor(profile ?? {})
   if (isLookBusyActive(lookBusy)) {
     const grid = buildCandidateGrid({
       date: format(localStart, 'yyyy-MM-dd'),

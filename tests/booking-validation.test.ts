@@ -311,11 +311,13 @@ describe('resolveAndValidateSlot — look busy', () => {
     return `${FUTURE_DATE}T${h}:${m}:00.000Z`
   })
 
+  // Look busy lives on the calendar profile (migration 1267), not the event
+  // type — resolveAndValidateSlot already fetches this row for the timezone.
   function withLookBusy(config: { mode: string; percent?: number | null; maxPerDay?: number | null }) {
     return buildFakeSupabase({
-      eventType: {
+      profile: {
         data: {
-          ...eventTypeRow,
+          timezone: 'UTC',
           look_busy_mode: config.mode,
           look_busy_percent: config.percent ?? null,
           look_busy_max_per_day: config.maxPerDay ?? null,
@@ -409,9 +411,9 @@ describe('resolveAndValidateSlot — look busy', () => {
     }
   })
 
-  it('treats a null mode (row selected before migration 1266) as off', async () => {
+  it('treats a host with no calendar profile row as off', async () => {
     const { client } = buildFakeSupabase({
-      eventType: { data: { ...eventTypeRow, look_busy_mode: null }, error: null },
+      profile: { data: null, error: null },
       windows: { data: WINDOWS, error: null },
     })
     const result = await resolveAndValidateSlot(client as any, {

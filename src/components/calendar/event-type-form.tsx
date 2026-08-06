@@ -27,23 +27,7 @@ const schema = z.object({
   allowed_location_kinds: z
     .array(z.enum(['google_meet', 'client_address', 'custom_address', 'phone_call', 'custom_phone', 'custom_link']))
     .min(1, 'Select at least one meeting location'),
-  look_busy_mode: z.enum(['off', 'hide_percent', 'max_per_day']),
-  look_busy_percent: z.number().int().min(1, 'Must be at least 1').max(90, 'Cannot exceed 90').nullable(),
-  look_busy_max_per_day: z.number().int().min(1, 'Must be at least 1').max(50, 'Cannot exceed 50').nullable(),
-}).superRefine((val, ctx) => {
-  if (val.look_busy_mode === 'hide_percent' && val.look_busy_percent == null) {
-    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['look_busy_percent'], message: 'Enter a percentage' })
-  }
-  if (val.look_busy_mode === 'max_per_day' && val.look_busy_max_per_day == null) {
-    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['look_busy_max_per_day'], message: 'Enter a maximum' })
-  }
 })
-
-const LOOK_BUSY_LABELS: Record<'off' | 'hide_percent' | 'max_per_day', string> = {
-  off: 'Off — show every open slot',
-  hide_percent: 'Hide a percentage of slots',
-  max_per_day: 'Show at most N slots per day',
-}
 
 type FormValues = z.infer<typeof schema>
 
@@ -83,14 +67,10 @@ export function EventTypeForm({ defaultValues, onSubmit, loading, submitLabel = 
               (REACHABLE_LOCATION_KINDS as readonly string[]).includes(k),
             ) as FormValues['allowed_location_kinds'])
           : ['custom_link'],
-      look_busy_mode: defaultValues?.look_busy_mode ?? 'off',
-      look_busy_percent: defaultValues?.look_busy_percent ?? null,
-      look_busy_max_per_day: defaultValues?.look_busy_max_per_day ?? null,
     },
   })
 
   const locationType = form.watch('location_type')
-  const lookBusyMode = form.watch('look_busy_mode')
 
   return (
     <Form {...form}>
@@ -190,67 +170,6 @@ export function EventTypeForm({ defaultValues, onSubmit, loading, submitLabel = 
             <FormMessage />
           </FormItem>
         )} />
-
-        <FormField control={form.control} name="look_busy_mode" render={({ field }) => (
-          <FormItem>
-            <FormLabel>Look busy</FormLabel>
-            <FormDescription>
-              Withholds some genuinely free slots so the page reads as in-demand.
-              This reduces real bookable capacity — withheld times cannot be
-              booked by anyone, including your AI agent. Which slots are held
-              back is fixed per day, so a booker who returns sees the same times.
-            </FormDescription>
-            <Select onValueChange={field.onChange} defaultValue={field.value}>
-              <FormControl><SelectTrigger><SelectValue /></SelectTrigger></FormControl>
-              <SelectContent>
-                {(Object.keys(LOOK_BUSY_LABELS) as Array<keyof typeof LOOK_BUSY_LABELS>).map((k) => (
-                  <SelectItem key={k} value={k}>{LOOK_BUSY_LABELS[k]}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <FormMessage />
-          </FormItem>
-        )} />
-
-        {lookBusyMode === 'hide_percent' && (
-          <FormField control={form.control} name="look_busy_percent" render={({ field }) => (
-            <FormItem>
-              <FormLabel>Percentage to hide</FormLabel>
-              <FormDescription>1–90. At least one slot per day always stays open.</FormDescription>
-              <FormControl>
-                <Input
-                  type="number"
-                  min={1}
-                  max={90}
-                  placeholder="40"
-                  value={field.value ?? ''}
-                  onChange={(e) => field.onChange(e.target.value === '' ? null : Number(e.target.value))}
-                />
-              </FormControl>
-              <FormMessage />
-            </FormItem>
-          )} />
-        )}
-
-        {lookBusyMode === 'max_per_day' && (
-          <FormField control={form.control} name="look_busy_max_per_day" render={({ field }) => (
-            <FormItem>
-              <FormLabel>Maximum slots per day</FormLabel>
-              <FormDescription>1–50, spread evenly across your availability.</FormDescription>
-              <FormControl>
-                <Input
-                  type="number"
-                  min={1}
-                  max={50}
-                  placeholder="3"
-                  value={field.value ?? ''}
-                  onChange={(e) => field.onChange(e.target.value === '' ? null : Number(e.target.value))}
-                />
-              </FormControl>
-              <FormMessage />
-            </FormItem>
-          )} />
-        )}
 
         <FormField control={form.control} name="color" render={({ field }) => (
           <FormItem>

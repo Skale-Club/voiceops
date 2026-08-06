@@ -1,8 +1,14 @@
 # Look Busy — artificial scarcity for calendar slots
 
-Withholds some genuinely free slots from an event type's booking page so the
-agenda reads as in-demand. Configured per event type under **Calendar → Event
-Types**, and **off by default** — no existing event type changes behaviour.
+Withholds some genuinely free slots from your public booking pages so the agenda
+reads as in-demand. Configured once per calendar under **Calendar →
+Preferences**, applies to every event type that calendar hosts, and is **off by
+default** — no existing calendar changes behaviour.
+
+Storage is `calendar_profiles` (migration `1267`). Migration `1266` had briefly
+put it on `event_types`; that was the wrong home — an operator thinks of "make my
+calendar look busy" as a property of the calendar, not something to re-declare on
+each event type. `1267` moves the columns and drops the `event_types` ones.
 
 This trades real bookable capacity for perceived scarcity. A withheld slot is
 not bookable by *anyone* going through the booker-facing paths, including the AI
@@ -21,8 +27,8 @@ each, rather than taking the N lowest-hash positions — otherwise every survivo
 could land in the same morning block, which is both useless to the operator and
 obviously synthetic.
 
-Both bounds are enforced twice: a `CHECK` constraint in migration `1266` and
-`zod` schemas in `_actions/event-types.ts` and `event-type-form.tsx`.
+Both bounds are enforced twice: a `CHECK` constraint in migration `1267` and the
+`zod` schema behind `updateLookBusySettings` in `_actions/calendar-profile.ts`.
 
 ## Two invariants that hold the feature together
 
@@ -48,6 +54,11 @@ This matters for two reasons:
 `computeHiddenSlotStarts` ranks slots by an FNV-1a hash of
 `` `${eventTypeId}|${date}|${slotStartIso}` ``. Same inputs, same output,
 forever, on the server and in tests.
+
+The hash stays keyed on the **event type** even though the setting is now
+calendar-level: two event types on the same calendar withhold different times,
+which is both more natural and unavoidable anyway, since different durations
+produce different slot grids.
 
 `Math.random()` would give a different agenda on every page refresh and to every
 booker simultaneously, and would make the display/validation agreement
@@ -99,9 +110,10 @@ publicly. That is pre-existing behaviour, unchanged here.
 ## Related
 
 - Engine: `src/lib/calendar/look-busy.ts` (pure — no IO, no `Date.now()`, no `Math.random()`)
+- Settings UI: `src/components/calendar/meeting-preferences.tsx` (Calendar → Preferences)
 - Grid + display: `src/lib/calendar/slots.ts`
 - Write gate: `src/lib/calendar/booking-validation.ts`
-- Migration: `supabase/migrations/1266_event_types_look_busy.sql`
+- Migrations: `supabase/migrations/1266_event_types_look_busy.sql` (superseded), `1267_calendar_profiles_look_busy.sql`
 - Tests: `tests/calendar-look-busy.test.ts`, `tests/calendar-slots.test.ts`, `tests/booking-validation.test.ts`
 
 ## Not covered

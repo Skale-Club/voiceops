@@ -16,7 +16,7 @@ function slugify(title: string): string {
     .slice(0, 60)
 }
 
-const eventTypeBaseSchema = z.object({
+const eventTypeSchema = z.object({
   title: z.string().min(1).max(100),
   slug: z.string().min(1).max(60).regex(/^[a-z0-9-]+$/).optional(),
   description: z.string().max(2000).optional(),
@@ -30,58 +30,9 @@ const eventTypeBaseSchema = z.object({
     .array(z.enum(['google_meet', 'client_address', 'custom_address', 'phone_call', 'custom_phone', 'custom_link']))
     .min(1)
     .optional(),
-  // Look busy (migration 1266). Bounds mirror the DB CHECKs.
-  look_busy_mode: z.enum(['off', 'hide_percent', 'max_per_day']).optional(),
-  look_busy_percent: z.number().int().min(1).max(90).nullable().optional(),
-  look_busy_max_per_day: z.number().int().min(1).max(50).nullable().optional(),
 })
 
-// Applied to both the full and the partial schema. Only fires when a mode was
-// actually submitted, so an unrelated patch (e.g. just the title) never trips
-// it. Kept as a standalone refiner because .superRefine() returns a ZodEffects,
-// which has no .partial() — updateEventType needs the partial of the *object*.
-function refineLookBusy(
-  val: {
-    look_busy_mode?: 'off' | 'hide_percent' | 'max_per_day'
-    look_busy_percent?: number | null
-    look_busy_max_per_day?: number | null
-  },
-  ctx: z.RefinementCtx,
-) {
-  if (val.look_busy_mode === 'hide_percent' && val.look_busy_percent == null) {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      path: ['look_busy_percent'],
-      message: 'look_busy_percent is required when look_busy_mode is hide_percent',
-    })
-  }
-  if (val.look_busy_mode === 'max_per_day' && val.look_busy_max_per_day == null) {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      path: ['look_busy_max_per_day'],
-      message: 'look_busy_max_per_day is required when look_busy_mode is max_per_day',
-    })
-  }
-}
-
-const eventTypeSchema = eventTypeBaseSchema.superRefine(refineLookBusy)
-const eventTypeUpdateSchema = eventTypeBaseSchema.partial().superRefine(refineLookBusy)
-
 export type EventTypeInput = z.infer<typeof eventTypeSchema>
-
-// Null the parameter that the chosen mode does not use, so a stale value can
-// never resurface if the operator switches modes back and forth. Only touches
-// the look-busy fields, and only when a mode was submitted.
-function normalizeLookBusy<T extends Partial<EventTypeInput>>(data: T): T {
-  if (!data.look_busy_mode) return data
-  if (data.look_busy_mode === 'off') {
-    return { ...data, look_busy_percent: null, look_busy_max_per_day: null }
-  }
-  if (data.look_busy_mode === 'hide_percent') {
-    return { ...data, look_busy_max_per_day: null }
-  }
-  return { ...data, look_busy_percent: null }
-}
 
 export type EventTypeRow = {
   id: string
@@ -97,9 +48,6 @@ export type EventTypeRow = {
   allowed_location_kinds: string[] | null
   active: boolean
   booking_type: 'personal' | 'round_robin'
-  look_busy_mode: 'off' | 'hide_percent' | 'max_per_day'
-  look_busy_percent: number | null
-  look_busy_max_per_day: number | null
   created_at: string
   updated_at: string
 }
@@ -140,7 +88,7 @@ export async function createEventType(
   const { data, error } = await supabase
     .from('event_types')
     .insert({
-      ...normalizeLookBusy(parsed.data),
+      ...parsed.data,
       slug,
       org_id: orgId,
       user_id: user.id,
@@ -160,13 +108,13 @@ export async function updateEventType(
   const user = await getUser()
   if (!user) return { ok: false, error: 'not_authenticated' }
 
-  const parsed = eventTypeUpdateSchema.safeParse(input)
+  const parsed = eventTypeSchema.partial().safeParse(input)
   if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? 'validation_error' }
 
   const supabase = await createClient()
   const { data, error } = await supabase
     .from('event_types')
-    .update({ ...normalizeLookBusy(parsed.data), updated_at: new Date().toISOString() })
+    .update({ ...parsed.data, updated_at: new Date().toISOString() })
     .eq('id', id)
     .eq('user_id', user.id)
     .select()

@@ -5091,9 +5091,6 @@ export interface Database {
           allowed_location_kinds: string[]
           default_store_location_id: string | null
           booking_type: 'personal' | 'round_robin'
-          look_busy_mode: 'off' | 'hide_percent' | 'max_per_day'
-          look_busy_percent: number | null
-          look_busy_max_per_day: number | null
           created_at: string
           updated_at: string
         }
@@ -5112,9 +5109,6 @@ export interface Database {
           allowed_location_kinds?: string[]
           default_store_location_id?: string | null
           booking_type?: 'personal' | 'round_robin'
-          look_busy_mode?: 'off' | 'hide_percent' | 'max_per_day'
-          look_busy_percent?: number | null
-          look_busy_max_per_day?: number | null
           created_at?: string
           updated_at?: string
         }
@@ -5130,9 +5124,6 @@ export interface Database {
           allowed_location_kinds?: string[]
           default_store_location_id?: string | null
           booking_type?: 'personal' | 'round_robin'
-          look_busy_mode?: 'off' | 'hide_percent' | 'max_per_day'
-          look_busy_percent?: number | null
-          look_busy_max_per_day?: number | null
           updated_at?: string
         }
         Relationships: [
@@ -5161,6 +5152,9 @@ export interface Database {
           sync_mode: string
           default_location_type: string
           conflict_calendar_ids: string[]
+          look_busy_mode: 'off' | 'hide_percent' | 'max_per_day'
+          look_busy_percent: number | null
+          look_busy_max_per_day: number | null
           created_at: string
           updated_at: string
         }
@@ -5172,6 +5166,9 @@ export interface Database {
           sync_mode?: string
           default_location_type?: string
           conflict_calendar_ids?: string[]
+          look_busy_mode?: 'off' | 'hide_percent' | 'max_per_day'
+          look_busy_percent?: number | null
+          look_busy_max_per_day?: number | null
           created_at?: string
           updated_at?: string
         }
@@ -5181,6 +5178,9 @@ export interface Database {
           sync_mode?: string
           default_location_type?: string
           conflict_calendar_ids?: string[]
+          look_busy_mode?: 'off' | 'hide_percent' | 'max_per_day'
+          look_busy_percent?: number | null
+          look_busy_max_per_day?: number | null
           updated_at?: string
         }
         Relationships: [
