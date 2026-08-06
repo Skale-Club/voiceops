@@ -38,6 +38,8 @@ import type {
   CrmQualificationStatus,
   CrmRecommendedChannel,
   Database,
+  EmailRisk,
+  EmailStatus,
   Json,
   ProspectEntityType,
 } from '@/types/database'
@@ -66,6 +68,11 @@ export type ProspectRow = {
   createdAt: string
   updatedAt: string
   tags: string[]
+  /** Migration 1264/1265: email verification cache surfaced via prospect_rows. */
+  emailStatus: EmailStatus | null
+  emailVerifiedAt: string | null
+  emailVerificationProvider: string | null
+  emailRisk: EmailRisk | null
 }
 
 export type ProspectListResult =
@@ -73,6 +80,9 @@ export type ProspectListResult =
   | { ok: false; error: string; forbidden?: boolean }
 
 export type ProspectSort = 'recent' | 'score' | 'name'
+
+/** 'unverified' is a sentinel for "email_status IS NULL" — not a real EmailStatus value. */
+export type ProspectEmailFilter = EmailStatus | 'unverified'
 
 export type ProspectFilters = {
   q?: string
@@ -85,6 +95,8 @@ export type ProspectFilters = {
   sort?: ProspectSort
   page?: number
   pageSize?: number
+  /** Filter by email verification status. See ProspectEmailFilter for the 'unverified' sentinel. */
+  emailStatus?: ProspectEmailFilter
 }
 
 export type ProspectsPageResult =
@@ -191,6 +203,8 @@ export async function getProspects(filters: ProspectFilters = {}): Promise<Prosp
   if (filters.engagement) query = query.eq('engagement_status', filters.engagement)
   if (filters.intent) query = query.eq('intent_level', filters.intent)
   if (filters.qualification) query = query.eq('qualification_status', filters.qualification)
+  if (filters.emailStatus === 'unverified') query = query.is('email_status', null)
+  else if (filters.emailStatus) query = query.eq('email_status', filters.emailStatus)
   if (safeCity) query = query.ilike('city', `%${safeCity}%`)
   if (safeQ)
     query = query.or(
@@ -239,6 +253,10 @@ export async function getProspects(filters: ProspectFilters = {}): Promise<Prosp
     createdAt: row.created_at as string,
     updatedAt: row.updated_at as string,
     tags: (row.tags as string[] | null) ?? [],
+    emailStatus: (row.email_status as EmailStatus | null) ?? null,
+    emailVerifiedAt: (row.email_verified_at as string | null) ?? null,
+    emailVerificationProvider: (row.email_verification_provider as string | null) ?? null,
+    emailRisk: (row.email_risk as EmailRisk | null) ?? null,
   }))
 
   const lists = ((listsResult.data ?? []) as Array<{ id: string; name: string }>).map((l) => ({
@@ -814,7 +832,7 @@ export async function getProspectReplies(): Promise<ProspectListResult> {
   const supabase = await createClient()
   const { data, error } = await supabase
     .from('contacts')
-    .select('id, first_name, last_name, name, email, phone, company, tags, custom_fields, source, source_type, source_id, engagement_status, intent_level, qualification_status, recommended_channel, score, last_contacted_at, last_replied_at, created_at, updated_at')
+    .select('id, first_name, last_name, name, email, phone, company, tags, custom_fields, source, source_type, source_id, engagement_status, intent_level, qualification_status, recommended_channel, score, last_contacted_at, last_replied_at, email_status, email_verified_at, email_verification_provider, email_risk, created_at, updated_at')
     .eq('lifecycle_stage', 'prospect')
     .in('engagement_status', REPLY_STATUSES)
     .order('last_replied_at', { ascending: false, nullsFirst: false })
@@ -844,6 +862,10 @@ export async function getProspectReplies(): Promise<ProspectListResult> {
     createdAt: row.created_at as string,
     updatedAt: row.updated_at as string,
     tags: (row.tags as string[] | null) ?? [],
+    emailStatus: (row.email_status as EmailStatus | null) ?? null,
+    emailVerifiedAt: (row.email_verified_at as string | null) ?? null,
+    emailVerificationProvider: (row.email_verification_provider as string | null) ?? null,
+    emailRisk: (row.email_risk as EmailRisk | null) ?? null,
   }))
 
   return { ok: true, rows, total: rows.length }
@@ -962,13 +984,13 @@ export async function getProspectDetail(
     kind === 'company'
       ? await supabase
           .from('accounts')
-          .select('id, name, domain, website, phone, tags, custom_fields, source, source_type, source_id, source_payload, engagement_status, intent_level, qualification_status, recommended_channel, score, last_contacted_at, last_replied_at, created_at, updated_at')
+          .select('id, name, domain, website, phone, tags, custom_fields, source, source_type, source_id, source_payload, engagement_status, intent_level, qualification_status, recommended_channel, score, last_contacted_at, last_replied_at, email_status, email_verified_at, email_verification_provider, email_risk, created_at, updated_at')
           .eq('id', id)
           .eq('lifecycle_stage', 'prospect')
           .maybeSingle()
       : await supabase
           .from('contacts')
-          .select('id, first_name, last_name, name, email, phone, company, tags, custom_fields, source, source_type, source_id, source_payload, engagement_status, intent_level, qualification_status, recommended_channel, score, last_contacted_at, last_replied_at, created_at, updated_at')
+          .select('id, first_name, last_name, name, email, phone, company, tags, custom_fields, source, source_type, source_id, source_payload, engagement_status, intent_level, qualification_status, recommended_channel, score, last_contacted_at, last_replied_at, email_status, email_verified_at, email_verification_provider, email_risk, created_at, updated_at')
           .eq('id', id)
           .eq('lifecycle_stage', 'prospect')
           .maybeSingle()
@@ -1044,6 +1066,10 @@ export async function getProspectDetail(
     createdAt: row.created_at as string,
     updatedAt: row.updated_at as string,
     tags: (row.tags as string[] | null) ?? [],
+    emailStatus: (row.email_status as EmailStatus | null) ?? null,
+    emailVerifiedAt: (row.email_verified_at as string | null) ?? null,
+    emailVerificationProvider: (row.email_verification_provider as string | null) ?? null,
+    emailRisk: (row.email_risk as EmailRisk | null) ?? null,
     events: ((eventsResult.data ?? []) as Array<Record<string, unknown>>).map((e) => ({
       id: e.id as string,
       eventType: e.event_type as string,

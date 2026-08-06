@@ -62,6 +62,7 @@ import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { useBreadcrumbOverride } from "@/components/layout/breadcrumb-override-context";
 import { DndBadge } from "@/components/contacts/dnd-badge";
+import { EmailVerificationBadge } from "@/components/prospects/email-verification-badge";
 import { ChannelBadge, type Channel } from "@/components/design-system/channel-badge";
 import {
   Tooltip,
@@ -634,6 +635,17 @@ export function ContactsTable({
                       <AlertTriangle className="h-3 w-3 shrink-0 text-amber-400" />
                     )}
                     <span className="truncate">{formatEmailDisplay(c.email) || "-"}</span>
+                    {c.email && (
+                      <EmailVerificationBadge
+                        status={c.email_status}
+                        risk={c.email_risk}
+                        verifiedAt={c.email_verified_at}
+                        provider={c.email_verification_provider}
+                        size="sm"
+                        showLabel={false}
+                        className="shrink-0"
+                      />
+                    )}
                   </div>
                   <div className="flex flex-wrap gap-1 overflow-hidden">
                     {c.tags.slice(0, 2).map((tagName) => {

@@ -1,6 +1,12 @@
 import { ShieldAlert, UserPlus } from 'lucide-react'
 
-import { getProspects, type ProspectFilters, type ProspectKind, type ProspectSort } from './actions'
+import {
+  getProspects,
+  type ProspectEmailFilter,
+  type ProspectFilters,
+  type ProspectKind,
+  type ProspectSort,
+} from './actions'
 import { ProspectsTable } from '@/components/prospects/prospects-table'
 import { EntityPageTemplate } from '@/components/crm/entity-template'
 import { PageContainer, PageHeader } from '@/components/layout/page-header'
@@ -22,6 +28,7 @@ type SearchParams = {
   list?: string
   sort?: string
   page?: string
+  emailStatus?: string
 }
 
 export default async function ProspectsPage({
@@ -30,6 +37,19 @@ export default async function ProspectsPage({
   searchParams: Promise<SearchParams>
 }) {
   const sp = await searchParams
+
+  const EMAIL_FILTER_VALUES: ProspectEmailFilter[] = [
+    'ok',
+    'catch_all',
+    'unknown',
+    'disposable',
+    'invalid',
+    'bounced',
+    'unverified',
+  ]
+  const emailStatus = (EMAIL_FILTER_VALUES as string[]).includes(sp.emailStatus ?? '')
+    ? (sp.emailStatus as ProspectEmailFilter)
+    : undefined
 
   const filters: ProspectFilters = {
     q: sp.q,
@@ -42,6 +62,7 @@ export default async function ProspectsPage({
     sort: (sp.sort as ProspectSort) || 'recent',
     page: sp.page ? Math.max(1, parseInt(sp.page, 10) || 1) : 1,
     pageSize: 25,
+    emailStatus,
   }
 
   const result = await getProspects(filters)

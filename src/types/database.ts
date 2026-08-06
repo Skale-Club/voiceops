@@ -174,6 +174,11 @@ export type CrmEngagementStatus =
   | 'unsubscribed'
 export type CrmIntentLevel = 'none' | 'low' | 'medium' | 'high'
 export type CrmQualificationStatus = 'unqualified' | 'needs_review' | 'qualified'
+// Email verification (migration 1264) — contacts.email_status / accounts.email_status.
+// Mirrors src/lib/email-verification/types.ts's EmailStatus; kept as a self-contained
+// union here (rather than importing) to match this file's existing enum convention.
+export type EmailStatus = 'ok' | 'catch_all' | 'unknown' | 'disposable' | 'invalid' | 'bounced'
+export type EmailRisk = 'low' | 'medium' | 'high'
 // Prospects full system (migration 1158) — recommended outreach channel for a record
 export type CrmRecommendedChannel = 'email' | 'sms' | 'whatsapp' | 'call' | 'visit' | 'linkedin'
 // Engagement timeline event types (migration 1158 — prospect_engagement_events)
@@ -2802,6 +2807,11 @@ export interface Database {
           last_contacted_at: string | null
           last_replied_at: string | null
           last_visit_at: string | null
+          /** Migration 1264: email verification cache (millionverifier/neverbounce/bounce) */
+          email_status: EmailStatus | null
+          email_verified_at: string | null
+          email_verification_provider: string | null
+          email_risk: EmailRisk | null
         }
         Insert: {
           id?: string
@@ -2882,6 +2892,10 @@ export interface Database {
           last_contacted_at?: string | null
           last_replied_at?: string | null
           last_visit_at?: string | null
+          email_status?: EmailStatus | null
+          email_verified_at?: string | null
+          email_verification_provider?: string | null
+          email_risk?: EmailRisk | null
         }
         Relationships: [
           {
@@ -3122,6 +3136,11 @@ export interface Database {
           created_by: string | null
           created_at: string
           updated_at: string
+          /** Migration 1264: email verification cache (millionverifier/neverbounce/bounce) — companies keep their scraped address in custom_fields.email, only the verification STATUS gets a real column */
+          email_status: EmailStatus | null
+          email_verified_at: string | null
+          email_verification_provider: string | null
+          email_risk: EmailRisk | null
         }
         Insert: {
           id?: string
@@ -3184,6 +3203,10 @@ export interface Database {
           last_replied_at?: string | null
           last_visit_at?: string | null
           updated_at?: string
+          email_status?: EmailStatus | null
+          email_verified_at?: string | null
+          email_verification_provider?: string | null
+          email_risk?: EmailRisk | null
         }
         Relationships: [
           {
@@ -3220,6 +3243,11 @@ export interface Database {
           score: number
           last_contacted_at: string | null
           last_replied_at: string | null
+          /** Migration 1265: email verification columns exposed on the unified view */
+          email_status: EmailStatus | null
+          email_verified_at: string | null
+          email_verification_provider: string | null
+          email_risk: EmailRisk | null
           created_at: string
           updated_at: string
         }
