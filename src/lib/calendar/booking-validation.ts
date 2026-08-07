@@ -14,30 +14,32 @@
 //      that generateSlots would never have offered as a displayed slot.
 //      Checks ALL windows for that day (a host can configure more than one
 //      window per day since migration 1140 — see Pitfall 5).
-//   4. The interval must not overlap any other CONFIRMED, native
+//   4. The interval must not be withheld by the host calendar's "look busy"
+//      configuration (calendar_profiles, migration 1267) — without this check
+//      every slot hidden from the booking page would still be bookable by
+//      anyone POSTing a start time directly or asking the AI agent (MCP
+//      bookings_create) to book it, which makes the whole feature cosmetic.
+//      Uses the same pure hide-set engine the display path uses
+//      (src/lib/calendar/look-busy.ts) over the same candidate grid.
+//   5. The interval must not overlap any other CONFIRMED, native
 //      (external_source IS NULL) booking for the same organizer, across ANY
 //      event type — mirrors the CAL-02 database exclusion constraint.
-//   5. The interval must not overlap a busy interval on the host's connected
+//   6. The interval must not overlap a busy interval on the host's connected
 //      Google Calendar (best-effort — fails open on API error).
 //
 // createBookingInternal (operator/dashboard drag-to-create) intentionally does
 // NOT call this helper — it allows duration overrides and bypasses
-// booker-facing availability windows by design. It still respects the CAL-02
-// database constraint like every other write path.
-//
-// Deferred (NOT fixed here): getAvailableSlots/getDebugSlots in
-// src/app/(dashboard)/calendar/_actions/bookings.ts still use .maybeSingle()
-// on user_availability and only pass a single window into generateSlots, so
-// they throw on a day with 2+ configured windows (RESEARCH.md Pitfall 5).
-// This helper's own window-matching logic below is unaffected — it always
-// queries user_availability as an array — but the *display* path a booker
-// sees slots from is a separate, pre-existing bug, explicitly out of scope.
+// booker-facing availability windows by design, which extends to look-busy: an
+// operator booking by hand may use a withheld slot. It still respects the
+// CAL-02 database constraint like every other write path.
 
-import { addMinutes } from 'date-fns'
+import { addMinutes, format } from 'date-fns'
 import { fromZonedTime, toZonedTime } from 'date-fns-tz'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { Database } from '@/types/database'
 import { fetchBusyTimes } from '@/lib/calendar/google-calendar'
+import { buildCandidateGrid } from '@/lib/calendar/slots'
+import { isLookBusyActive, isSlotHidden, lookBusyConfigFor } from '@/lib/calendar/look-busy'
 
 export type SlotValidationError =
   | 'event_type_not_found'
@@ -113,7 +115,7 @@ export async function resolveAndValidateSlot(
 
   const { data: profile } = await supabase
     .from('calendar_profiles')
-    .select('timezone, conflict_calendar_ids')
+    .select('timezone, conflict_calendar_ids, look_busy_mode, look_busy_percent, look_busy_max_per_day')
     .eq('user_id', et.user_id)
     .maybeSingle()
   const hostTimezone = profile?.timezone ?? 'UTC'
@@ -151,6 +153,32 @@ export async function resolveAndValidateSlot(
     return (startAt.getTime() - windowStartUtc.getTime()) % stepMs === 0
   })
   if (!withinAnyWindow) return { ok: false, error: 'outside_availability' }
+
+  // Look busy: reject a slot the booking page deliberately withheld. Rebuilds
+  // the same candidate grid the display path built — from availability alone,
+  // never from what is still free — so the hide-set matches exactly.
+  //
+  // Returns the existing 'outside_availability' rather than a dedicated error
+  // on purpose: a distinct code would tell a probing booker "this time is free
+  // but withheld", which is precisely what the feature must not disclose.
+  const lookBusy = lookBusyConfigFor(profile ?? {})
+  if (isLookBusyActive(lookBusy)) {
+    const grid = buildCandidateGrid({
+      date: format(localStart, 'yyyy-MM-dd'),
+      timezone: hostTimezone,
+      durationMinutes: et.duration_minutes,
+      availability: windows ?? [],
+      bufferMinutes: 0,
+    })
+    const hidden = isSlotHidden({
+      eventTypeId: et.id,
+      date: format(localStart, 'yyyy-MM-dd'),
+      gridStarts: grid.map((c) => c.start.toISOString()),
+      config: lookBusy,
+      slotStartIso: startAt.toISOString(),
+    })
+    if (hidden) return { ok: false, error: 'outside_availability' }
+  }
 
   const { data: organizerEventTypes } = await supabase
     .from('event_types')

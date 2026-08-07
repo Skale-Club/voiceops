@@ -27,6 +27,9 @@ const REASON_LABEL: Record<SlotBlockReason, string> = {
   past: 'PAST',
   booked: 'BOOKED',
   google_busy: 'GOOGLE BUSY',
+  // Only ever reaches the client for an authenticated member of the event
+  // type's org — getDebugSlots drops withheld slots for everyone else.
+  look_busy: 'LOOK BUSY',
 }
 
 interface BookingSlotPickerProps {
