@@ -113,7 +113,7 @@ publicly. That is pre-existing behaviour, unchanged here.
 - Settings UI: `src/components/calendar/meeting-preferences.tsx` (Calendar → Preferences)
 - Grid + display: `src/lib/calendar/slots.ts`
 - Write gate: `src/lib/calendar/booking-validation.ts`
-- Migrations: `supabase/migrations/1266_event_types_look_busy.sql` (superseded), `1267_calendar_profiles_look_busy.sql`
+- Migrations: `supabase/migrations/1267_event_types_look_busy.sql` (superseded), `1268_calendar_profiles_look_busy.sql`
 - Tests: `tests/calendar-look-busy.test.ts`, `tests/calendar-slots.test.ts`, `tests/booking-validation.test.ts`
 
 ## Not covered
