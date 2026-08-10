@@ -14,6 +14,8 @@ interface CreateBookingParams {
   serviceIds?: Array<number | string> | string
   staffMemberId?: number | string
   staffId?: number | string
+  /** What the customer actually asked for, in their words (AGT-08). */
+  notes?: string
   [key: string]: unknown
 }
 
@@ -58,6 +60,9 @@ export async function createXkeduleBooking(
     },
   }
   if (staff != null) body.staffMemberId = Number(staff)
+  // Carries the request through to the person holding the clippers ("short on
+  // the sides", "it's for my son") instead of dying in the transcript.
+  if (typeof p.notes === 'string' && p.notes.trim()) body.notes = p.notes.trim()
 
   try {
     const booking = await xkeduleFetchJson<BookingResponse>(

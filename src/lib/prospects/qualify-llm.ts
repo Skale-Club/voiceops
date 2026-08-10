@@ -104,12 +104,8 @@ async function resolveLlmProvider(
   const platformOpenRouterKey = await getPlatformSetting('OPENROUTER_API_KEY', serviceClient)
   if (platformOpenRouterKey) return { kind: 'openrouter', apiKey: platformOpenRouterKey }
 
-  const orgAnthropicKey = await getProviderKey('anthropic', orgId, serviceClient)
-  if (orgAnthropicKey) return { kind: 'anthropic', apiKey: orgAnthropicKey }
-
-  const platformAnthropicKey = await getPlatformSetting('ANTHROPIC_API_KEY', serviceClient)
-  if (platformAnthropicKey) return { kind: 'anthropic', apiKey: platformAnthropicKey }
-
+  // OpenRouter only — see src/lib/copilot/resolve-provider.ts for why the
+  // direct-Anthropic fallback was removed everywhere.
   throw new Error('no_llm_key')
 }
 
