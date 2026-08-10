@@ -111,10 +111,17 @@ export function AssistantMappingsTable({
       toast.error(result.error ?? "Sync failed. Try again.");
       return;
     }
+    // A skipped assistant is one another workspace already routes through.
+    // Saying so out loud matters: silence here reads as "everything imported",
+    // and the person would go looking for an assistant that is deliberately
+    // still pointed somewhere else.
+    const skippedNote = result.skipped
+      ? ` ${result.skipped} left with another workspace that already uses ${result.skipped === 1 ? "it" : "them"}.`
+      : "";
     toast.success(
-      result.imported
+      (result.imported
         ? `Synced ${result.imported} assistant${result.imported === 1 ? "" : "s"} from Vapi.`
-        : "No assistants found on your Vapi account.",
+        : "No new assistants to import.") + skippedNote,
     );
     router.refresh();
   }

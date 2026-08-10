@@ -70,6 +70,8 @@ export async function deleteAssistantMapping(id: string) {
 export async function syncVapiAssistantsAction(): Promise<{
   ok: boolean
   imported?: number
+  /** Assistants another org already routes through — left untouched. */
+  skipped?: number
   error?: string
 }> {
   const supabase = await createClient()
