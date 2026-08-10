@@ -19,6 +19,8 @@ interface VapiAssistant {
 export interface SyncVapiAssistantsResult {
   ok: boolean
   imported?: number
+  /** Assistants left alone because another org already routes through them. */
+  skipped?: number
   error?: string
 }
 
@@ -73,15 +75,45 @@ export async function syncVapiAssistants(
     return { ok: true, imported: 0 }
   }
 
-  // 3. Upsert into the registry. onConflict keeps each row's is_active intact
+  // 3. Never take an assistant that another org already claims.
+  //
+  // One Vapi account can serve several Xphere orgs — a platform-owned account
+  // hosting an assistant that books into a client's tenant, say. The mapping is
+  // not a label saying who owns the assistant; it is the routing table that
+  // decides WHOSE credentials fire when a tool runs. A blind upsert on
+  // vapi_assistant_id rewrote organization_id, so pressing "Sync from Vapi" on
+  // the account's home org silently repointed the other org's assistant at
+  // itself. Nothing errors: the next caller just reaches an org with no
+  // matching integration and hears the tool's fallback message.
+  const { data: claimed, error: claimError } = await supabase
+    .from('assistant_mappings')
+    .select('vapi_assistant_id, organization_id')
+    .in('vapi_assistant_id', rows.map((r) => r.vapi_assistant_id))
+
+  if (claimError) {
+    return { ok: false, error: claimError.message }
+  }
+
+  const claimedByOthers = new Set(
+    (claimed ?? [])
+      .filter((m) => m.organization_id !== organizationId)
+      .map((m) => m.vapi_assistant_id),
+  )
+  const importable = rows.filter((r) => !claimedByOthers.has(r.vapi_assistant_id))
+
+  if (importable.length === 0) {
+    return { ok: true, imported: 0, skipped: claimedByOthers.size }
+  }
+
+  // 4. Upsert into the registry. onConflict keeps each row's is_active intact
   //    (so a manual disable survives a re-sync) and only refreshes the name.
   const { error } = await supabase
     .from('assistant_mappings')
-    .upsert(rows, { onConflict: 'vapi_assistant_id' })
+    .upsert(importable, { onConflict: 'vapi_assistant_id' })
 
   if (error) {
     return { ok: false, error: error.message }
   }
 
-  return { ok: true, imported: rows.length }
+  return { ok: true, imported: importable.length, skipped: claimedByOthers.size }
 }
