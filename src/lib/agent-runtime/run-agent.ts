@@ -8,14 +8,15 @@
 // Blocking path: generateText from 'ai' (locked in 34-01-SUMMARY.md)
 // Streaming path: streamText from 'ai' (locked in D-35-09)
 //
-// Provider: OpenRouter is the primary path in production — platform_settings
-// only carries OPENROUTER_API_KEY (no ANTHROPIC_API_KEY), matching the
-// resolution precedence already established by src/lib/copilot/resolve-provider.ts.
-// The direct Anthropic path (@ai-sdk/anthropic) is kept as a fallback for orgs/
-// deployments that configure ANTHROPIC_API_KEY directly. See resolveLlmProvider().
+// Provider: OpenRouter, always. Every model this platform runs — Claude, GPT,
+// Llama — is reached through one OpenRouter key, so model ids keep their vendor
+// prefix (`anthropic/claude-sonnet-4-6`) and there is exactly one credential to
+// configure. The direct Anthropic path was removed: it was a second way to be
+// misconfigured, and it silently was — every agent invocation on the web widget
+// between May and June died with `no_anthropic_key` while a perfectly good
+// OpenRouter key sat in platform_settings. See resolveLlmProvider().
 
 import { generateText, streamText, dynamicTool, stepCountIs } from 'ai'
-import { createAnthropic } from '@ai-sdk/anthropic'
 import { createOpenRouter } from '@openrouter/ai-sdk-provider'
 import { jsonSchema } from 'ai'
 import { after } from 'next/server'
@@ -35,7 +36,6 @@ import {
   checkDailyCostCap,
   checkCommerceWritesPerTurn,
 } from './guardrails'
-import { anthropicApiModelId } from '@/lib/agents/models'
 import { resolveAgent } from './resolve-agent'
 import { resolveAgentTool } from './resolve-agent-tool'
 import {
@@ -112,22 +112,19 @@ function turnTimeoutFor(budget: number, hasTools: boolean): number {
 
 /**
  * Per-call LLM extras for extended thinking. When enabled the caller must omit
- * a custom temperature (Anthropic forces temperature=1 with thinking enabled)
+ * a custom temperature (thinking forces temperature=1 on the underlying model)
  * and ensure maxOutputTokens exceeds the thinking budget.
  *
- * Anthropic path: providerOptions.anthropic.thinking — native Messages API param.
- * OpenRouter path: providerOptions.openrouter.reasoning.max_tokens — OpenRouter's
- * normalized "reasoning tokens" param, which it maps onto whichever underlying
- * vendor param applies (e.g. Anthropic's thinking.budget_tokens) for the routed
- * model. https://openrouter.ai/docs/use-cases/reasoning-tokens
+ * providerOptions.openrouter.reasoning.max_tokens is OpenRouter's normalized
+ * "reasoning tokens" param, which it maps onto whichever underlying vendor
+ * param applies (e.g. Claude's thinking.budget_tokens) for the routed model.
+ * https://openrouter.ai/docs/use-cases/reasoning-tokens
  */
 function thinkingLlmExtras(
   maxTokens: number,
   budget: number,
-  providerKind: LlmProviderChoice['kind'],
 ): {
   providerOptions?: {
-    anthropic?: { thinking: { type: 'enabled'; budgetTokens: number } }
     openrouter?: { reasoning: { max_tokens: number } }
   }
   maxOutputTokens: number
@@ -136,20 +133,15 @@ function thinkingLlmExtras(
   if (!(budget > 0)) {
     return { maxOutputTokens: maxTokens, includeTemperature: true }
   }
-  const providerOptions =
-    providerKind === 'anthropic'
-      ? { anthropic: { thinking: { type: 'enabled' as const, budgetTokens: budget } } }
-      : { openrouter: { reasoning: { max_tokens: budget } } }
   return {
-    providerOptions,
+    providerOptions: { openrouter: { reasoning: { max_tokens: budget } } },
     maxOutputTokens: Math.max(maxTokens, budget + 2048),
     includeTemperature: false,
   }
 }
 
 // ---------------------------------------------------------------------------
-// LLM credential + provider resolution (org OpenRouter → platform OpenRouter →
-// org Anthropic → platform Anthropic)
+// LLM credential resolution (org OpenRouter key → platform OpenRouter key)
 // ---------------------------------------------------------------------------
 // Mirrors the precedence in src/lib/copilot/resolve-provider.ts, but resolved
 // against the service-role client already used throughout this module (this
@@ -157,10 +149,13 @@ function thinkingLlmExtras(
 // request session, unlike the copilot route which has one) and against the
 // agent's own configured model rather than copilot's fixed model tiers.
 
-type LlmProviderChoice =
-  | { kind: 'openrouter'; apiKey: string }
-  | { kind: 'anthropic'; apiKey: string }
+type LlmProviderChoice = { kind: 'openrouter'; apiKey: string }
 
+/**
+ * One provider, two places to hold the key: the org's own OpenRouter
+ * integration wins (so an org can be billed for its own usage), otherwise the
+ * platform key covers everyone.
+ */
 async function resolveLlmProvider(
   orgId: string,
   serviceClient: ReturnType<typeof createServiceRoleClient>,
@@ -173,34 +168,21 @@ async function resolveLlmProvider(
   const platformOpenRouterKey = await getPlatformSetting('OPENROUTER_API_KEY', serviceClient)
   if (platformOpenRouterKey) return { kind: 'openrouter', apiKey: platformOpenRouterKey }
 
-  const orgAnthropicKey = await getProviderKey('anthropic', orgId, serviceClient)
-  if (orgAnthropicKey) return { kind: 'anthropic', apiKey: orgAnthropicKey }
-
-  const platformAnthropicKey = await getPlatformSetting('ANTHROPIC_API_KEY', serviceClient)
-  if (platformAnthropicKey) return { kind: 'anthropic', apiKey: platformAnthropicKey }
-
   throw new Error('no_llm_key')
 }
 
 /**
- * Builds the ai@^6 LanguageModel for a resolved provider choice.
- * - OpenRouter: pass the FULL model id (e.g. `anthropic/claude-sonnet-4-6`) —
- *   that vendor-prefixed form is OpenRouter's native model id, not a prefix to
- *   strip.
- * - Anthropic: strip the `anthropic/` routing prefix via anthropicApiModelId()
- *   since the Messages API expects bare ids (e.g. `claude-sonnet-4-6`).
+ * Builds the ai@^6 LanguageModel. Model ids keep their vendor prefix
+ * (`anthropic/claude-sonnet-4-6`) — that IS OpenRouter's native id, not a
+ * prefix to strip.
  */
 function buildLanguageModel(providerChoice: LlmProviderChoice, modelId: string) {
-  if (providerChoice.kind === 'openrouter') {
-    const openrouterProvider = createOpenRouter({ apiKey: providerChoice.apiKey })
-    // Explicit .chat() — the bare callable form's first overload resolves to
-    // the legacy completion (text-completion, no tool calling) API when no
-    // settings are passed. .chat() is OpenRouter's chat-completions-compatible
-    // endpoint and is required for tool use + streaming here.
-    return openrouterProvider.chat(modelId)
-  }
-  const anthropicProvider = createAnthropic({ apiKey: providerChoice.apiKey })
-  return anthropicProvider(anthropicApiModelId(modelId))
+  const openrouterProvider = createOpenRouter({ apiKey: providerChoice.apiKey })
+  // Explicit .chat() — the bare callable form's first overload resolves to
+  // the legacy completion (text-completion, no tool calling) API when no
+  // settings are passed. .chat() is OpenRouter's chat-completions-compatible
+  // endpoint and is required for tool use + streaming here.
+  return openrouterProvider.chat(modelId)
 }
 
 // ---------------------------------------------------------------------------
@@ -644,7 +626,7 @@ async function runAgentBlocking(opts: AgentRunOptions): Promise<AgentRunResult> 
       const serviceClient = createServiceRoleClient()
 
       // Resolve LLM credential + provider: org OpenRouter → platform
-      // OpenRouter → org Anthropic → platform Anthropic (throws no_llm_key
+      // org OpenRouter key → platform OpenRouter key (throws no_llm_key
       // if none configured). Per-call provider bound to this org's key avoids
       // mutating any process.env credential, which would race across
       // concurrent requests from different orgs.
@@ -919,7 +901,7 @@ async function runAgentBlocking(opts: AgentRunOptions): Promise<AgentRunResult> 
       const effectiveMaxSteps = opts.maxSteps
         ? Math.min(50, Math.max(1, opts.maxSteps))
         : (resolvedAgent.maxSteps ?? MAX_LLM_CALLS_PER_TURN)
-      const thinkingExtras = thinkingLlmExtras(resolvedAgent.maxTokens, thinkingBudget, llmProviderChoice.kind)
+      const thinkingExtras = thinkingLlmExtras(resolvedAgent.maxTokens, thinkingBudget)
 
       // Schedule the turn timeout now that the toolSet is known: tool-using
       // turns get the wider tools/thinking tier (RUNTIME-08). The thinking
@@ -1183,7 +1165,7 @@ function runAgentStreaming(
 
         try {
           // Resolve LLM credential + provider: org OpenRouter → platform
-          // OpenRouter → org Anthropic → platform Anthropic (throws
+          // org OpenRouter key → platform OpenRouter key (throws
           // no_llm_key if none configured). Per-call provider bound to this
           // org's key avoids mutating any process.env credential, which
           // would race across concurrent requests from different orgs.
@@ -1371,7 +1353,7 @@ function runAgentStreaming(
           const effectiveMaxSteps = opts.maxSteps
             ? Math.min(50, Math.max(1, opts.maxSteps))
             : (resolvedAgent.maxSteps ?? MAX_LLM_CALLS_PER_TURN)
-          const thinkingExtras = thinkingLlmExtras(resolvedAgent.maxTokens, thinkingBudget, llmProviderChoice.kind)
+          const thinkingExtras = thinkingLlmExtras(resolvedAgent.maxTokens, thinkingBudget)
 
           // Schedule the turn timeout now that the toolSet is known: tool-using
           // turns get the wider tools/thinking tier (RUNTIME-08). The thinking

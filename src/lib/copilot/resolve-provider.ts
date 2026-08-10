@@ -63,18 +63,12 @@ export async function resolveCopilotProvider(
     return { kind: 'openrouter', apiKey: platformOr, model: orModel }
   }
 
-  // 3. Org-level Anthropic
-  const orgAnth = await getProviderKey('anthropic', orgId, supabase)
-  if (orgAnth) {
-    return { kind: 'anthropic', apiKey: orgAnth, model: anModel }
-  }
-
-  // 4. Platform-level Anthropic
-  const platformAnth = await getPlatformSetting('ANTHROPIC_API_KEY')
-  if (platformAnth) {
-    return { kind: 'anthropic', apiKey: platformAnth, model: anModel }
-  }
-
+  // No third and fourth step on purpose. Every model runs through OpenRouter,
+  // 100% of the time. The direct-Anthropic fallback that used to sit here was a
+  // second way to be misconfigured and silently was one: agent runs failed with
+  // `no_anthropic_key` while a working OpenRouter key sat in platform_settings.
+  // The `anthropic` variant of ProviderChoice is now unreachable; call sites
+  // that still branch on it are dead code pending cleanup.
   return null
 }
 

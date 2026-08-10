@@ -335,18 +335,26 @@ export const NODES: NodeSpec[] = [
   {
     type: 'xkedule_check_availability',
     kind: 'action',
-    description: 'Check open time slots in Xkedule for a date and service(s). Duration is derived from the services.',
+    description:
+      'Check open time slots in Xkedule. Pass `date` for one day, or `startDate`+`endDate` to scan a range and get the next available opening. Duration is derived from the services. Set `includeStaff` to learn who can take each slot (single date only).',
     integration_required: ['xkedule'],
     params_schema: {
       type: 'object',
       properties: {
-        date: { type: 'string', description: 'YYYY-MM-DD' },
+        date: { type: 'string', description: 'YYYY-MM-DD — a single day' },
+        startDate: { type: 'string', description: 'YYYY-MM-DD — start of a range scan (use with endDate, instead of date)' },
+        endDate: { type: 'string', description: 'YYYY-MM-DD — end of a range scan (use with startDate, instead of date)' },
         serviceIds: { type: 'string', description: 'Comma-separated service ids (or a single id)' },
         staffId: { type: 'number', description: 'Optional staff member id' },
+        includeStaff: { type: 'boolean', description: 'Return which staff member can take each slot. Single date only; ignored when staffId is set.' },
       },
-      required: ['date', 'serviceIds'],
+      required: ['serviceIds'],
     },
-    examples: [{ date: '2026-06-20', serviceIds: '5' }],
+    examples: [
+      { date: '2026-06-20', serviceIds: '5' },
+      { startDate: '2026-06-20', endDate: '2026-06-27', serviceIds: '5' },
+      { date: '2026-06-20', serviceIds: '5', includeStaff: true },
+    ],
   },
   {
     type: 'xkedule_create_booking',
@@ -364,6 +372,7 @@ export const NODES: NodeSpec[] = [
         customerPhone: { type: 'string' },
         customerEmail: { type: 'string' },
         customerAddress: { type: 'string' },
+        notes: { type: 'string', description: "What the customer asked for in their own words, e.g. 'short on the sides'." },
       },
       required: ['serviceIds', 'bookingDate', 'startTime', 'customerName', 'customerPhone'],
     },
@@ -415,6 +424,15 @@ export const NODES: NodeSpec[] = [
       required: ['serviceIds'],
     },
     examples: [{ serviceIds: '5,7' }],
+  },
+  {
+    type: 'xkedule_business_info',
+    kind: 'action',
+    description:
+      "Read the business's opening hours, address, timezone, service area and booking policies (cancellation, no-show, late arrival, deposit) from Xkedule. Use it instead of guessing — unpublished policies come back marked as such.",
+    integration_required: ['xkedule'],
+    params_schema: { type: 'object', properties: {} },
+    examples: [{}],
   },
   {
     type: 'xkedule_lookup_customer',
