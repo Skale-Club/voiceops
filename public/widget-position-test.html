@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Opps Widget — Placement Harness</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 0; padding: 24px 28px; background: #fafafa; color: #18181b; }
+    h1 { font-size: 18px; margin: 0 0 4px; }
+    p  { font-size: 13px; color: #71717a; margin: 0 0 16px; }
+    .row { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; align-items: center; }
+    button { font: inherit; font-size: 12.5px; padding: 6px 10px; border-radius: 6px;
+             border: 1px solid #d4d4d8; background: #fff; cursor: pointer; }
+    button[aria-pressed="true"] { border-color: #6366F1; background: #eef2ff; color: #4338ca; }
+    label { font-size: 12.5px; color: #3f3f46; display: inline-flex; align-items: center; gap: 6px; }
+    code { background: #f4f4f5; padding: 1px 5px; border-radius: 4px; font-size: 12px; }
+  </style>
+</head>
+<body>
+  <h1>Widget placement harness</h1>
+  <p>
+    No network, no DB: <code>fetch</code> is stubbed for the config endpoint, so this page exercises the
+    real <code>public/widget.js</code> anchoring CSS alone. Switch anchors and spacing and watch the bubble,
+    the greeting pill and the open panel follow.
+  </p>
+
+  <div class="row" id="anchors"></div>
+  <div class="row">
+    <label>X <input id="ox" type="range" min="0" max="200" value="20" /> <span id="oxv">20</span>px</label>
+    <label>Y <input id="oy" type="range" min="0" max="200" value="20" /> <span id="oyv">20</span>px</label>
+    <button id="toggle">Open / close panel</button>
+  </div>
+
+  <script>
+    // --- Stub the config endpoint before widget.js loads ---------------------
+    const state = { position: 'bottom-right', offsetX: 20, offsetY: 20 }
+    const realFetch = window.fetch.bind(window)
+    window.fetch = function (input, init) {
+      const url = typeof input === 'string' ? input : (input && input.url) || ''
+      if (url.includes('/api/widget/') && url.includes('/config')) {
+        return Promise.resolve(new Response(JSON.stringify({
+          displayName: 'Placement Test',
+          primaryColor: '#6366F1',
+          welcomeMessage: 'Anchor check.',
+          avatarUrl: null,
+          greetingEnabled: true,
+          greetingMessage: 'Anchor check.',
+          greetingDelaySeconds: 0,
+          position: state.position,
+          offsetX: state.offsetX,
+          offsetY: state.offsetY,
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+      }
+      return realFetch(input, init)
+    }
+
+    // Re-project placement onto the live host without reloading the bundle —
+    // exactly what applyPlacement() in the widget does.
+    function apply() {
+      const host = document.getElementById('opps-root')
+      if (!host) return
+      const [v, h] = state.position.split('-')
+      host.setAttribute('data-vpos', v)
+      host.setAttribute('data-hpos', h)
+      host.style.setProperty('--opps-offset-x', state.offsetX + 'px')
+      host.style.setProperty('--opps-offset-y', v === 'middle' ? '0px' : state.offsetY + 'px')
+    }
+
+    const POSITIONS = ['top-left','top-right','middle-left','middle-right','bottom-left','bottom-right']
+    const bar = document.getElementById('anchors')
+    POSITIONS.forEach((p) => {
+      const b = document.createElement('button')
+      b.textContent = p
+      b.setAttribute('aria-pressed', String(p === state.position))
+      b.onclick = () => {
+        state.position = p
+        bar.querySelectorAll('button').forEach((x) => x.setAttribute('aria-pressed', String(x.textContent === p)))
+        apply()
+      }
+      bar.appendChild(b)
+    })
+
+    const ox = document.getElementById('ox'), oy = document.getElementById('oy')
+    ox.oninput = () => { state.offsetX = +ox.value; document.getElementById('oxv').textContent = ox.value; apply() }
+    oy.oninput = () => { state.offsetY = +oy.value; document.getElementById('oyv').textContent = oy.value; apply() }
+    document.getElementById('toggle').onclick = () => {
+      const root = document.getElementById('opps-root')
+      const panel = root && root.shadowRoot.querySelector('.opps-panel')
+      if (panel && panel.getAttribute('aria-hidden') === 'false') window.Opps.close()
+      else window.Opps.open()
+    }
+  </script>
+
+  <script src="/widget.js" data-token="placement-harness" async></script>
+</body>
+</html>

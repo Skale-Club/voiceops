@@ -9,6 +9,7 @@ import { WidgetPlayground } from '@/components/widget/widget-playground'
 import { PageContainer, PageHeader } from '@/components/layout/page-header'
 import { getActiveAgents, getChannelDefaults } from '@/app/(dashboard)/agents/actions'
 import { normalizeWidgetUrlMode, normalizeWidgetUrlRules } from '@/lib/widget/url-rules'
+import { normalizeWidgetOffset, normalizeWidgetPosition } from '@/lib/widget/position'
 
 const DEFAULT_WIDGET_SETTINGS = {
   displayName: 'AI Assistant',
@@ -52,7 +53,7 @@ export default async function SettingsWidgetPage() {
   const [orgResult, agents, channelDefaults] = await Promise.all([
     supabase
       .from('organizations')
-      .select('id, name, widget_display_name, widget_primary_color, widget_welcome_message, widget_token, widget_avatar_url, accent_color, widget_greeting_enabled, widget_greeting_message, widget_greeting_delay_seconds, widget_url_mode, widget_url_rules')
+      .select('id, name, widget_display_name, widget_primary_color, widget_welcome_message, widget_token, widget_avatar_url, accent_color, widget_greeting_enabled, widget_greeting_message, widget_greeting_delay_seconds, widget_url_mode, widget_url_rules, widget_position, widget_offset_x, widget_offset_y')
       .eq('id', activeOrgId)
       .single(),
     getActiveAgents(),
@@ -79,6 +80,9 @@ export default async function SettingsWidgetPage() {
     greetingDelaySeconds: typeof organization.widget_greeting_delay_seconds === 'number' ? organization.widget_greeting_delay_seconds : 3,
     urlMode: normalizeWidgetUrlMode(organization.widget_url_mode),
     urlRules: normalizeWidgetUrlRules(organization.widget_url_rules),
+    position: normalizeWidgetPosition(organization.widget_position),
+    offsetX: normalizeWidgetOffset(organization.widget_offset_x),
+    offsetY: normalizeWidgetOffset(organization.widget_offset_y),
   }
 
   return (

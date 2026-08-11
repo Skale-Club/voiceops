@@ -1,6 +1,15 @@
 // src/widget/index.ts
 // Opps embeddable chat widget | standalone vanilla TypeScript, no React/Next.js imports
 import { WIDGET_THEME as T } from './theme'
+import {
+  horizontalAnchor,
+  normalizeWidgetOffset,
+  normalizeWidgetPosition,
+  verticalAnchor,
+  WIDGET_OFFSET_DEFAULT,
+  WIDGET_POSITION_DEFAULT,
+  type WidgetPosition,
+} from '../lib/widget/position'
 
 interface WidgetConfig {
   displayName: string
@@ -9,6 +18,9 @@ interface WidgetConfig {
   greetingEnabled: boolean
   greetingMessage: string
   greetingDelaySeconds: number
+  position: WidgetPosition
+  offsetX: number
+  offsetY: number
 }
 
 const DEFAULT_WIDGET_CONFIG: WidgetConfig = {
@@ -18,6 +30,9 @@ const DEFAULT_WIDGET_CONFIG: WidgetConfig = {
   greetingEnabled: true,
   greetingMessage: 'Hi! How can I help?',
   greetingDelaySeconds: 3,
+  position: WIDGET_POSITION_DEFAULT,
+  offsetX: WIDGET_OFFSET_DEFAULT,
+  offsetY: WIDGET_OFFSET_DEFAULT,
 }
 
 // --- CSS constant (inline string, full UI-SPEC values) ---
@@ -25,7 +40,28 @@ const WIDGET_CSS = `
 /* Theme */
 :host {
   --opps-primary-color: #18181B;
+
+  /* --- Placement -----------------------------------------------------------
+     The host carries data-vpos (top|middle|bottom) and data-hpos (left|right),
+     set at runtime from the org's widget settings. The offsets are the gap from
+     the two screen edges the bubble hugs. Defaults reproduce the historical
+     hardcoded bottom-right / 20px placement exactly. */
+  --opps-offset-x: 20px;
+  --opps-offset-y: 20px;
+  /* How far the panel and greeting must clear the bubble: 56px + 12px gap. */
+  --opps-lead: 68px;
+  /* Transform-origin halves, so one rule serves all six anchors. */
+  --opps-origin-y: bottom;
+  --opps-origin-x: right;
+  /* Self-centering shift for the greeting pill, and the slide direction of the
+     panel open/close animation. Both flip with the vertical anchor and are read
+     from inside @keyframes, which resolves them per-element. */
+  --opps-greet-shift: 50%;
+  --opps-panel-shift: 20px;
 }
+:host([data-vpos="top"])    { --opps-origin-y: top;    --opps-greet-shift: -50%; --opps-panel-shift: -20px; }
+:host([data-vpos="middle"]) { --opps-origin-y: center; --opps-greet-shift: -50%; }
+:host([data-hpos="left"])   { --opps-origin-x: left; }
 
 /* Reset */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -47,8 +83,6 @@ const WIDGET_CSS = `
 /* Bubble */
 .opps-bubble {
   position: fixed;
-  bottom: 20px;
-  right: 20px;
   z-index: 2147483647;
   width: 56px;
   height: 56px;
@@ -68,14 +102,46 @@ const WIDGET_CSS = `
   animation: opps-pulse 1.4s ease-out 1.2s 2 both;
 }
 
+/* --- Anchoring -------------------------------------------------------------
+   Every fixed element resolves its two edges from the host's data-vpos/data-hpos.
+   The middle anchors center on the viewport rather than an edge, so
+   widget_offset_y has no effect there (the settings UI disables it to match).
+   The bubble is centered by offsetting half its height (28px) instead of a
+   translate, so :hover/:active keep sole ownership of transform. */
+:host([data-hpos="right"]) .opps-bubble,
+:host([data-hpos="right"]) .opps-panel { right: var(--opps-offset-x); left: auto; }
+:host([data-hpos="left"])  .opps-bubble,
+:host([data-hpos="left"])  .opps-panel { left: var(--opps-offset-x); right: auto; }
+
+:host([data-vpos="bottom"]) .opps-bubble { bottom: var(--opps-offset-y); top: auto; }
+:host([data-vpos="top"])    .opps-bubble { top: var(--opps-offset-y); bottom: auto; }
+:host([data-vpos="middle"]) .opps-bubble { top: calc(50% - 28px); bottom: auto; }
+
+/* The panel clears the bubble on the side the anchor leaves free. */
+:host([data-vpos="bottom"]) .opps-panel {
+  bottom: calc(var(--opps-offset-y) + var(--opps-lead));
+  top: auto;
+  max-height: calc(100vh - var(--opps-offset-y) - var(--opps-lead) - 20px);
+}
+:host([data-vpos="top"]) .opps-panel {
+  top: calc(var(--opps-offset-y) + var(--opps-lead));
+  bottom: auto;
+  max-height: calc(100vh - var(--opps-offset-y) - var(--opps-lead) - 20px);
+}
+:host([data-vpos="middle"]) .opps-panel {
+  top: max(12px, calc(50% - var(--opps-panel-h) / 2));
+  bottom: auto;
+  max-height: calc(100vh - 24px);
+}
+
 /* Panel */
 .opps-panel {
   position: fixed;
-  bottom: 88px;
-  right: 20px;
   z-index: 2147483646;
   width: 360px;
-  height: 520px;
+  /* Mirrored into a var so the middle anchor can center on the real height. */
+  --opps-panel-h: 520px;
+  height: var(--opps-panel-h);
   background: ${T.panelBg};
   border: 1px solid ${T.borderColor};
   border-radius: 12px;
@@ -83,27 +149,28 @@ const WIDGET_CSS = `
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  transform-origin: bottom right;
+  transform-origin: var(--opps-origin-y) var(--opps-origin-x);
   transition: width 240ms cubic-bezier(0.2,0,0,1), height 240ms cubic-bezier(0.2,0,0,1);
 }
 .opps-panel[aria-hidden="true"] {
   display: none;
 }
-/* Expanded (desktop): a bit larger, still anchored bottom-right */
+/* Expanded (desktop): a bit larger, still on the org's anchor. The max-height
+   comes from the anchor rules above, which know the offsets. */
 .opps-panel.opps-expanded {
   width: 420px;
-  height: 680px;
-  max-height: calc(100vh - 108px);
+  --opps-panel-h: 680px;
 }
-/* Mobile: expanded = fullscreen */
+/* Mobile: expanded = fullscreen. Selector is host-qualified so it outranks the
+   :host([data-vpos]) anchor rules above and can pin all four edges to 0. */
 @media (max-width: 640px) {
-  .opps-panel.opps-expanded {
+  :host([data-vpos]) .opps-panel.opps-expanded {
     top: 0;
     left: 0;
     right: 0;
     bottom: 0;
     width: 100%;
-    height: 100%;
+    --opps-panel-h: 100%;
     max-height: 100%;
     border-radius: 0;
     border: none;
@@ -116,12 +183,12 @@ const WIDGET_CSS = `
   animation: opps-panel-close 220ms cubic-bezier(0.36, 0, 0.66, -0.3) forwards;
 }
 @keyframes opps-panel-open {
-  from { opacity: 0; transform: scale(0.82) translateY(20px); }
-  to   { opacity: 1; transform: scale(1)    translateY(0);    }
+  from { opacity: 0; transform: scale(0.82) translateY(var(--opps-panel-shift)); }
+  to   { opacity: 1; transform: scale(1)    translateY(0);                       }
 }
 @keyframes opps-panel-close {
-  from { opacity: 1; transform: scale(1)    translateY(0);    }
-  to   { opacity: 0; transform: scale(0.82) translateY(20px); }
+  from { opacity: 1; transform: scale(1)    translateY(0);                       }
+  to   { opacity: 0; transform: scale(0.82) translateY(var(--opps-panel-shift)); }
 }
 
 /* Bubble icon flip animation on toggle */
@@ -143,30 +210,42 @@ const WIDGET_CSS = `
 /* Greeting composer (minimized "Write a message…" prompt) */
 .opps-greeting {
   position: fixed;
-  /* Anchored to the bubble's vertical centerline (20px bottom + 56/2) and
-     shifted down 50% of its own height, so the pill centers on the bubble
-     regardless of its height. */
-  bottom: 48px;
-  right: 88px;
   z-index: 2147483646;
   display: flex;
   flex-direction: column;
-  align-items: flex-end;
   max-width: 300px;
-  transform: translateY(50%);
-  transform-origin: bottom right;
+  /* Anchored to the bubble's centerline (see rules below) and shifted half its
+     own height, so the pill centers on the bubble whatever its height. */
+  transform: translateY(var(--opps-greet-shift));
+  transform-origin: var(--opps-origin-y) var(--opps-origin-x);
   font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
 }
+/* The greeting sits beside the bubble, on the inward side of the anchor. */
+:host([data-hpos="right"]) .opps-greeting {
+  right: calc(var(--opps-offset-x) + var(--opps-lead));
+  left: auto;
+  align-items: flex-end;
+}
+:host([data-hpos="left"]) .opps-greeting {
+  left: calc(var(--opps-offset-x) + var(--opps-lead));
+  right: auto;
+  align-items: flex-start;
+}
+/* 28px = half the bubble, i.e. its centerline. */
+:host([data-vpos="bottom"]) .opps-greeting { bottom: calc(var(--opps-offset-y) + 28px); top: auto; }
+:host([data-vpos="top"])    .opps-greeting { top: calc(var(--opps-offset-y) + 28px); bottom: auto; }
+:host([data-vpos="middle"]) .opps-greeting { top: 50%; bottom: auto; }
+
 .opps-greeting[aria-hidden="true"] { display: none; }
 .opps-greeting-opening { animation: opps-greeting-in 280ms cubic-bezier(0.34, 1.56, 0.64, 1) forwards; }
 .opps-greeting-closing { animation: opps-greeting-out 200ms ease forwards; }
 @keyframes opps-greeting-in {
-  from { opacity: 0; transform: translateY(calc(50% + 12px)) scale(0.96); }
-  to   { opacity: 1; transform: translateY(50%)              scale(1);    }
+  from { opacity: 0; transform: translateY(calc(var(--opps-greet-shift) + 12px)) scale(0.96); }
+  to   { opacity: 1; transform: translateY(var(--opps-greet-shift))              scale(1);    }
 }
 @keyframes opps-greeting-out {
-  from { opacity: 1; transform: translateY(50%)              scale(1);    }
-  to   { opacity: 0; transform: translateY(calc(50% + 12px)) scale(0.96); }
+  from { opacity: 1; transform: translateY(var(--opps-greet-shift))              scale(1);    }
+  to   { opacity: 0; transform: translateY(calc(var(--opps-greet-shift) + 12px)) scale(0.96); }
 }
 .opps-greeting-row { position: relative; display: flex; align-items: center; }
 /* Invisible hover bridge above the pill so moving the cursor up to the × keeps
@@ -179,6 +258,9 @@ const WIDGET_CSS = `
   top: -36px;
   height: 38px;
 }
+/* Anchored at the top of the screen there is no room above the pill, so the
+   dismiss button and its hover bridge flip below it. */
+:host([data-vpos="top"]) .opps-greeting-row::before { top: auto; bottom: -36px; }
 .opps-greeting-pill {
   display: flex;
   align-items: center;
@@ -218,6 +300,8 @@ const WIDGET_CSS = `
 }
 .opps-greeting-send:hover:not(:disabled) { opacity: 0.92; }
 .opps-greeting-send:disabled { background: #d4d4d8; cursor: default; }
+:host([data-vpos="top"])  .opps-greeting-close { top: auto; bottom: -28px; }
+:host([data-hpos="left"]) .opps-greeting-close { left: auto; right: -7px; }
 .opps-greeting-close {
   position: absolute;
   top: -28px;
@@ -601,6 +685,21 @@ function getDisplayInitial(displayName: string): string {
   return displayName.trim().charAt(0).toUpperCase() || DEFAULT_WIDGET_CONFIG.displayName.charAt(0)
 }
 
+/**
+ * Project the org's placement settings onto the shadow host. The CSS does the
+ * rest: data-vpos/data-hpos select the anchor rules, and the two offset vars
+ * feed the edge gaps. Vertical spacing is dropped for the middle-* anchors
+ * (viewport-centered), so a stale offsetY can't nudge a centered widget.
+ */
+function applyPlacement(host: HTMLElement, config: WidgetConfig): void {
+  const position = normalizeWidgetPosition(config.position)
+  const vpos = verticalAnchor(position)
+  host.setAttribute('data-vpos', vpos)
+  host.setAttribute('data-hpos', horizontalAnchor(position))
+  host.style.setProperty('--opps-offset-x', `${normalizeWidgetOffset(config.offsetX)}px`)
+  host.style.setProperty('--opps-offset-y', vpos === 'middle' ? '0px' : `${normalizeWidgetOffset(config.offsetY)}px`)
+}
+
 // Result of the config fetch. `blocked` is true only when the server explicitly
 // denies this URL (HTTP 403 from the widget's URL rules) — the signal the widget
 // uses to keep itself hidden. Any other failure falls back to defaults and shows
@@ -640,6 +739,9 @@ async function fetchWidgetConfig(apiBase: string, token: string): Promise<Widget
         greetingEnabled: payload.greetingEnabled !== false,
         greetingMessage: normalizeWidgetText(payload.greetingMessage, welcomeMessage),
         greetingDelaySeconds: Math.max(0, Math.min(30, rawDelay)),
+        position: normalizeWidgetPosition(payload.position),
+        offsetX: normalizeWidgetOffset(payload.offsetX),
+        offsetY: normalizeWidgetOffset(payload.offsetY),
       },
       blocked: false,
     }
@@ -1097,6 +1199,9 @@ function initWidget(token: string, apiBase: string, contextEndpoint: string): vo
   // Keep hidden until the config fetch authorizes this URL — avoids any flash of
   // the bubble on pages where the widget's URL rules disallow it.
   host.style.display = 'none'
+  // Seed the default anchor so the CSS has something to match before the config
+  // arrives; applyPlacement() overwrites it with the org's setting.
+  applyPlacement(host, DEFAULT_WIDGET_CONFIG)
   document.body.appendChild(host)
 
   const shadow = host.attachShadow({ mode: 'open' })
@@ -1216,6 +1321,7 @@ function initWidget(token: string, apiBase: string, contextEndpoint: string): vo
     }
     host.style.display = '' // authorized → reveal
     host.style.setProperty('--opps-primary-color', config.primaryColor)
+    applyPlacement(host, config)
     applyConfig(config)
     if (config.greetingEnabled && !greetingDismissed()) {
       greetingTimer = setTimeout(showGreeting, config.greetingDelaySeconds * 1000)

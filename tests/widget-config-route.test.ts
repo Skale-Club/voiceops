@@ -35,6 +35,9 @@ describe('GET /api/widget/[token]/config', () => {
         widget_primary_color: '#0F172A',
         widget_welcome_message: 'How can we help today?',
         widget_avatar_url: 'https://example.com/avatar.png',
+        widget_position: 'top-left',
+        widget_offset_x: 48,
+        widget_offset_y: 64,
       },
       error: null,
     })
@@ -53,9 +56,12 @@ describe('GET /api/widget/[token]/config', () => {
       greetingEnabled: true,
       greetingMessage: 'How can we help today?',
       greetingDelaySeconds: 3,
+      position: 'top-left',
+      offsetX: 48,
+      offsetY: 64,
     })
     expect(mockSupabase.select).toHaveBeenCalledWith(
-      'is_active, widget_display_name, widget_primary_color, widget_welcome_message, widget_avatar_url, accent_color, widget_greeting_enabled, widget_greeting_message, widget_greeting_delay_seconds, widget_url_mode, widget_url_rules'
+      'is_active, widget_display_name, widget_primary_color, widget_welcome_message, widget_avatar_url, accent_color, widget_greeting_enabled, widget_greeting_message, widget_greeting_delay_seconds, widget_url_mode, widget_url_rules, widget_position, widget_offset_x, widget_offset_y'
     )
   })
 
@@ -118,6 +124,58 @@ describe('GET /api/widget/[token]/config', () => {
       greetingEnabled: true,
       greetingMessage: 'Hi! How can I help?',
       greetingDelaySeconds: 3,
+      // Placement columns absent (pre-1269 row) → the historical hardcoded anchor.
+      position: 'bottom-right',
+      offsetX: 20,
+      offsetY: 20,
     })
+  })
+
+  it('rejects an unknown position and clamps out-of-range spacing', async () => {
+    mockSupabase.single.mockResolvedValue({
+      data: {
+        is_active: true,
+        widget_display_name: 'Bot',
+        widget_welcome_message: 'Hello',
+        widget_position: 'diagonal-somewhere',
+        widget_offset_x: 9999,
+        widget_offset_y: -40,
+      },
+      error: null,
+    })
+
+    const { GET } = await import('@/app/api/widget/[token]/config/route')
+    const response = await GET(new Request('http://localhost/api/widget/odd-token/config'), {
+      params: Promise.resolve({ token: 'odd-token' }),
+    })
+
+    const body = await response.json()
+    expect(body.position).toBe('bottom-right')
+    expect(body.offsetX).toBe(200)
+    expect(body.offsetY).toBe(0)
+  })
+
+  it('zeroes vertical spacing for a middle anchor, which centers on the viewport', async () => {
+    mockSupabase.single.mockResolvedValue({
+      data: {
+        is_active: true,
+        widget_display_name: 'Bot',
+        widget_welcome_message: 'Hello',
+        widget_position: 'middle-left',
+        widget_offset_x: 32,
+        widget_offset_y: 80,
+      },
+      error: null,
+    })
+
+    const { GET } = await import('@/app/api/widget/[token]/config/route')
+    const response = await GET(new Request('http://localhost/api/widget/middle-token/config'), {
+      params: Promise.resolve({ token: 'middle-token' }),
+    })
+
+    const body = await response.json()
+    expect(body.position).toBe('middle-left')
+    expect(body.offsetX).toBe(32)
+    expect(body.offsetY).toBe(0)
   })
 })

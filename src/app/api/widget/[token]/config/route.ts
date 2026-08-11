@@ -6,6 +6,11 @@ import {
   normalizeWidgetUrlMode,
   normalizeWidgetUrlRules,
 } from '@/lib/widget/url-rules'
+import {
+  isVerticallyCentered,
+  normalizeWidgetOffset,
+  normalizeWidgetPosition,
+} from '@/lib/widget/position'
 
 export const runtime = 'nodejs'
 
@@ -54,7 +59,7 @@ export async function GET(
   const supabase = createServiceRoleClient()
   const { data: org, error } = await supabase
     .from('organizations')
-    .select('is_active, widget_display_name, widget_primary_color, widget_welcome_message, widget_avatar_url, accent_color, widget_greeting_enabled, widget_greeting_message, widget_greeting_delay_seconds, widget_url_mode, widget_url_rules')
+    .select('is_active, widget_display_name, widget_primary_color, widget_welcome_message, widget_avatar_url, accent_color, widget_greeting_enabled, widget_greeting_message, widget_greeting_delay_seconds, widget_url_mode, widget_url_rules, widget_position, widget_offset_x, widget_offset_y')
     .eq('widget_token', token)
     .single()
 
@@ -81,6 +86,11 @@ export async function GET(
   const rawDelay = typeof org.widget_greeting_delay_seconds === 'number' ? org.widget_greeting_delay_seconds : 3
   const greetingDelaySeconds = Math.max(0, Math.min(30, rawDelay))
 
+  // Placement (migration 1269). The DB has CHECK constraints, but normalize here
+  // too so a widget served against an un-migrated column still gets bottom-right
+  // rather than an undefined anchor. offsetY is meaningless when centered.
+  const position = normalizeWidgetPosition(org.widget_position)
+
   return Response.json({
     displayName: normalizeWidgetValue(org.widget_display_name, DEFAULT_WIDGET_CONFIG.displayName),
     // Fall back to the company's brand accent so the widget matches the brand
@@ -96,5 +106,8 @@ export async function GET(
     greetingEnabled: org.widget_greeting_enabled !== false,
     greetingMessage: normalizeWidgetValue(org.widget_greeting_message, welcomeMessage),
     greetingDelaySeconds,
+    position,
+    offsetX: normalizeWidgetOffset(org.widget_offset_x),
+    offsetY: isVerticallyCentered(position) ? 0 : normalizeWidgetOffset(org.widget_offset_y),
   }, { headers: CORS_HEADERS })
 }

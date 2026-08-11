@@ -8,6 +8,11 @@ import {
   normalizeWidgetUrlRules,
   type WidgetUrlMode,
 } from '@/lib/widget/url-rules'
+import {
+  normalizeWidgetOffset,
+  normalizeWidgetPosition,
+  type WidgetPosition,
+} from '@/lib/widget/position'
 
 
 export interface WidgetSettingsInput {
@@ -21,6 +26,10 @@ export interface WidgetSettingsInput {
   // newline/comma-separated string (as typed in the settings textarea).
   urlMode?: WidgetUrlMode
   urlRules?: string[] | string | null
+  // Screen anchor + the gap from the two edges the bubble hugs (px).
+  position?: WidgetPosition
+  offsetX?: number
+  offsetY?: number
 }
 
 export interface WidgetActionResult {
@@ -44,7 +53,25 @@ function normalizeWidgetSettings(input: WidgetSettingsInput): WidgetSettingsInpu
   // back to allow/block doesn't lose the list.
   const urlRules = normalizeWidgetUrlRules(input.urlRules)
 
-  return { displayName, welcomeMessage, avatarUrl, greetingEnabled, greetingMessage, greetingDelaySeconds, urlMode, urlRules }
+  // Placement. offsetY is kept as entered even for the middle-* anchors (which
+  // ignore it) so switching back to a top/bottom anchor restores the old gap.
+  const position = normalizeWidgetPosition(input.position)
+  const offsetX = normalizeWidgetOffset(input.offsetX)
+  const offsetY = normalizeWidgetOffset(input.offsetY)
+
+  return {
+    displayName,
+    welcomeMessage,
+    avatarUrl,
+    greetingEnabled,
+    greetingMessage,
+    greetingDelaySeconds,
+    urlMode,
+    urlRules,
+    position,
+    offsetX,
+    offsetY,
+  }
 }
 
 async function getActiveOrgId() {
@@ -95,6 +122,9 @@ export async function saveWidgetSettings(
       widget_greeting_delay_seconds: settings.greetingDelaySeconds ?? 3,
       widget_url_mode: settings.urlMode ?? 'all',
       widget_url_rules: Array.isArray(settings.urlRules) ? settings.urlRules : [],
+      widget_position: settings.position ?? 'bottom-right',
+      widget_offset_x: settings.offsetX ?? 20,
+      widget_offset_y: settings.offsetY ?? 20,
     })
     .eq('id', orgId)
 

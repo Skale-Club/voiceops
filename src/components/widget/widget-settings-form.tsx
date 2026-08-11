@@ -35,6 +35,13 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { setChannelDefault } from '@/app/(dashboard)/agents/actions'
+import { WidgetPlacementEditor } from '@/components/widget/widget-placement-editor'
+import {
+  WIDGET_OFFSET_DEFAULT,
+  WIDGET_OFFSET_MAX,
+  WIDGET_OFFSET_MIN,
+  WIDGET_POSITION_DEFAULT,
+} from '@/lib/widget/position'
 
 const widgetSettingsSchema = z.object({
   displayName: z
@@ -54,6 +61,11 @@ const widgetSettingsSchema = z.object({
   urlMode: z.enum(['all', 'allowlist', 'blocklist']),
   // Textarea value: one URL pattern per line. Normalized to an array on save.
   urlRules: z.string().optional(),
+  // Literal union (not WIDGET_POSITIONS spread) so zod infers WidgetPosition
+  // itself, keeping saveWidgetSettings(values) assignable without a cast.
+  position: z.enum(['top-left', 'top-right', 'middle-left', 'middle-right', 'bottom-left', 'bottom-right']),
+  offsetX: z.coerce.number().int().min(WIDGET_OFFSET_MIN).max(WIDGET_OFFSET_MAX),
+  offsetY: z.coerce.number().int().min(WIDGET_OFFSET_MIN).max(WIDGET_OFFSET_MAX),
 })
 
 /** Join a stored rules array (or string) into the textarea's newline form. */
@@ -115,6 +127,9 @@ export function WidgetSettingsForm({
       greetingDelaySeconds: savedSettings.greetingDelaySeconds ?? 3,
       urlMode: savedSettings.urlMode ?? 'all',
       urlRules: rulesToText(savedSettings.urlRules),
+      position: savedSettings.position ?? WIDGET_POSITION_DEFAULT,
+      offsetX: savedSettings.offsetX ?? WIDGET_OFFSET_DEFAULT,
+      offsetY: savedSettings.offsetY ?? WIDGET_OFFSET_DEFAULT,
     },
   })
 
@@ -334,6 +349,17 @@ export function WidgetSettingsForm({
                   )}
                 />
               </div>
+
+              {/* Placement — screen anchor + spacing from the edges it hugs */}
+              <WidgetPlacementEditor
+                position={form.watch('position')}
+                offsetX={form.watch('offsetX')}
+                offsetY={form.watch('offsetY')}
+                onPositionChange={(value) => form.setValue('position', value, { shouldDirty: true })}
+                onOffsetXChange={(value) => form.setValue('offsetX', value, { shouldDirty: true })}
+                onOffsetYChange={(value) => form.setValue('offsetY', value, { shouldDirty: true })}
+                disabled={isPending}
+              />
 
               {/* URL rules — authorize where the widget is allowed to run */}
               <div className="space-y-4 rounded-[10px] border border-border bg-bg-secondary/40 p-4">
