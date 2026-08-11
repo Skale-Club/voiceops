@@ -56,6 +56,7 @@ function harness(overrides: {
     loadProjectedMembers: vi.fn(async () => ({
       members: overrides.current ?? [member()],
       suppressedCount: 0,
+      invalidCount: 0,
     })),
     loadMemberships: vi.fn(async () => overrides.previous ?? []),
     setRemoteAudienceId: vi.fn(async () => undefined),
@@ -164,6 +165,8 @@ describe('reconcileMetaAudience', () => {
 
   it('dry-runs without Graph mutations or a successful-ledger commit', async () => {
     const h = harness({ audienceId: null })
+    h.config.termsAcceptedAt = null
+    h.config.termsAcceptedBy = null
     const { reconcileMetaAudience } = await import('@/lib/meta/audience-reconcile')
     const result = await reconcileMetaAudience({
       store: h.store, provider: h.provider, transport: h.transport,

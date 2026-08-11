@@ -1,238 +1,339 @@
 'use client'
 
-import { useState } from 'react'
-import { useForm } from 'react-hook-form'
-import { zodResolver } from '@hookform/resolvers/zod'
-import { z } from 'zod'
+import * as React from 'react'
+import { useRouter } from 'next/navigation'
+import {
+  AlertTriangle,
+  CheckCircle2,
+  Eye,
+  Loader2,
+  Pause,
+  Play,
+  Plus,
+  RefreshCw,
+  ShieldCheck,
+} from 'lucide-react'
 import { toast } from 'sonner'
-import { Loader2, RefreshCw, ToggleLeft, ToggleRight } from 'lucide-react'
 
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Checkbox } from '@/components/ui/checkbox'
-import { Badge } from '@/components/ui/badge'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import {
+  previewMetaAudience,
+  runMetaAudience,
   saveMetaAudienceConfig,
   toggleMetaAudienceSync,
   type MetaAudienceConfigRow,
+  type MetaAudienceDashboardData,
 } from './actions'
 
-const schema = z.object({
-  meta_ad_account_id: z
-    .string()
-    .trim()
-    .min(1, 'Required')
-    .regex(/^act_\d+$/, 'Must be in the format act_XXXXXXXXX'),
-  meta_business_id: z.string().trim().optional().or(z.literal('')),
-  audience_name: z.string().trim().max(200).optional().or(z.literal('')),
-  terms_accepted: z.boolean(),
-})
+type Preview = { entities: number; emails: number; phones: number; suppressed: number; invalid: number; scope: string }
 
-type FormValues = z.infer<typeof schema>
-
-interface Props {
-  config: MetaAudienceConfigRow | null
+function formatDate(value: string | null) {
+  if (!value) return 'Never'
+  return new Date(value).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })
 }
 
-function formatDate(iso: string | null): string {
-  if (!iso) return '—'
-  return new Date(iso).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })
+function sourceLabel(config: MetaAudienceConfigRow) {
+  return config.audience_kind === 'xcraper_master' ? 'All Xcraper prospects' : 'Saved prospect segment'
 }
 
-export function MetaAudienceForm({ config }: Props) {
-  const [toggling, setToggling] = useState(false)
+export function MetaAudienceForm({ data }: { data: MetaAudienceDashboardData }) {
+  const router = useRouter()
+  const [selectedId, setSelectedId] = React.useState<string | null>(data.configs[0]?.id ?? null)
+  const selected = data.configs.find((config) => config.id === selectedId) ?? null
+  const launchName = data.orgName.toLowerCase() === 'skale club'
+    ? 'Skale Club - Xcraper Prospects'
+    : `${data.orgName} - Xcraper Prospects`
+  const [name, setName] = React.useState(selected?.audience_name ?? launchName)
+  const [connectionId, setConnectionId] = React.useState(selected?.ads_connection_id ?? '')
+  const [kind, setKind] = React.useState<'xcraper_master' | 'prospect_segment'>(selected?.audience_kind ?? 'xcraper_master')
+  const initialSegment = selected?.source_definition && typeof selected.source_definition === 'object' && !Array.isArray(selected.source_definition)
+    ? selected.source_definition.prospectAudienceId
+    : null
+  const [segmentId, setSegmentId] = React.useState(typeof initialSegment === 'string' ? initialSegment : '')
+  const [terms, setTerms] = React.useState(Boolean(selected?.terms_accepted_at))
+  const [preview, setPreview] = React.useState<Preview | null>(null)
+  const [busy, setBusy] = React.useState<string | null>(null)
 
-  const {
-    register,
-    handleSubmit,
-    formState: { errors, isSubmitting },
-    setValue,
-    watch,
-  } = useForm<FormValues>({
-    resolver: zodResolver(schema),
-    defaultValues: {
-      meta_ad_account_id: config?.meta_ad_account_id ?? '',
-      meta_business_id: config?.meta_business_id ?? '',
-      audience_name: config?.audience_name ?? '',
-      terms_accepted: !!config?.terms_accepted_at,
-    },
-  })
+  const connection = data.connections.find((item) => item.id === connectionId)
+  const connectionExpired = !connection?.expiresAt || Date.parse(connection.expiresAt) <= Date.now()
+  const segment = data.savedSegments.find((item) => item.id === segmentId)
+  const configReady = Boolean(selected && connection && connection.status === 'active' && !connectionExpired)
+  const enableReason = !selected
+    ? 'Save the configuration first.'
+    : !connection
+      ? 'Select a tenant Meta connection.'
+      : connection.status !== 'active' || connectionExpired
+        ? 'Reconnect the selected Meta account.'
+        : kind === 'prospect_segment' && (!segment || segment.entityCount === 0)
+          ? 'Choose a saved segment with explicit members.'
+          : !selected.terms_accepted_at
+            ? 'Accept the Meta Customer List terms.'
+            : null
 
-  const termsAccepted = watch('terms_accepted')
-  const syncEnabled = config?.sync_enabled ?? false
-
-  async function onSubmit(values: FormValues) {
-    const result = await saveMetaAudienceConfig(values)
-    if (result.ok) {
-      toast.success('Configuration saved')
-    } else {
-      toast.error(result.error ?? 'Failed to save')
-    }
+  function loadConfig(config: MetaAudienceConfigRow | null) {
+    setSelectedId(config?.id ?? null)
+    setName(config?.audience_name ?? launchName)
+    setConnectionId(config?.ads_connection_id ?? '')
+    setKind(config?.audience_kind ?? 'xcraper_master')
+    const definition = config?.source_definition
+    setSegmentId(definition && typeof definition === 'object' && !Array.isArray(definition) && typeof definition.prospectAudienceId === 'string'
+      ? definition.prospectAudienceId
+      : '')
+    setTerms(Boolean(config?.terms_accepted_at))
+    setPreview(null)
   }
 
-  async function handleToggleSync() {
-    setToggling(true)
+  async function execute(label: string, action: () => Promise<{ ok: boolean; error?: string }>) {
+    setBusy(label)
     try {
-      const result = await toggleMetaAudienceSync(!syncEnabled)
-      if (result.ok) {
-        toast.success(syncEnabled ? 'Sync disabled' : 'Sync enabled')
-      } else {
-        toast.error(result.error ?? 'Failed to toggle sync')
+      const result = await action()
+      if (!result.ok) {
+        toast.error(result.error ?? 'The operation failed.')
+        return false
       }
+      router.refresh()
+      return true
     } finally {
-      setToggling(false)
+      setBusy(null)
     }
   }
 
-  const stats = config?.last_sync_stats
+  async function save() {
+    const ok = await execute('save', () => saveMetaAudienceConfig({
+      id: selected?.id,
+      ads_connection_id: connectionId,
+      audience_name: name,
+      audience_kind: kind,
+      saved_segment_id: kind === 'prospect_segment' ? segmentId : null,
+      terms_accepted: terms,
+    }))
+    if (ok) toast.success(selected ? 'Audience updated.' : 'Audience created.')
+  }
+
+  async function loadPreview() {
+    if (!selected) return
+    setBusy('preview')
+    try {
+      const result = await previewMetaAudience(selected.id)
+      if (!result.ok || !result.preview) return toast.error(result.error ?? 'Preview failed.')
+      setPreview(result.preview)
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  async function run(dryRun: boolean) {
+    if (!selected) return
+    const key = dryRun ? 'dry' : 'sync'
+    const ok = await execute(key, () => runMetaAudience(selected.id, dryRun))
+    if (ok) toast.success(dryRun ? 'Dry run completed.' : 'Audience reconciled successfully.')
+  }
+
+  const runs = selected ? data.runs.filter((run) => run.audienceConfigId === selected.id) : []
 
   return (
-    <div className="space-y-8">
-      {/* Status card */}
-      {config && (
-        <div className="rounded-lg border bg-muted/30 p-4 space-y-3">
-          <div className="flex items-center justify-between">
-            <span className="text-sm font-medium">Sync status</span>
-            <Badge variant={syncEnabled ? 'default' : 'secondary'}>
-              {syncEnabled ? 'Active' : 'Paused'}
-            </Badge>
-          </div>
-          <div className="grid grid-cols-2 gap-x-6 gap-y-1 text-sm text-muted-foreground">
-            <span>Last sync</span>
-            <span className="text-foreground">{formatDate(config.last_synced_at)}</span>
-            {stats && (
-              <>
-                <span>Contacts sent</span>
-                <span className="text-foreground">{stats.sent ?? 0}</span>
-                <span>Removed</span>
-                <span className="text-foreground">{stats.removed ?? 0}</span>
-                {(stats.error_count ?? 0) > 0 && (
-                  <>
-                    <span className="text-destructive">Errors</span>
-                    <span className="text-destructive">{stats.error_count}</span>
-                  </>
-                )}
-              </>
-            )}
-            {config.custom_audience_id && (
-              <>
-                <span>Audience ID</span>
-                <span className="font-mono text-xs text-foreground">{config.custom_audience_id}</span>
-              </>
-            )}
-          </div>
-
-          <Button
-            type="button"
-            variant={syncEnabled ? 'outline' : 'default'}
-            size="sm"
-            onClick={handleToggleSync}
-            disabled={toggling || !config.terms_accepted_at}
-            className="w-full mt-1"
-          >
-            {toggling ? (
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-            ) : syncEnabled ? (
-              <ToggleLeft className="mr-2 h-4 w-4" />
-            ) : (
-              <ToggleRight className="mr-2 h-4 w-4" />
-            )}
-            {syncEnabled ? 'Pause sync' : 'Enable sync'}
-          </Button>
-        </div>
-      )}
-
-      {/* Config form */}
-      <form onSubmit={handleSubmit(onSubmit)} className="space-y-5">
-        <div className="space-y-1.5">
-          <Label htmlFor="meta_ad_account_id">Meta Ad Account ID</Label>
-          <Input
-            id="meta_ad_account_id"
-            placeholder="act_123456789"
-            {...register('meta_ad_account_id')}
-          />
-          {errors.meta_ad_account_id && (
-            <p className="text-xs text-destructive">{errors.meta_ad_account_id.message}</p>
-          )}
-          <p className="text-xs text-muted-foreground">
-            Found in Meta Ads Manager → Account Overview. Starts with <code>act_</code>.
-          </p>
-        </div>
-
-        <div className="space-y-1.5">
-          <Label htmlFor="meta_business_id">Meta Business ID (optional)</Label>
-          <Input
-            id="meta_business_id"
-            placeholder="123456789"
-            {...register('meta_business_id')}
-          />
-        </div>
-
-        <div className="space-y-1.5">
-          <Label htmlFor="audience_name">Audience name</Label>
-          <Input
-            id="audience_name"
-            placeholder="Xphere CRM — My Company"
-            {...register('audience_name')}
-          />
-          <p className="text-xs text-muted-foreground">
-            This name will appear in Meta Ads Manager. Changing it does not rename an existing audience.
-          </p>
-        </div>
-
-        <div className="flex items-start gap-3 rounded-lg border p-4 bg-muted/20">
-          <Checkbox
-            id="terms_accepted"
-            checked={termsAccepted}
-            onCheckedChange={(v) => setValue('terms_accepted', !!v)}
-            disabled={!!config?.terms_accepted_at}
-          />
-          <div className="space-y-1">
-            <label htmlFor="terms_accepted" className="text-sm font-medium leading-none cursor-pointer">
-              I accept the Meta Customer List Custom Audiences terms
-            </label>
-            <p className="text-xs text-muted-foreground">
-              By enabling this feature you confirm that your organization has the right to use
-              your contacts' data for advertising, and that your privacy policy covers this use.
-              Required by Meta.{' '}
-              <a
-                href="https://www.facebook.com/legal/terms/customaudience"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="underline"
-              >
-                Read terms
-              </a>
-            </p>
-            {config?.terms_accepted_at && (
-              <p className="text-xs text-muted-foreground">
-                Accepted on {formatDate(config.terms_accepted_at)}
-              </p>
-            )}
-          </div>
-        </div>
-
-        <Button type="submit" disabled={isSubmitting} className="w-full sm:w-auto">
-          {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-          {config ? 'Save changes' : 'Save configuration'}
+    <div className="grid gap-6 lg:grid-cols-[280px_minmax(0,1fr)]">
+      <aside className="space-y-3">
+        <Button variant="secondary" className="w-full justify-start" onClick={() => loadConfig(null)}>
+          <Plus className="h-4 w-4" /> New audience
         </Button>
-      </form>
-
-      {/* Info footer */}
-      <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground space-y-2">
-        <div className="flex items-center gap-2 font-medium text-foreground">
-          <RefreshCw className="h-4 w-4" />
-          How it works
+        <div className="overflow-hidden rounded-[12px] border border-border bg-bg-secondary divide-y divide-border-subtle">
+          {data.configs.length === 0 ? (
+            <p className="p-4 text-sm text-text-tertiary">No Meta audiences configured.</p>
+          ) : data.configs.map((config) => (
+            <button
+              key={config.id}
+              type="button"
+              onClick={() => loadConfig(config)}
+              className={`w-full p-4 text-left transition-colors ${selectedId === config.id ? 'bg-accent/10' : 'hover:bg-bg-tertiary/50'}`}
+            >
+              <div className="flex items-center justify-between gap-2">
+                <span className="truncate text-sm font-medium text-text-primary">{config.audience_name}</span>
+                <Badge variant={config.sync_enabled ? 'default' : 'secondary'}>{config.operational_status}</Badge>
+              </div>
+              <p className="mt-1 text-xs text-text-tertiary">{sourceLabel(config)}</p>
+            </button>
+          ))}
         </div>
-        <ul className="list-disc list-inside space-y-1">
-          <li>Contacts are hashed (SHA-256) before leaving Xphere — raw emails and phones are never sent.</li>
-          <li>The sync runs hourly and is incremental — only contacts updated since the last run are pushed.</li>
-          <li>Contacts with DND enabled are automatically removed from the audience.</li>
-          <li>Meta requires at least ~100 matched contacts for delivery. Small orgs may not reach threshold.</li>
-          <li>Phone numbers match better than corporate emails on Meta.</li>
-        </ul>
-      </div>
+      </aside>
+
+      <main className="space-y-6">
+        <section className="space-y-5 rounded-[12px] border border-border bg-bg-secondary p-5">
+          <div>
+            <h2 className="text-base font-semibold text-text-primary">Audience setup</h2>
+            <p className="mt-1 text-sm text-text-tertiary">Choose one tenant connection and an explicit prospect scope.</p>
+          </div>
+
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="space-y-1.5 sm:col-span-2">
+              <Label>Audience name</Label>
+              <Input value={name} onChange={(event) => setName(event.target.value)} maxLength={200} />
+            </div>
+            <div className="space-y-1.5">
+              <Label>Meta connection and ad account</Label>
+              <Select value={connectionId} onValueChange={setConnectionId}>
+                <SelectTrigger><SelectValue placeholder="Select a Meta account" /></SelectTrigger>
+                <SelectContent>
+                  {data.connections.map((item) => (
+                    <SelectItem key={item.id} value={item.id}>{item.adAccountName} · {item.adAccountId}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {connection && (
+                <p className={`text-xs ${connection.status === 'active' && !connectionExpired ? 'text-emerald-600' : 'text-destructive'}`}>
+                  {connection.status === 'active' && !connectionExpired
+                    ? `Connected · token expires ${formatDate(connection.expiresAt)}`
+                    : 'Reconnect required before a real sync.'}
+                </p>
+              )}
+            </div>
+            <div className="space-y-1.5">
+              <Label>Source scope</Label>
+              <Select value={kind} onValueChange={(value) => setKind(value as typeof kind)}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="xcraper_master">All Xcraper prospects</SelectItem>
+                  <SelectItem value="prospect_segment">Saved prospect segment</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+
+          {kind === 'prospect_segment' && (
+            <div className="space-y-1.5">
+              <Label>Saved segment</Label>
+              <Select value={segmentId} onValueChange={setSegmentId}>
+                <SelectTrigger><SelectValue placeholder="Choose a saved segment" /></SelectTrigger>
+                <SelectContent>
+                  {data.savedSegments.map((item) => (
+                    <SelectItem key={item.id} value={item.id} disabled={item.entityCount === 0}>
+                      {item.name} · {item.entityCount} members
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+
+          <div className="flex items-start gap-3 rounded-[10px] border border-border bg-bg-tertiary/30 p-4">
+            <Checkbox
+              id="meta-terms"
+              checked={terms}
+              onCheckedChange={(value) => setTerms(Boolean(value))}
+              disabled={Boolean(selected?.terms_accepted_at)}
+            />
+            <div>
+              <label htmlFor="meta-terms" className="text-sm font-medium text-text-primary">I confirm our right to use this customer data for advertising.</label>
+              <p className="mt-1 text-xs text-text-tertiary">
+                Required for real writes under the Meta Customer List Custom Audience terms. Preview and dry-run remain available first.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap gap-2">
+            <Button onClick={save} disabled={busy !== null || !name.trim() || !connectionId || (kind === 'prospect_segment' && !segmentId)}>
+              {busy === 'save' && <Loader2 className="h-4 w-4 animate-spin" />}
+              {selected ? 'Save changes' : 'Create audience'}
+            </Button>
+            {selected && (
+              <Button variant="secondary" onClick={loadPreview} disabled={busy !== null}>
+                <Eye className="h-4 w-4" /> Preview
+              </Button>
+            )}
+          </div>
+        </section>
+
+        {selected && (
+          <section className="space-y-4 rounded-[12px] border border-border bg-bg-secondary p-5">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h2 className="text-base font-semibold text-text-primary">Preflight and operations</h2>
+                <p className="mt-1 text-sm text-text-tertiary">No email, phone, hash, token, or remote audience ID is displayed.</p>
+              </div>
+              <Badge variant={selected.sync_enabled ? 'default' : 'secondary'}>{selected.sync_enabled ? 'Enabled' : 'Paused'}</Badge>
+            </div>
+
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+              {preview ? [
+                ['Eligible', preview.entities], ['Email keys', preview.emails], ['Phone keys', preview.phones],
+                ['Suppressed', preview.suppressed], ['Invalid', preview.invalid],
+              ].map(([label, value]) => (
+                <div key={label} className="rounded-[10px] border border-border-subtle bg-bg-tertiary/30 p-3">
+                  <p className="text-xs text-text-tertiary">{label}</p>
+                  <p className="mt-1 text-xl font-semibold text-text-primary">{value}</p>
+                </div>
+              )) : (
+                <p className="text-sm text-text-tertiary sm:col-span-2 xl:col-span-5">Run Preview to calculate safe membership counts.</p>
+              )}
+            </div>
+
+            {enableReason ? (
+              <div className="flex items-center gap-2 rounded-[10px] border border-amber-500/30 bg-amber-500/5 p-3 text-sm text-amber-700 dark:text-amber-300">
+                <AlertTriangle className="h-4 w-4" /> {enableReason}
+              </div>
+            ) : (
+              <div className="flex items-center gap-2 text-sm text-emerald-600">
+                <ShieldCheck className="h-4 w-4" /> Ready for tenant-scoped Meta writes.
+              </div>
+            )}
+
+            {selected.last_error_code && (
+              <div className="rounded-[10px] border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
+                <strong>{selected.last_error_code}</strong> · {selected.last_error_message ?? 'Reconnect or review the configuration.'}
+              </div>
+            )}
+
+            <div className="flex flex-wrap gap-2">
+              <Button variant="secondary" onClick={() => run(true)} disabled={busy !== null || !configReady}>
+                {busy === 'dry' ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                Dry run
+              </Button>
+              <Button
+                onClick={() => execute('toggle', () => toggleMetaAudienceSync(selected.id, !selected.sync_enabled))}
+                disabled={busy !== null || (!selected.sync_enabled && Boolean(enableReason))}
+                variant={selected.sync_enabled ? 'outline' : 'default'}
+              >
+                {selected.sync_enabled ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
+                {selected.sync_enabled ? 'Pause' : 'Enable'}
+              </Button>
+              <Button onClick={() => run(false)} disabled={busy !== null || Boolean(enableReason) || !selected.sync_enabled}>
+                {busy === 'sync' ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
+                Sync now
+              </Button>
+            </div>
+            <p className="text-xs text-text-tertiary">Last successful sync: {formatDate(selected.last_synced_at)}</p>
+          </section>
+        )}
+
+        {selected && (
+          <section className="overflow-hidden rounded-[12px] border border-border bg-bg-secondary">
+            <div className="border-b border-border px-5 py-4">
+              <h2 className="text-base font-semibold text-text-primary">Safe run history</h2>
+            </div>
+            {runs.length === 0 ? (
+              <p className="p-5 text-sm text-text-tertiary">No runs yet.</p>
+            ) : (
+              <div className="divide-y divide-border-subtle">
+                {runs.map((run) => (
+                  <div key={run.id} className="grid gap-2 px-5 py-3 text-sm sm:grid-cols-[130px_1fr_auto] sm:items-center">
+                    <div><Badge variant={run.status === 'succeeded' ? 'default' : 'secondary'}>{run.dryRun ? 'dry run' : run.status}</Badge></div>
+                    <div className="text-text-secondary">
+                      Target {run.targetCount} · add {run.addCount} · remove {run.removeCount} · suppressed {run.suppressedCount} · invalid {run.invalidCount}
+                      {run.errorCode ? <p className="text-xs text-destructive">{run.errorCode}: {run.errorMessage}</p> : null}
+                    </div>
+                    <time className="text-xs text-text-tertiary">{formatDate(run.completedAt ?? run.createdAt)}</time>
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
+        )}
+      </main>
     </div>
   )
 }

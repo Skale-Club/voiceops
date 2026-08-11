@@ -71,6 +71,7 @@ export interface AudienceReconcileStore {
   loadProjectedMembers(config: ReconcileConfig): Promise<{
     members: ProjectedAudienceMember[]
     suppressedCount: number
+    invalidCount: number
   }>
   loadMemberships(orgId: string, audienceConfigId: string): Promise<StoredAudienceMembership[]>
   setRemoteAudienceId(input: {
@@ -186,7 +187,7 @@ export async function reconcileMetaAudience(input: {
   try {
     const config = await input.store.loadConfig(input.orgId, input.audienceConfigId)
     if (!config) throw new ReconcilePreconditionError('CONFIG_NOT_FOUND', 'Audience configuration was not found.')
-    if (!config.termsAcceptedAt || !config.termsAcceptedBy) {
+    if (!input.dryRun && (!config.termsAcceptedAt || !config.termsAcceptedBy)) {
       throw new ReconcilePreconditionError('TERMS_NOT_ACCEPTED', 'Meta Custom Audience terms must be accepted first.')
     }
     if (!config.adsConnectionId) {
@@ -227,7 +228,7 @@ export async function reconcileMetaAudience(input: {
       addCount: diff.add.length,
       removeCount: diff.remove.length,
       unchangedCount: diff.unchanged.length,
-      invalidCount: 0,
+      invalidCount: projection.invalidCount,
       suppressedCount: projection.suppressedCount,
     }
     const finish = {
@@ -448,6 +449,9 @@ export class SupabaseAudienceReconcileStore implements AudienceReconcileStore {
       members: projection.members,
       suppressedCount: projection.exclusions.filter((item) =>
         item.reason === 'dnd' || item.reason === 'unsubscribed' || item.reason === 'email_suppressed',
+      ).length,
+      invalidCount: projection.exclusions.filter((item) =>
+        item.reason === 'no_identifiers' || item.reason === 'duplicate_identifiers',
       ).length,
     }
   }

@@ -230,7 +230,7 @@ BEGIN
   FROM public.meta_audience_config
   WHERE id = p_audience_config_id
     AND org_id = p_org_id
-    AND sync_enabled = true
+    AND (sync_enabled = true OR p_dry_run = true)
   FOR UPDATE;
 
   IF NOT FOUND THEN
