@@ -14,25 +14,25 @@
 
 - [ ] **TEN-01**: Meta audience operations resolve credentials from the active `ads_connections` row belonging to the same `org_id` as the audience; the global agency token is not the default runtime path.
 - [ ] **TEN-02**: The selected Meta ad account is explicit, organization-owned, active, and token-valid; missing, expired, inaccessible, or mismatched credentials fail closed with an actionable status.
-- [ ] **TEN-03**: RLS, service-role queries, background jobs, and mutations enforce organization scope explicitly and have regression coverage proving one tenant cannot inspect or sync another tenant's audience.
+- [x] **TEN-03**: RLS, service-role queries, background jobs, and mutations enforce organization scope explicitly and have regression coverage proving one tenant cannot inspect or sync another tenant's audience.
 
 ## Audience Model
 
-- [ ] **AUD-01**: One organization may configure multiple Meta audiences, including one master Xcraper audience and optional audiences backed by Xphere saved prospect segments/lists.
-- [ ] **AUD-02**: Audience configuration records Meta audience ID, ad account, name, source rule, consent acceptance, enablement, last successful state, and immutable organization ownership.
-- [ ] **AUD-03**: Audience creation is idempotent; disabling synchronization pauses writes without deleting the Meta audience, while destructive deletion requires a separate explicit operator action.
+- [x] **AUD-01**: One organization may configure multiple Meta audiences, including one master Xcraper audience and optional audiences backed by Xphere saved prospect segments/lists.
+- [x] **AUD-02**: Audience configuration records Meta audience ID, ad account, name, source rule, consent acceptance, enablement, last successful state, and immutable organization ownership.
+- [x] **AUD-03**: Audience creation is idempotent; disabling synchronization pauses writes without deleting the Meta audience, while destructive deletion requires a separate explicit operator action.
 
 ## Synchronization
 
 - [ ] **SYNC-01**: Successful Xcraper ingestion marks relevant audiences dirty or enqueues an organization-scoped sync; hourly reconciliation repairs missed events and drift.
 - [ ] **SYNC-02**: Synchronization calculates additions and removals from durable membership state, including identifier changes, and sends Meta operations in bounded retryable batches.
-- [ ] **SYNC-03**: A run is idempotent, concurrency-safe, retryable, and advances its successful watermark/snapshot only after every required batch succeeds.
-- [ ] **SYNC-04**: Sync history stores safe counts, run status, timestamps, retry/error codes, and correlation IDs; failures can be retried without duplicating or losing membership.
+- [x] **SYNC-03**: A run is idempotent, concurrency-safe, retryable, and advances its successful watermark/snapshot only after every required batch succeeds.
+- [x] **SYNC-04**: Sync history stores safe counts, run status, timestamps, retry/error codes, and correlation IDs; failures can be retried without duplicating or losing membership.
 
 ## Consent and Suppression
 
 - [ ] **COMP-01**: DND, `engagement_status = 'unsubscribed'`, email suppression, archived duplicate, and deleted/ineligible records are excluded and removed from previously synchronized audiences.
-- [ ] **COMP-02**: Customer List Custom Audience terms acceptance is organization-scoped, timestamped, attributable to an authenticated operator, and required before real synchronization.
+- [x] **COMP-02**: Customer List Custom Audience terms acceptance is organization-scoped, timestamped, attributable to an authenticated operator, and required before real synchronization.
 - [ ] **COMP-03**: Membership rules expose email-verification status for preview/filtering but do not silently discard scraped identifiers unless the configured audience rule explicitly requires verified email.
 
 ## Operator Experience
@@ -45,12 +45,12 @@
 
 - [ ] **OPS-01**: The supported Meta Graph/Marketing API version and Customer List request contract are verified against current official documentation before production activation.
 - [ ] **OPS-02**: Required secrets and runtime configuration are provisioned in the actual execution environment; scheduled jobs must not report success when synchronization was skipped for missing configuration.
-- [ ] **OPS-03**: Database migrations are idempotent, applied to production before application rollout, and paired with rollback/recovery instructions that preserve audience membership state.
+- [x] **OPS-03**: Database migrations are idempotent, applied to production before application rollout, and paired with rollback/recovery instructions that preserve audience membership state.
 
 ## Verification
 
 - [ ] **TEST-01**: Unit tests cover normalization/hashing, entity projection, eligibility/suppression, membership diffing, batching, retries, and watermark failure behavior.
-- [ ] **TEST-02**: Integration tests cover company re-import enrichment, per-tenant connection resolution, RLS/service-role scoping, job concurrency, and Meta ADD/REMOVE request contracts with no token or raw PII leakage.
+- [x] **TEST-02**: Integration tests cover company re-import enrichment, per-tenant connection resolution, RLS/service-role scoping, job concurrency, and Meta ADD/REMOVE request contracts with no token or raw PII leakage.
 - [ ] **TEST-03**: A production-safe validation path performs a Skale Club dry run, controlled real sync, Meta status check, and reconciliation rerun with unchanged membership.
 
 ## Launch
