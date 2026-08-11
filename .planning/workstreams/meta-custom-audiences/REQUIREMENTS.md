@@ -8,7 +8,7 @@
 
 - [x] **DATA-01**: Audience membership includes organization-scoped Xcraper prospects stored as either `contacts` or `accounts`, reading company email from `accounts.custom_fields.email` and company phone from `accounts.phone`.
 - [x] **DATA-02**: Email and phone identifiers are normalized, deduplicated, paired by entity, and SHA-256 hashed inside Xphere before transmission; raw identifiers never appear in Meta requests, job logs, or sync history.
-- [ ] **DATA-03**: Re-importing an existing Xcraper company updates mergeable enrichment fields, including `custom_fields.email`, website, address/category metadata, and source payload, without overwriting stronger CRM data with nulls.
+- [x] **DATA-03**: Re-importing an existing Xcraper company updates mergeable enrichment fields, including `custom_fields.email`, website, address/category metadata, and source payload, without overwriting stronger CRM data with nulls.
 
 ## Tenant Connection
 
@@ -24,7 +24,7 @@
 
 ## Synchronization
 
-- [ ] **SYNC-01**: Successful Xcraper ingestion marks relevant audiences dirty or enqueues an organization-scoped sync; hourly reconciliation repairs missed events and drift.
+- [x] **SYNC-01**: Successful Xcraper ingestion marks relevant audiences dirty or enqueues an organization-scoped sync; hourly reconciliation repairs missed events and drift.
 - [x] **SYNC-02**: Synchronization calculates additions and removals from durable membership state, including identifier changes, and sends Meta operations in bounded retryable batches.
 - [x] **SYNC-03**: A run is idempotent, concurrency-safe, retryable, and advances its successful watermark/snapshot only after every required batch succeeds.
 - [x] **SYNC-04**: Sync history stores safe counts, run status, timestamps, retry/error codes, and correlation IDs; failures can be retried without duplicating or losing membership.
