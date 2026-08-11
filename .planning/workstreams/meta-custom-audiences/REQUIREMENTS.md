@@ -37,9 +37,9 @@
 
 ## Operator Experience
 
-- [ ] **UX-01**: Meta Custom Audiences is discoverable from Xphere integrations and prospect audiences rather than existing only as an unlinked route.
-- [ ] **UX-02**: Before activation, the operator can preview entity count, unique emails, unique phones, suppressed count, invalid count, source/list scope, and the selected ad account without exposing raw values.
-- [ ] **UX-03**: The UI provides save, enable/pause, dry run, manual sync, status/history, token expiry, terms state, and actionable error recovery.
+- [x] **UX-01**: Meta Custom Audiences is discoverable from Xphere integrations and prospect audiences rather than existing only as an unlinked route.
+- [x] **UX-02**: Before activation, the operator can preview entity count, unique emails, unique phones, suppressed count, invalid count, source/list scope, and the selected ad account without exposing raw values.
+- [x] **UX-03**: The UI provides save, enable/pause, dry run, manual sync, status/history, token expiry, terms state, and actionable error recovery.
 
 ## Operations
 
