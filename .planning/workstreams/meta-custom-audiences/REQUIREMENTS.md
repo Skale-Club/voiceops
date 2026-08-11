@@ -12,8 +12,8 @@
 
 ## Tenant Connection
 
-- [ ] **TEN-01**: Meta audience operations resolve credentials from the active `ads_connections` row belonging to the same `org_id` as the audience; the global agency token is not the default runtime path.
-- [ ] **TEN-02**: The selected Meta ad account is explicit, organization-owned, active, and token-valid; missing, expired, inaccessible, or mismatched credentials fail closed with an actionable status.
+- [x] **TEN-01**: Meta audience operations resolve credentials from the active `ads_connections` row belonging to the same `org_id` as the audience; the global agency token is not the default runtime path.
+- [x] **TEN-02**: The selected Meta ad account is explicit, organization-owned, active, and token-valid; missing, expired, inaccessible, or mismatched credentials fail closed with an actionable status.
 - [x] **TEN-03**: RLS, service-role queries, background jobs, and mutations enforce organization scope explicitly and have regression coverage proving one tenant cannot inspect or sync another tenant's audience.
 
 ## Audience Model
@@ -43,7 +43,7 @@
 
 ## Operations
 
-- [ ] **OPS-01**: The supported Meta Graph/Marketing API version and Customer List request contract are verified against current official documentation before production activation.
+- [x] **OPS-01**: The supported Meta Graph/Marketing API version and Customer List request contract are verified against current official documentation before production activation.
 - [ ] **OPS-02**: Required secrets and runtime configuration are provisioned in the actual execution environment; scheduled jobs must not report success when synchronization was skipped for missing configuration.
 - [x] **OPS-03**: Database migrations are idempotent, applied to production before application rollout, and paired with rollback/recovery instructions that preserve audience membership state.
 
