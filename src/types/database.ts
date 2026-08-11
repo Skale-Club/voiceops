@@ -7857,7 +7857,7 @@ export interface Database {
           sync_enabled: boolean
           terms_accepted_at: string | null
           terms_accepted_by: string | null
-          consent_basis: string
+          consent_basis: 'USER_PROVIDED_ONLY' | 'PARTNER_PROVIDED_ONLY' | 'BOTH_USER_AND_PARTNER_PROVIDED'
           operational_status: 'draft' | 'ready' | 'dirty' | 'syncing' | 'synced' | 'paused' | 'misconfigured' | 'error'
           dirty_at: string | null
           dirty_reason: string | null
@@ -7884,7 +7884,7 @@ export interface Database {
           sync_enabled?: boolean
           terms_accepted_at?: string | null
           terms_accepted_by?: string | null
-          consent_basis?: string
+          consent_basis?: 'USER_PROVIDED_ONLY' | 'PARTNER_PROVIDED_ONLY' | 'BOTH_USER_AND_PARTNER_PROVIDED'
           operational_status?: 'draft' | 'ready' | 'dirty' | 'syncing' | 'synced' | 'paused' | 'misconfigured' | 'error'
           dirty_at?: string | null
           dirty_reason?: string | null
@@ -7911,7 +7911,7 @@ export interface Database {
           sync_enabled?: boolean
           terms_accepted_at?: string | null
           terms_accepted_by?: string | null
-          consent_basis?: string
+          consent_basis?: 'USER_PROVIDED_ONLY' | 'PARTNER_PROVIDED_ONLY' | 'BOTH_USER_AND_PARTNER_PROVIDED'
           operational_status?: 'draft' | 'ready' | 'dirty' | 'syncing' | 'synced' | 'paused' | 'misconfigured' | 'error'
           dirty_at?: string | null
           dirty_reason?: string | null

@@ -1,8 +1,8 @@
 // Meta Graph API — shared primitives.
 //
 // Hashing, phone normalization, and HTTP wrappers reused across the Meta
-// integrations (Custom Audiences sync + Conversions API). Graph API v20.0,
-// matching META_ADS_GRAPH_VERSION. Web Crypto only (Edge-runtime safe).
+// integrations (Custom Audiences sync + Conversions API). Version comes only
+// from META_ADS_GRAPH_VERSION. Web Crypto only (Edge-runtime safe).
 
 import { META_ADS_GRAPH_VERSION } from '@/lib/ads/meta-oauth'
 
@@ -26,13 +26,46 @@ export function normalizePhone(phone: string): string {
   return phone.replace(/\D/g, '')
 }
 
-async function readGraphError(res: Response): Promise<string> {
-  let msg = `Meta API ${res.status}`
+const HASH_PATTERN = /\b[0-9a-f]{64}\b/gi
+
+function redactGraphMessage(message: string, token: string): string {
+  let safe = message
+  if (token) safe = safe.split(token).join('[REDACTED_TOKEN]')
+  return safe.replace(HASH_PATTERN, '[REDACTED_HASH]')
+}
+
+export class MetaGraphRequestError extends Error {
+  constructor(
+    public readonly status: number,
+    public readonly code: number | null,
+    message: string,
+  ) {
+    super(message)
+    this.name = 'MetaGraphRequestError'
+  }
+}
+
+async function readGraphError(
+  res: Response,
+  token: string,
+): Promise<MetaGraphRequestError> {
+  let code: number | null = null
+  let msg = `Meta Graph request failed with status ${res.status}`
   try {
     const err = (await res.json()) as { error?: { message?: string; code?: number } }
+    code = typeof err.error?.code === 'number' ? err.error.code : null
     msg = err.error?.message ?? msg
   } catch { /* ignore */ }
-  return msg
+  const prefix = code === null ? 'Meta Graph request failed' : `Meta Graph error ${code}`
+  return new MetaGraphRequestError(res.status, code, `${prefix}: ${redactGraphMessage(msg, token)}`)
+}
+
+async function graphFetch(url: string | URL, init: RequestInit): Promise<Response> {
+  try {
+    return await fetch(url, init)
+  } catch {
+    throw new MetaGraphRequestError(0, null, 'Meta Graph network request failed')
+  }
 }
 
 export async function graphPost<T>(
@@ -40,13 +73,13 @@ export async function graphPost<T>(
   token: string,
   body: Record<string, unknown>,
 ): Promise<T> {
-  const res = await fetch(`${GRAPH_BASE}/${path}`, {
+  const res = await graphFetch(`${GRAPH_BASE}/${path}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
     body: JSON.stringify({ ...body, access_token: token }),
     cache: 'no-store',
   })
-  if (!res.ok) throw new Error(await readGraphError(res))
+  if (!res.ok) throw await readGraphError(res, token)
   return res.json() as Promise<T>
 }
 
@@ -62,13 +95,13 @@ export async function graphDelete<T>(
   token: string,
   body: Record<string, unknown>,
 ): Promise<T> {
-  const res = await fetch(`${GRAPH_BASE}/${path}`, {
+  const res = await graphFetch(`${GRAPH_BASE}/${path}`, {
     method: 'DELETE',
     headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
     body: JSON.stringify({ ...body, access_token: token }),
     cache: 'no-store',
   })
-  if (!res.ok) throw new Error(await readGraphError(res))
+  if (!res.ok) throw await readGraphError(res, token)
   return res.json() as Promise<T>
 }
 
@@ -82,7 +115,10 @@ export async function graphGet<T>(
   if (params) {
     for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v)
   }
-  const res = await fetch(url, { method: 'GET', headers: { Accept: 'application/json' }, cache: 'no-store' })
-  if (!res.ok) throw new Error(await readGraphError(res))
+  const res = await graphFetch(
+    url,
+    { method: 'GET', headers: { Accept: 'application/json' }, cache: 'no-store' },
+  )
+  if (!res.ok) throw await readGraphError(res, token)
   return res.json() as Promise<T>
 }

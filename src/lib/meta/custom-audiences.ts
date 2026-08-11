@@ -1,5 +1,5 @@
 // Meta Marketing API — Custom Audiences (Customer File)
-// Graph API v20.0, schema: EMAIL_SHA256 + PHONE_SHA256
+// Graph API version is centralized in meta-oauth, schema: EMAIL_SHA256 + PHONE_SHA256
 // https://developers.facebook.com/docs/marketing-api/audiences/guides/custom-audiences
 
 import { sha256Hex, normalizePhone, graphPost, graphGet, graphDelete } from '@/lib/meta/graph'
@@ -9,6 +9,10 @@ const BATCH_SIZE = 10_000
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 export type AudienceUserOperation = 'ADD' | 'REMOVE'
+export type MetaCustomerFileSource =
+  | 'USER_PROVIDED_ONLY'
+  | 'PARTNER_PROVIDED_ONLY'
+  | 'BOTH_USER_AND_PARTNER_PROVIDED'
 
 export interface AudienceBatchResult {
   num_received: number
@@ -30,13 +34,13 @@ export interface AudienceStatus {
 export async function createCustomAudience(
   adAccountId: string,
   token: string,
-  opts: { name: string; description?: string; consentBasis?: string },
+  opts: { name: string; description?: string; consentBasis?: MetaCustomerFileSource },
 ): Promise<{ id: string }> {
   return graphPost<{ id: string }>(`${adAccountId}/customaudiences`, token, {
     name: opts.name,
     subtype: 'CUSTOM',
     description: opts.description ?? 'Xphere CRM sync',
-    customer_file_source: opts.consentBasis ?? 'CUSTOMER_FILE_WITH_CONSENT',
+    customer_file_source: opts.consentBasis ?? 'USER_PROVIDED_ONLY',
   })
 }
 

@@ -21,6 +21,15 @@ ALTER TABLE public.meta_audience_config
   ADD COLUMN IF NOT EXISTS last_error_code text,
   ADD COLUMN IF NOT EXISTS last_error_message text;
 
+-- v26 CustomerFileSource values from Meta's official Business SDK. The
+-- prototype value is no longer part of the current enum.
+UPDATE public.meta_audience_config
+SET consent_basis = 'USER_PROVIDED_ONLY'
+WHERE consent_basis = 'CUSTOMER_FILE_WITH_CONSENT';
+
+ALTER TABLE public.meta_audience_config
+  ALTER COLUMN consent_basis SET DEFAULT 'USER_PROVIDED_ONLY';
+
 -- The legacy migration made org_id globally unique. Remove any single-column
 -- uniqueness constraint on org_id regardless of its generated name.
 DO $$
@@ -91,6 +100,20 @@ BEGIN
       CHECK (operational_status IN (
         'draft', 'ready', 'dirty', 'syncing', 'synced',
         'paused', 'misconfigured', 'error'
+      ));
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'meta_audience_config_consent_basis_check'
+      AND conrelid = 'public.meta_audience_config'::regclass
+  ) THEN
+    ALTER TABLE public.meta_audience_config
+      ADD CONSTRAINT meta_audience_config_consent_basis_check
+      CHECK (consent_basis IN (
+        'USER_PROVIDED_ONLY',
+        'PARTNER_PROVIDED_ONLY',
+        'BOTH_USER_AND_PARTNER_PROVIDED'
       ));
   END IF;
 END $$;

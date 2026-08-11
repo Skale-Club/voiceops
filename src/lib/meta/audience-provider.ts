@@ -142,7 +142,6 @@ export class AgencySystemUserProvider implements MetaConnectionProvider {
   async getConnection(
     _orgId: string,
     adAccountId: string,
-    _connectionId?: string,
   ): Promise<MetaAudienceConnection> {
     const token = process.env.META_SYSTEM_USER_TOKEN
     if (!token) throw new MetaAudienceConnectionError('AGENCY_TOKEN_MISSING')

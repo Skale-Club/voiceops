@@ -1,4 +1,7 @@
-export const META_ADS_GRAPH_VERSION = 'v20.0'
+// Verified 2026-08-10 against Meta's official Business SDK v26.0.0, released
+// 2026-08-06. This single constant drives OAuth, Ads, CAPI, and Custom Audience
+// requests. Re-check Meta's version/deprecation schedule before future rollout.
+export const META_ADS_GRAPH_VERSION = 'v26.0'
 export const META_ADS_CALLBACK_PATH = '/api/ads/meta/callback'
 export const META_ADS_CALLBACK_URI = `https://xphere.app${META_ADS_CALLBACK_PATH}`
 export const META_ADS_OAUTH_STATE_COOKIE = 'meta_ads_oauth_state'
