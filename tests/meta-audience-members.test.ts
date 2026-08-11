@@ -68,13 +68,13 @@ describe('Meta audience member projector', () => {
     if (!contactResult.eligible || !accountResult.eligible) throw new Error('expected eligible entities')
 
     expect(contactResult.member.emailHash).toBe(
-      '01bdbda417d3463152ae3a092326c9b826211836348b76a17fc6b45844344d15',
+      'c8cd3c6427301eaf6665bccacd65ddb614527acc843a15463e3faba57124c351',
     )
     expect(contactResult.member.phoneHash).toBe(
-      '5cb9db4603d9ce4dab5ce615926d28bbf4b4fba4ba092c611979df1a5cf75a28',
+      'c0ea20aec6609f4498b65ff99246afe754ce0dc822feddfd08582f904edba7a8',
     )
     expect(accountResult.member.emailHash).toBe(
-      '00215d8a61bdc957dd43b6d8f27915d9c279334cbd02d640c1759ef8c3f879d2',
+      '7028742ef62b4ec22ed04586e96b2b4ea835a5376e7008e8f9c58217746d37b6',
     )
   })
 

@@ -58,6 +58,12 @@ export interface ContactHashEntry {
   phone?: string | null
 }
 
+/** Already-normalized SHA-256 values from the durable membership projector. */
+export interface AudienceHashEntry {
+  emailHash?: string | null
+  phoneHash?: string | null
+}
+
 export interface HashedPayloadEntry {
   data: string[][]     // [[email_hash, phone_hash], ...] — empty string for missing field
   schema: string[]     // ['EMAIL_SHA256', 'PHONE_SHA256']
@@ -78,6 +84,25 @@ export async function hashContacts(contacts: ContactHashEntry[]): Promise<Hashed
   return { schema, data }
 }
 
+const SHA256_HEX = /^[0-9a-f]{64}$/
+
+/** Build Meta's paired schema without ever reintroducing raw identifiers. */
+export function payloadFromHashes(entries: AudienceHashEntry[]): HashedPayloadEntry {
+  const schema = ['EMAIL_SHA256', 'PHONE_SHA256']
+  const data: string[][] = []
+
+  for (const entry of entries) {
+    const emailHash = entry.emailHash ?? ''
+    const phoneHash = entry.phoneHash ?? ''
+    if (emailHash && !SHA256_HEX.test(emailHash)) throw new Error('Invalid email SHA-256 hash')
+    if (phoneHash && !SHA256_HEX.test(phoneHash)) throw new Error('Invalid phone SHA-256 hash')
+    if (!emailHash && !phoneHash) continue
+    data.push([emailHash, phoneHash])
+  }
+
+  return { schema, data }
+}
+
 // ─── Sync batches ─────────────────────────────────────────────────────────────
 
 export async function syncUsersToAudience(
@@ -87,6 +112,27 @@ export async function syncUsersToAudience(
   operation: AudienceUserOperation,
 ): Promise<{ sent: number; invalid: number }> {
   const { schema, data } = await hashContacts(contacts)
+  return syncPayload(audienceId, token, schema, data, operation)
+}
+
+/** Submit the safe hash-only rows emitted by audience reconciliation. */
+export async function syncHashedUsersToAudience(
+  audienceId: string,
+  token: string,
+  entries: AudienceHashEntry[],
+  operation: AudienceUserOperation,
+): Promise<{ sent: number; invalid: number }> {
+  const { schema, data } = payloadFromHashes(entries)
+  return syncPayload(audienceId, token, schema, data, operation)
+}
+
+async function syncPayload(
+  audienceId: string,
+  token: string,
+  schema: string[],
+  data: string[][],
+  operation: AudienceUserOperation,
+): Promise<{ sent: number; invalid: number }> {
   if (data.length === 0) return { sent: 0, invalid: 0 }
 
   let totalSent = 0
