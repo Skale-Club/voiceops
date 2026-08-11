@@ -44,7 +44,7 @@
 ## Operations
 
 - [x] **OPS-01**: The supported Meta Graph/Marketing API version and Customer List request contract are verified against current official documentation before production activation.
-- [ ] **OPS-02**: Required secrets and runtime configuration are provisioned in the actual execution environment; scheduled jobs must not report success when synchronization was skipped for missing configuration.
+- [x] **OPS-02**: Required secrets and runtime configuration are provisioned in the actual execution environment; scheduled jobs must not report success when synchronization was skipped for missing configuration.
 - [x] **OPS-03**: Database migrations are idempotent, applied to production before application rollout, and paired with rollback/recovery instructions that preserve audience membership state.
 
 ## Verification
