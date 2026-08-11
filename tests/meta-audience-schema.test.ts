@@ -92,4 +92,23 @@ describe('Meta prospect audience schema', () => {
       expect(tableTypes).toContain('Update: {')
     }
   })
+
+  it('commits membership and successful run state in one service-role-only transaction', () => {
+    const commit = sectionBetween(
+      migration,
+      'CREATE OR REPLACE FUNCTION public.commit_meta_audience_sync',
+      'CREATE OR REPLACE FUNCTION public.complete_meta_audience_dry_run',
+    )
+    expect(commit).toContain('FOR UPDATE')
+    expect(commit).toContain('DELETE FROM public.meta_audience_memberships')
+    expect(commit).toContain('INSERT INTO public.meta_audience_memberships')
+    expect(commit).toContain("SET status = 'succeeded'")
+    expect(commit).toContain("operational_status = 'synced'")
+    expect(migration).toContain(
+      'REVOKE ALL ON FUNCTION public.commit_meta_audience_sync(uuid, uuid, uuid, uuid, jsonb, jsonb) FROM PUBLIC, anon, authenticated',
+    )
+    expect(migration).toContain(
+      'GRANT EXECUTE ON FUNCTION public.commit_meta_audience_sync(uuid, uuid, uuid, uuid, jsonb, jsonb) TO service_role',
+    )
+  })
 })

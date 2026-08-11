@@ -53,12 +53,15 @@ function harness(overrides: {
       ? { claimed: false as const }
       : { claimed: true as const, runId: 'run-1', claimId: 'claim-1' }),
     loadConfig: vi.fn(async () => config),
-    loadProjectedMembers: vi.fn(async () => overrides.current ?? [member()]),
+    loadProjectedMembers: vi.fn(async () => ({
+      members: overrides.current ?? [member()],
+      suppressedCount: 0,
+    })),
     loadMemberships: vi.fn(async () => overrides.previous ?? []),
-    setRemoteAudienceId: vi.fn(async (_input: unknown) => undefined),
-    commitSuccess: vi.fn(async (_input: unknown) => { order.push('commit') }),
-    completeDryRun: vi.fn(async (_input: unknown) => { order.push('dry-run') }),
-    fail: vi.fn(async (_input: unknown) => { order.push('fail') }),
+    setRemoteAudienceId: vi.fn(async () => undefined),
+    commitSuccess: vi.fn(async () => { order.push('commit') }),
+    completeDryRun: vi.fn(async () => { order.push('dry-run') }),
+    fail: vi.fn(async () => { order.push('fail') }),
   }
   const provider = {
     getConnection: vi.fn(async () => ({ token: 'secret-token', adAccountId: 'act_123', connectionId: 'connection-1' })),

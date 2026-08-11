@@ -208,6 +208,221 @@ CREATE INDEX IF NOT EXISTS idx_meta_audience_sync_runs_retry
   ON public.meta_audience_sync_runs (next_retry_at)
   WHERE status = 'failed' AND next_retry_at IS NOT NULL;
 
+-- ----- Atomic claim / completion RPCs (service role only) -------------------
+
+CREATE OR REPLACE FUNCTION public.claim_meta_audience_sync(
+  p_org_id uuid,
+  p_audience_config_id uuid,
+  p_trigger_source text,
+  p_dry_run boolean
+)
+RETURNS TABLE (claimed boolean, run_id uuid, claim_id uuid)
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  config_row public.meta_audience_config%ROWTYPE;
+  next_run_id uuid := gen_random_uuid();
+  next_claim_id uuid := gen_random_uuid();
+BEGIN
+  SELECT * INTO config_row
+  FROM public.meta_audience_config
+  WHERE id = p_audience_config_id
+    AND org_id = p_org_id
+    AND sync_enabled = true
+  FOR UPDATE;
+
+  IF NOT FOUND THEN
+    RETURN QUERY SELECT false, NULL::uuid, NULL::uuid;
+    RETURN;
+  END IF;
+
+  IF config_row.sync_claim_id IS NOT NULL
+     AND config_row.sync_claimed_at > now() - interval '30 minutes' THEN
+    RETURN QUERY SELECT false, NULL::uuid, NULL::uuid;
+    RETURN;
+  END IF;
+
+  INSERT INTO public.meta_audience_sync_runs (
+    id, org_id, audience_config_id, trigger_source, dry_run,
+    status, claim_id, started_at
+  ) VALUES (
+    next_run_id, p_org_id, p_audience_config_id, p_trigger_source, p_dry_run,
+    'running', next_claim_id, now()
+  );
+
+  UPDATE public.meta_audience_config
+  SET sync_claim_id = next_claim_id,
+      sync_claimed_at = now(),
+      operational_status = 'syncing',
+      updated_at = now()
+  WHERE id = p_audience_config_id AND org_id = p_org_id;
+
+  RETURN QUERY SELECT true, next_run_id, next_claim_id;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.commit_meta_audience_sync(
+  p_org_id uuid,
+  p_audience_config_id uuid,
+  p_run_id uuid,
+  p_claim_id uuid,
+  p_members jsonb,
+  p_counts jsonb
+)
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+  PERFORM 1 FROM public.meta_audience_config
+  WHERE id = p_audience_config_id AND org_id = p_org_id
+    AND sync_claim_id = p_claim_id
+  FOR UPDATE;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'meta audience claim is no longer owned';
+  END IF;
+
+  DELETE FROM public.meta_audience_memberships
+  WHERE org_id = p_org_id AND audience_config_id = p_audience_config_id;
+
+  INSERT INTO public.meta_audience_memberships (
+    org_id, audience_config_id, entity_type, entity_id,
+    submitted_email_hash, submitted_phone_hash, eligibility_fingerprint,
+    last_synced_at
+  )
+  SELECT
+    p_org_id,
+    p_audience_config_id,
+    member->>'entity_type',
+    (member->>'entity_id')::uuid,
+    NULLIF(member->>'submitted_email_hash', ''),
+    NULLIF(member->>'submitted_phone_hash', ''),
+    member->>'eligibility_fingerprint',
+    now()
+  FROM jsonb_array_elements(COALESCE(p_members, '[]'::jsonb)) AS member;
+
+  UPDATE public.meta_audience_sync_runs
+  SET status = 'succeeded',
+      target_count = COALESCE((p_counts->>'targetCount')::integer, 0),
+      add_count = COALESCE((p_counts->>'addCount')::integer, 0),
+      remove_count = COALESCE((p_counts->>'removeCount')::integer, 0),
+      unchanged_count = COALESCE((p_counts->>'unchangedCount')::integer, 0),
+      invalid_count = COALESCE((p_counts->>'invalidCount')::integer, 0),
+      suppressed_count = COALESCE((p_counts->>'suppressedCount')::integer, 0),
+      completed_at = now(),
+      updated_at = now()
+  WHERE id = p_run_id AND org_id = p_org_id
+    AND audience_config_id = p_audience_config_id AND claim_id = p_claim_id;
+
+  IF NOT FOUND THEN RAISE EXCEPTION 'meta audience run is no longer owned'; END IF;
+
+  UPDATE public.meta_audience_config
+  SET last_synced_at = now(),
+      last_sync_stats = jsonb_build_object(
+        'sent', COALESCE((p_counts->>'addCount')::integer, 0),
+        'removed', COALESCE((p_counts->>'removeCount')::integer, 0),
+        'invalid', COALESCE((p_counts->>'invalidCount')::integer, 0)
+      ),
+      operational_status = 'synced',
+      dirty_at = NULL,
+      dirty_reason = NULL,
+      next_sync_at = now() + interval '1 hour',
+      sync_claim_id = NULL,
+      sync_claimed_at = NULL,
+      last_error_code = NULL,
+      last_error_message = NULL,
+      updated_at = now()
+  WHERE id = p_audience_config_id AND org_id = p_org_id AND sync_claim_id = p_claim_id;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.complete_meta_audience_dry_run(
+  p_org_id uuid,
+  p_audience_config_id uuid,
+  p_run_id uuid,
+  p_claim_id uuid,
+  p_counts jsonb
+)
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+  UPDATE public.meta_audience_sync_runs
+  SET status = 'succeeded',
+      target_count = COALESCE((p_counts->>'targetCount')::integer, 0),
+      add_count = COALESCE((p_counts->>'addCount')::integer, 0),
+      remove_count = COALESCE((p_counts->>'removeCount')::integer, 0),
+      unchanged_count = COALESCE((p_counts->>'unchangedCount')::integer, 0),
+      invalid_count = COALESCE((p_counts->>'invalidCount')::integer, 0),
+      suppressed_count = COALESCE((p_counts->>'suppressedCount')::integer, 0),
+      completed_at = now(),
+      updated_at = now()
+  WHERE id = p_run_id AND org_id = p_org_id
+    AND audience_config_id = p_audience_config_id AND claim_id = p_claim_id;
+  IF NOT FOUND THEN RAISE EXCEPTION 'meta audience dry-run is no longer owned'; END IF;
+
+  UPDATE public.meta_audience_config
+  SET operational_status = CASE WHEN dirty_at IS NULL THEN 'ready' ELSE 'dirty' END,
+      sync_claim_id = NULL,
+      sync_claimed_at = NULL,
+      updated_at = now()
+  WHERE id = p_audience_config_id AND org_id = p_org_id AND sync_claim_id = p_claim_id;
+  IF NOT FOUND THEN RAISE EXCEPTION 'meta audience claim is no longer owned'; END IF;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.fail_meta_audience_sync(
+  p_org_id uuid,
+  p_audience_config_id uuid,
+  p_run_id uuid,
+  p_claim_id uuid,
+  p_error_code text,
+  p_error_message text,
+  p_misconfigured boolean
+)
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+  UPDATE public.meta_audience_sync_runs
+  SET status = 'failed',
+      error_code = left(p_error_code, 100),
+      error_message = left(p_error_message, 300),
+      retry_count = retry_count + 1,
+      next_retry_at = now() + interval '15 minutes',
+      completed_at = now(),
+      updated_at = now()
+  WHERE id = p_run_id AND org_id = p_org_id
+    AND audience_config_id = p_audience_config_id AND claim_id = p_claim_id;
+
+  UPDATE public.meta_audience_config
+  SET operational_status = CASE WHEN p_misconfigured THEN 'misconfigured' ELSE 'error' END,
+      next_sync_at = now() + interval '15 minutes',
+      sync_claim_id = NULL,
+      sync_claimed_at = NULL,
+      last_error_code = left(p_error_code, 100),
+      last_error_message = left(p_error_message, 300),
+      updated_at = now()
+  WHERE id = p_audience_config_id AND org_id = p_org_id AND sync_claim_id = p_claim_id;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.claim_meta_audience_sync(uuid, uuid, text, boolean) FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.commit_meta_audience_sync(uuid, uuid, uuid, uuid, jsonb, jsonb) FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.complete_meta_audience_dry_run(uuid, uuid, uuid, uuid, jsonb) FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.fail_meta_audience_sync(uuid, uuid, uuid, uuid, text, text, boolean) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.claim_meta_audience_sync(uuid, uuid, text, boolean) TO service_role;
+GRANT EXECUTE ON FUNCTION public.commit_meta_audience_sync(uuid, uuid, uuid, uuid, jsonb, jsonb) TO service_role;
+GRANT EXECUTE ON FUNCTION public.complete_meta_audience_dry_run(uuid, uuid, uuid, uuid, jsonb) TO service_role;
+GRANT EXECUTE ON FUNCTION public.fail_meta_audience_sync(uuid, uuid, uuid, uuid, text, text, boolean) TO service_role;
+
 -- ----- Updated-at triggers ---------------------------------------------------
 
 DROP TRIGGER IF EXISTS meta_audience_memberships_updated_at
