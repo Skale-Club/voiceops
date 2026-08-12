@@ -6,6 +6,12 @@
 // Tables: `conversations` + `conversation_messages` (the only persistence world for chat).
 // See .planning/codebase/chat-data-boundary.md for the full data lifecycle.
 import { createServiceRoleClient } from '@/lib/supabase/admin'
+import type { ChatSessionContext } from './session'
+
+// Cap on how many past turns loadSessionFromDb() rebuilds into historyWindow.
+// Mirrors the rough size of the Redis cache (session.ts docs "last 10 message
+// turns" — a turn is a user+assistant pair, so 20 rows ~= 10 turns).
+const HISTORY_FALLBACK_LIMIT = 20
 
 /**
  * Create a new conversations row in Supabase.
@@ -66,4 +72,60 @@ export async function persistMessage(opts: {
     })
     .eq('id', opts.dbSessionId)
   if (updateError) throw updateError
+}
+
+/**
+ * Rebuild a ChatSessionContext straight from Postgres when Redis has no
+ * session for an incoming client sessionId (Redis down, evicted, or past its
+ * 1h sliding TTL — session.ts's getSession() returned null either way).
+ *
+ * `conversations.session_key` is UNIQUE (migration 012) and is exactly what
+ * ensureDbSession() stores as the client-facing sessionId, so this is a
+ * direct reload of the same identity Redis would have cached — not a guess.
+ * The org_id match is defense-in-depth against cross-org sessionId reuse
+ * (mirrors the `existingSession.orgId === org.id` check on the Redis path).
+ *
+ * Returns null if no matching conversation exists — caller mints a new one.
+ * Throws on a genuine DB error; callers must not let that 500 the route
+ * (Postgres being briefly unhappy on top of Redis being down should degrade
+ * to "start a fresh session", not "the whole chat is broken").
+ */
+export async function loadSessionFromDb(opts: {
+  orgId: string
+  sessionId: string
+}): Promise<ChatSessionContext | null> {
+  const supabase = createServiceRoleClient()
+
+  const { data: convo, error: convoError } = await supabase
+    .from('conversations')
+    .select('id, created_at')
+    .eq('org_id', opts.orgId)
+    .eq('session_key', opts.sessionId)
+    .maybeSingle()
+  if (convoError) throw convoError
+  if (!convo) return null
+
+  // Most recent N rows first (cheap index scan), then reverse to the
+  // oldest→newest order historyWindow/runAgent expects.
+  const { data: rows, error: msgError } = await supabase
+    .from('conversation_messages')
+    .select('role, content, created_at')
+    .eq('conversation_id', convo.id)
+    .order('created_at', { ascending: false })
+    .limit(HISTORY_FALLBACK_LIMIT)
+  if (msgError) throw msgError
+
+  const messages: ChatSessionContext['messages'] = (rows ?? [])
+    .filter((r) => r.role === 'user' || r.role === 'assistant')
+    .reverse()
+    .map((r) => ({ role: r.role as 'user' | 'assistant', content: r.content }))
+
+  return {
+    orgId: opts.orgId,
+    sessionId: opts.sessionId,
+    dbSessionId: convo.id,
+    messages,
+    createdAt: convo.created_at,
+    lastActiveAt: new Date().toISOString(),
+  }
 }
