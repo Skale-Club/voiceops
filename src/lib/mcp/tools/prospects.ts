@@ -20,6 +20,8 @@ import {
   xmailActivateCampaign,
   type XmailLead,
 } from '@/lib/xmail/client'
+import { loadWebsiteInsightsForAccounts } from '@/lib/xmail/website-insights'
+import type { WebsiteInsights } from '@/services/website-analyzer/outreach-insights'
 import { verifyProspectsBatch, type BatchAggregate, type EmailVerified, type ProspectKind } from '@/lib/email-verification/verify'
 import type { McpToolDef } from '../tool-types'
 
@@ -83,7 +85,11 @@ function verificationKind(kind: 'person' | 'company'): ProspectKind {
   return kind === 'company' ? 'account' : 'contact'
 }
 
-function toXmailLead(p: ResolvedProspect, verification: EmailVerified): XmailLead {
+function toXmailLead(
+  p: ResolvedProspect,
+  verification: EmailVerified,
+  websiteInsights?: WebsiteInsights,
+): XmailLead {
   // xphere_kind must use the resolver's vocabulary ('contact' | 'account'), not
   // the prospect's own 'person' | 'company' kind — see resolveProspectEntity in
   // src/lib/prospects/events.ts.
@@ -99,6 +105,7 @@ function toXmailLead(p: ResolvedProspect, verification: EmailVerified): XmailLea
     email_verified_at: verification.verifiedAt,
     email_verification_provider: verification.provider,
     email_risk: verification.risk,
+    ...(websiteInsights ? { websiteInsights } : {}),
   }
   if (p.kind === 'company') {
     return { email: p.email as string, companyName: p.name ?? undefined, website: p.website ?? undefined, customFields }
@@ -357,7 +364,14 @@ export const prospectsTools: McpToolDef[] = [
         if (accts.ok && accts.accounts.length > 0) inboxId = accts.accounts[0].id
       }
 
-      const imp = await xmailBulkImportLeads(recipients.map((r) => toXmailLead(r.prospect, r.verified)))
+      const service = db()
+      const websiteInsights = await loadWebsiteInsightsForAccounts(
+        service,
+        auth.orgId,
+        recipients.filter(r => r.prospect.kind === 'company').map(r => r.prospect.id),
+      )
+      const imp = await xmailBulkImportLeads(recipients.map((r) =>
+        toXmailLead(r.prospect, r.verified, websiteInsights.get(r.prospect.id))))
       if (!imp.ok) return { error: `Xmail lead import failed: ${imp.error}` }
 
       const add = await xmailAddLeadsToCampaign(campaign_id, imp.leadIds, inboxId)

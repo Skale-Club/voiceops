@@ -5610,6 +5610,86 @@ export interface Database {
           }
         ]
       }
+      website_analyses: {
+        Row: {
+          id: string
+          org_id: string
+          account_id: string
+          status: 'pending' | 'running' | 'completed' | 'failed'
+          url: string | null
+          lead_score: number | null
+          brand_colors: Json
+          logo_url: string | null
+          services: string[]
+          pain_points: string[]
+          outreach_insights: Json
+          screenshot_desktop_url: string | null
+          screenshot_mobile_url: string | null
+          preview_url: string | null
+          preview_token: string | null
+          raw_evidence: Json
+          error_message: string | null
+          analyzed_at: string | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          org_id: string
+          account_id: string
+          status?: 'pending' | 'running' | 'completed' | 'failed'
+          url?: string | null
+          lead_score?: number | null
+          brand_colors?: Json
+          logo_url?: string | null
+          services?: string[]
+          pain_points?: string[]
+          outreach_insights?: Json
+          screenshot_desktop_url?: string | null
+          screenshot_mobile_url?: string | null
+          preview_url?: string | null
+          preview_token?: string | null
+          raw_evidence?: Json
+          error_message?: string | null
+          analyzed_at?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          status?: 'pending' | 'running' | 'completed' | 'failed'
+          url?: string | null
+          lead_score?: number | null
+          brand_colors?: Json
+          logo_url?: string | null
+          services?: string[]
+          pain_points?: string[]
+          outreach_insights?: Json
+          screenshot_desktop_url?: string | null
+          screenshot_mobile_url?: string | null
+          preview_url?: string | null
+          preview_token?: string | null
+          raw_evidence?: Json
+          error_message?: string | null
+          analyzed_at?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: 'website_analyses_account_id_fkey'
+            columns: ['account_id']
+            isOneToOne: false
+            referencedRelation: 'accounts'
+            referencedColumns: ['id']
+          },
+          {
+            foreignKeyName: 'website_analyses_org_id_fkey'
+            columns: ['org_id']
+            isOneToOne: false
+            referencedRelation: 'organizations'
+            referencedColumns: ['id']
+          },
+        ]
+      }
       google_review_photos: {
         Row: {
           id: string

@@ -5,6 +5,7 @@
 
 import { createServiceRoleClient } from '@/lib/supabase/admin'
 import { analyzeWebsite, calculateLeadScore, normaliseUrl } from './extractor'
+import { buildWebsiteInsights } from './outreach-insights'
 import type { AnalysisResult } from './types'
 import type { Json } from '@/types/database'
 
@@ -187,6 +188,7 @@ export async function runAnalysis(opts: {
       screenshotDesktopUrl,
       screenshotMobileUrl,
       rawEvidence,
+      outreachInsights: buildWebsiteInsights({ url: extraction.resolvedUrl, services, rawEvidence }),
     }
 
     // ── 6. Persist analysis row ──────────────────────────────────────────────
@@ -201,6 +203,7 @@ export async function runAnalysis(opts: {
         screenshot_desktop_url: result.screenshotDesktopUrl,
         screenshot_mobile_url:  result.screenshotMobileUrl,
         raw_evidence:           result.rawEvidence as Json,
+        outreach_insights:      result.outreachInsights as Json,
         analyzed_at:            new Date().toISOString(),
         updated_at:             new Date().toISOString(),
       })

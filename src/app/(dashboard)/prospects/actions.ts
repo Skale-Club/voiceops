@@ -10,6 +10,7 @@ import { parseCsv } from '@/lib/contacts/csv'
 import { normaliseEmail } from '@/lib/contacts/zod-schemas'
 import { normalizePhoneToE164 } from '@/lib/phone-numbers/normalize'
 import { isXmailConfigured, xmailBulkImportLeads, type XmailLead } from '@/lib/xmail/client'
+import { loadWebsiteInsightsForAccounts } from '@/lib/xmail/website-insights'
 import { isXpotConfigured, xpotSendLeads, type XpotLead } from '@/lib/xpot/client'
 import { generatePreviewForAnalysis } from '@/services/website-analyzer'
 import {
@@ -990,6 +991,7 @@ export type WebsiteAnalysis = {
   logoUrl: string | null
   services: string[]
   painPoints: string[]
+  outreachInsights: Record<string, string>
   screenshotDesktopUrl: string | null
   screenshotMobileUrl: string | null
   previewUrl: string | null
@@ -1066,7 +1068,7 @@ export async function getProspectDetail(
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       ? (supabase as any)
           .from('website_analyses')
-          .select('id, status, lead_score, url, brand_colors, logo_url, services, pain_points, screenshot_desktop_url, screenshot_mobile_url, preview_url, raw_evidence, analyzed_at, error_message, created_at')
+          .select('id, status, lead_score, url, brand_colors, logo_url, services, pain_points, outreach_insights, screenshot_desktop_url, screenshot_mobile_url, preview_url, raw_evidence, analyzed_at, error_message, created_at')
           .eq('account_id', id)
           .order('created_at', { ascending: false })
           .limit(1)
@@ -1139,6 +1141,7 @@ export async function getProspectDetail(
         logoUrl: (a.logo_url as string | null) ?? null,
         services: (a.services as string[] | null) ?? [],
         painPoints: (a.pain_points as string[] | null) ?? [],
+        outreachInsights: (a.outreach_insights as Record<string, string> | null) ?? {},
         screenshotDesktopUrl: (a.screenshot_desktop_url as string | null) ?? null,
         screenshotMobileUrl: (a.screenshot_mobile_url as string | null) ?? null,
         previewUrl: (a.preview_url as string | null) ?? null,
@@ -1292,6 +1295,9 @@ export async function startOutreach(refs: ProspectRef[]): Promise<BulkResult> {
   const leads: XmailLead[] = []
   const touchedContacts: string[] = []
   const touchedAccounts: string[] = []
+  const { data: orgId } = await supabase.rpc('get_current_org_id')
+  if (!orgId) return { ok: false, error: 'No active workspace found.' }
+  const websiteInsights = await loadWebsiteInsightsForAccounts(supabase, orgId as string, accountIds)
 
   if (contactIds.length) {
     const { data } = await supabase
@@ -1328,7 +1334,13 @@ export async function startOutreach(refs: ProspectRef[]): Promise<BulkResult> {
         companyName: (a.name as string | null) ?? null,
         phone: (a.phone as string | null) ?? null,
         website: (a.domain as string | null) ?? null,
-        customFields: { xphere_id: a.id, xphere_kind: 'account' },
+        customFields: {
+          xphere_id: a.id,
+          xphere_kind: 'account',
+          ...(websiteInsights.get(a.id as string)
+            ? { websiteInsights: websiteInsights.get(a.id as string) }
+            : {}),
+        },
       })
       touchedAccounts.push(a.id as string)
     }

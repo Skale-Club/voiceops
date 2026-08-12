@@ -35,6 +35,7 @@ export interface AnalysisResult {
   screenshotDesktopUrl: string | null
   screenshotMobileUrl: string | null
   rawEvidence: Record<string, unknown>
+  outreachInsights: Record<string, string>
 }
 
 /** Status shape returned by GET /api/v1/accounts/:id/analyze */
@@ -47,6 +48,7 @@ export interface AnalysisStatus {
   logoUrl: string | null
   services: string[]
   painPoints: string[]
+  outreachInsights: Record<string, string>
   screenshotDesktopUrl: string | null
   screenshotMobileUrl: string | null
   analyzedAt: string | null

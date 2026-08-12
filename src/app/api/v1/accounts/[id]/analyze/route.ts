@@ -141,7 +141,7 @@ export async function GET(
   const { data: analysis } = await (supabase as any)
     .from('website_analyses')
     .select(
-      'id, account_id, status, lead_score, brand_colors, logo_url, services, pain_points, screenshot_desktop_url, screenshot_mobile_url, analyzed_at, error_message',
+      'id, account_id, status, lead_score, brand_colors, logo_url, services, pain_points, outreach_insights, screenshot_desktop_url, screenshot_mobile_url, analyzed_at, error_message',
     )
     .eq('account_id', accountId)
     .eq('org_id', apiKey.org_id)

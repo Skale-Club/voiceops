@@ -485,6 +485,7 @@ function WebsiteAnalysisSection({
   const score = analysis.leadScore ?? 0
   const verdict =
     score >= 60 ? 'Strong opportunity' : score >= 40 ? 'Good opportunity' : score >= 20 ? 'Weak opportunity' : 'Website already solid'
+  const englishInsight = analysis.outreachInsights.en
 
   async function handlePreview() {
     setBusy(true)
@@ -501,6 +502,12 @@ function WebsiteAnalysisSection({
   return (
     <Section icon={Globe} title="Website analysis">
       <div className="space-y-3">
+        {englishInsight && (
+          <div className="rounded-[8px] border border-accent/20 bg-accent/5 p-3">
+            <p className="text-[10.5px] font-semibold uppercase tracking-[0.12em] text-accent">Email insight · English</p>
+            <p className="mt-1.5 text-[12.5px] leading-5 text-text-primary">{englishInsight}</p>
+          </div>
+        )}
         {/* Score + verdict */}
         <div className="flex items-center gap-2 text-[12.5px]">
           <span
