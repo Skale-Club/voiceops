@@ -7849,13 +7849,25 @@ export interface Database {
           org_id: string
           meta_business_id: string | null
           meta_ad_account_id: string
+          ads_connection_id: string | null
           custom_audience_id: string | null
           audience_name: string | null
+          audience_kind: 'xcraper_master' | 'prospect_segment'
+          source_definition: Json
           sync_enabled: boolean
           terms_accepted_at: string | null
-          consent_basis: string
+          terms_accepted_by: string | null
+          consent_basis: 'USER_PROVIDED_ONLY' | 'PARTNER_PROVIDED_ONLY' | 'BOTH_USER_AND_PARTNER_PROVIDED'
+          operational_status: 'draft' | 'ready' | 'dirty' | 'syncing' | 'synced' | 'paused' | 'misconfigured' | 'error'
+          dirty_at: string | null
+          dirty_reason: string | null
+          next_sync_at: string | null
+          sync_claim_id: string | null
+          sync_claimed_at: string | null
           last_synced_at: string | null
           last_sync_stats: { sent?: number; removed?: number; error_count?: number } | null
+          last_error_code: string | null
+          last_error_message: string | null
           created_at: string
           updated_at: string
         }
@@ -7864,33 +7876,211 @@ export interface Database {
           org_id: string
           meta_business_id?: string | null
           meta_ad_account_id: string
+          ads_connection_id?: string | null
           custom_audience_id?: string | null
           audience_name?: string | null
+          audience_kind?: 'xcraper_master' | 'prospect_segment'
+          source_definition?: Json
           sync_enabled?: boolean
           terms_accepted_at?: string | null
-          consent_basis?: string
+          terms_accepted_by?: string | null
+          consent_basis?: 'USER_PROVIDED_ONLY' | 'PARTNER_PROVIDED_ONLY' | 'BOTH_USER_AND_PARTNER_PROVIDED'
+          operational_status?: 'draft' | 'ready' | 'dirty' | 'syncing' | 'synced' | 'paused' | 'misconfigured' | 'error'
+          dirty_at?: string | null
+          dirty_reason?: string | null
+          next_sync_at?: string | null
+          sync_claim_id?: string | null
+          sync_claimed_at?: string | null
           last_synced_at?: string | null
           last_sync_stats?: { sent?: number; removed?: number; error_count?: number } | null
+          last_error_code?: string | null
+          last_error_message?: string | null
           created_at?: string
           updated_at?: string
         }
         Update: {
+          id?: string
+          org_id?: string
           meta_business_id?: string | null
           meta_ad_account_id?: string
+          ads_connection_id?: string | null
           custom_audience_id?: string | null
           audience_name?: string | null
+          audience_kind?: 'xcraper_master' | 'prospect_segment'
+          source_definition?: Json
           sync_enabled?: boolean
           terms_accepted_at?: string | null
-          consent_basis?: string
+          terms_accepted_by?: string | null
+          consent_basis?: 'USER_PROVIDED_ONLY' | 'PARTNER_PROVIDED_ONLY' | 'BOTH_USER_AND_PARTNER_PROVIDED'
+          operational_status?: 'draft' | 'ready' | 'dirty' | 'syncing' | 'synced' | 'paused' | 'misconfigured' | 'error'
+          dirty_at?: string | null
+          dirty_reason?: string | null
+          next_sync_at?: string | null
+          sync_claim_id?: string | null
+          sync_claimed_at?: string | null
           last_synced_at?: string | null
           last_sync_stats?: { sent?: number; removed?: number; error_count?: number } | null
+          last_error_code?: string | null
+          last_error_message?: string | null
+          created_at?: string
           updated_at?: string
         }
         Relationships: [
           {
+            foreignKeyName: 'meta_audience_config_ads_connection_id_fkey'
+            columns: ['ads_connection_id']
+            isOneToOne: false
+            referencedRelation: 'ads_connections'
+            referencedColumns: ['id']
+          },
+          {
             foreignKeyName: 'meta_audience_config_org_id_fkey'
             columns: ['org_id']
-            isOneToOne: true
+            isOneToOne: false
+            referencedRelation: 'organizations'
+            referencedColumns: ['id']
+          },
+        ]
+      }
+      meta_audience_memberships: {
+        Row: {
+          id: string
+          org_id: string
+          audience_config_id: string
+          entity_type: 'contact' | 'account'
+          entity_id: string
+          submitted_email_hash: string | null
+          submitted_phone_hash: string | null
+          eligibility_fingerprint: string
+          last_synced_at: string
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          org_id: string
+          audience_config_id: string
+          entity_type: 'contact' | 'account'
+          entity_id: string
+          submitted_email_hash?: string | null
+          submitted_phone_hash?: string | null
+          eligibility_fingerprint: string
+          last_synced_at?: string
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          org_id?: string
+          audience_config_id?: string
+          entity_type?: 'contact' | 'account'
+          entity_id?: string
+          submitted_email_hash?: string | null
+          submitted_phone_hash?: string | null
+          eligibility_fingerprint?: string
+          last_synced_at?: string
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: 'meta_audience_memberships_config_fkey'
+            columns: ['org_id', 'audience_config_id']
+            isOneToOne: false
+            referencedRelation: 'meta_audience_config'
+            referencedColumns: ['org_id', 'id']
+          },
+          {
+            foreignKeyName: 'meta_audience_memberships_org_id_fkey'
+            columns: ['org_id']
+            isOneToOne: false
+            referencedRelation: 'organizations'
+            referencedColumns: ['id']
+          },
+        ]
+      }
+      meta_audience_sync_runs: {
+        Row: {
+          id: string
+          org_id: string
+          audience_config_id: string
+          trigger_source: 'manual' | 'scheduled' | 'ingestion' | 'retry'
+          dry_run: boolean
+          status: 'pending' | 'running' | 'succeeded' | 'failed' | 'skipped'
+          claim_id: string
+          target_count: number
+          add_count: number
+          remove_count: number
+          unchanged_count: number
+          invalid_count: number
+          suppressed_count: number
+          retry_count: number
+          next_retry_at: string | null
+          error_code: string | null
+          error_message: string | null
+          started_at: string | null
+          completed_at: string | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          org_id: string
+          audience_config_id: string
+          trigger_source?: 'manual' | 'scheduled' | 'ingestion' | 'retry'
+          dry_run?: boolean
+          status?: 'pending' | 'running' | 'succeeded' | 'failed' | 'skipped'
+          claim_id?: string
+          target_count?: number
+          add_count?: number
+          remove_count?: number
+          unchanged_count?: number
+          invalid_count?: number
+          suppressed_count?: number
+          retry_count?: number
+          next_retry_at?: string | null
+          error_code?: string | null
+          error_message?: string | null
+          started_at?: string | null
+          completed_at?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          org_id?: string
+          audience_config_id?: string
+          trigger_source?: 'manual' | 'scheduled' | 'ingestion' | 'retry'
+          dry_run?: boolean
+          status?: 'pending' | 'running' | 'succeeded' | 'failed' | 'skipped'
+          claim_id?: string
+          target_count?: number
+          add_count?: number
+          remove_count?: number
+          unchanged_count?: number
+          invalid_count?: number
+          suppressed_count?: number
+          retry_count?: number
+          next_retry_at?: string | null
+          error_code?: string | null
+          error_message?: string | null
+          started_at?: string | null
+          completed_at?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: 'meta_audience_sync_runs_config_fkey'
+            columns: ['org_id', 'audience_config_id']
+            isOneToOne: false
+            referencedRelation: 'meta_audience_config'
+            referencedColumns: ['org_id', 'id']
+          },
+          {
+            foreignKeyName: 'meta_audience_sync_runs_org_id_fkey'
+            columns: ['org_id']
+            isOneToOne: false
             referencedRelation: 'organizations'
             referencedColumns: ['id']
           },

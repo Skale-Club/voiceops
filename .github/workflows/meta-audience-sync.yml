@@ -1,26 +1,24 @@
 name: Meta Custom Audience Sync
 
-# Hourly per-org Meta Custom Audience sync (Project 5 — Meta Custom Audience Sync).
-# Runs scripts/meta-audience-sync.ts against every org with sync_enabled=true.
-# Fails closed: if META_SYSTEM_USER_TOKEN is not configured, the job no-ops
-# (green) instead of erroring every hour. Configure these repo secrets to enable:
-#   SUPABASE_SERVICE_ROLE_KEY, META_SYSTEM_USER_TOKEN
-# and repo variable NEXT_PUBLIC_SUPABASE_URL.
-#
-# NOTE: run this OR a Hetzner crontab — not both, or audiences sync twice.
+# Hourly recovery reconciliation for enabled tenant-owned audiences.
+# Tenant OAuth tokens are decrypted only at execution time; no global Meta
+# system-user token is required for this workflow.
 
 on:
   workflow_dispatch:
     inputs:
       org_id:
-        description: 'Sync a single org (optional)'
+        description: 'Constrain the run to one organization (optional)'
+        required: false
+      audience_id:
+        description: 'Constrain the run to one audience config (optional)'
         required: false
       dry_run:
-        description: 'Dry run — compute batches but do not write to Meta'
+        description: 'Compute the exact diff without Graph or ledger mutation'
         type: boolean
         default: false
   schedule:
-    - cron: '15 * * * *' # hourly at :15
+    - cron: '15 * * * *'
 
 concurrency:
   group: meta-audience-sync
@@ -31,7 +29,7 @@ permissions:
 
 jobs:
   sync:
-    name: Sync audiences
+    name: Reconcile tenant audiences
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -42,32 +40,36 @@ jobs:
           node-version: '20'
           cache: 'npm'
 
-      - name: Check configuration
-        id: cfg
-        env:
-          TOKEN: ${{ secrets.META_SYSTEM_USER_TOKEN }}
-        run: |
-          if [ -z "$TOKEN" ]; then
-            echo "META_SYSTEM_USER_TOKEN not set — skipping sync (no-op)."
-            echo "configured=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "configured=true" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Install dependencies
-        if: steps.cfg.outputs.configured == 'true'
-        run: npm ci
-
-      - name: Run meta-audience-sync
-        if: steps.cfg.outputs.configured == 'true'
+      - name: Validate required configuration
         env:
           NEXT_PUBLIC_SUPABASE_URL: ${{ vars.NEXT_PUBLIC_SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-          META_SYSTEM_USER_TOKEN: ${{ secrets.META_SYSTEM_USER_TOKEN }}
+          ENCRYPTION_SECRET: ${{ secrets.ENCRYPTION_SECRET }}
+        run: |
+          missing=""
+          for key in NEXT_PUBLIC_SUPABASE_URL SUPABASE_SERVICE_ROLE_KEY ENCRYPTION_SECRET; do
+            eval "value=\${$key}"
+            if [ -z "$value" ]; then missing="$missing $key"; fi
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::Missing required configuration:$missing"
+            exit 1
+          fi
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Reconcile Meta audiences
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ vars.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          ENCRYPTION_SECRET: ${{ secrets.ENCRYPTION_SECRET }}
           ORG_ID: ${{ inputs.org_id }}
+          AUDIENCE_ID: ${{ inputs.audience_id }}
           DRY_RUN: ${{ inputs.dry_run }}
         run: |
-          ARGS=""
-          if [ -n "$ORG_ID" ]; then ARGS="$ARGS --org $ORG_ID"; fi
-          if [ "$DRY_RUN" = "true" ]; then ARGS="$ARGS --dry-run"; fi
-          npx tsx scripts/meta-audience-sync.ts $ARGS
+          args=()
+          if [ -n "$ORG_ID" ]; then args+=(--org "$ORG_ID"); fi
+          if [ -n "$AUDIENCE_ID" ]; then args+=(--audience "$AUDIENCE_ID"); fi
+          if [ "$DRY_RUN" = "true" ]; then args+=(--dry-run); fi
+          npx tsx scripts/meta-audience-sync.ts "${args[@]}"

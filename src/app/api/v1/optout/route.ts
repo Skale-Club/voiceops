@@ -15,6 +15,7 @@ import { z } from 'zod'
 import { createServiceRoleClient } from '@/lib/supabase/admin'
 import { normalisePhone, normaliseEmail } from '@/lib/contacts/zod-schemas'
 import { hasScope } from '@/lib/api-keys/scopes'
+import { markMetaAudiencesDirty, type AudienceDirtyChange } from '@/lib/meta/audience-dirty'
 import type { Json } from '@/types/database'
 
 export const runtime = 'nodejs'
@@ -99,11 +100,13 @@ export async function POST(request: Request): Promise<Response> {
 
   const orgId = apiKey.org_id
   let affectedRecords = 0
+  let changed = false
+  const dirtyChanges: AudienceDirtyChange[] = []
 
   // ── 3. Opt out matching contacts ──────────────────────────────────────────
   const contactQuery = supabase
     .from('contacts')
-    .select('id, email')
+    .select('id, email, source_type')
     .eq('org_id', orgId)
 
   // Build filter: match by email OR phone
@@ -112,45 +115,79 @@ export async function POST(request: Request): Promise<Response> {
       `email_normalized.eq.${emailNorm},phone_e164.eq.${phoneNorm}`,
     )
     if (contacts?.length) {
-      await optOutContacts(supabase, orgId, contacts, source)
-      affectedRecords += contacts.length
+      const succeeded = await optOutContacts(supabase, orgId, contacts, source)
+      if (succeeded) {
+        affectedRecords += contacts.length
+        changed = true
+        dirtyChanges.push(...contacts.map((contact) => ({
+          entityType: 'contact' as const,
+          entityId: contact.id,
+          sourceType: contact.source_type,
+        })))
+      }
     }
   } else if (emailNorm) {
     const { data: contacts } = await contactQuery.eq('email_normalized', emailNorm)
     if (contacts?.length) {
-      await optOutContacts(supabase, orgId, contacts, source)
-      affectedRecords += contacts.length
+      const succeeded = await optOutContacts(supabase, orgId, contacts, source)
+      if (succeeded) {
+        affectedRecords += contacts.length
+        changed = true
+        dirtyChanges.push(...contacts.map((contact) => ({
+          entityType: 'contact' as const,
+          entityId: contact.id,
+          sourceType: contact.source_type,
+        })))
+      }
     }
   } else if (phoneNorm) {
     const { data: contacts } = await contactQuery.eq('phone_e164', phoneNorm)
     if (contacts?.length) {
-      await optOutContacts(supabase, orgId, contacts, source)
-      affectedRecords += contacts.length
+      const succeeded = await optOutContacts(supabase, orgId, contacts, source)
+      if (succeeded) {
+        affectedRecords += contacts.length
+        changed = true
+        dirtyChanges.push(...contacts.map((contact) => ({
+          entityType: 'contact' as const,
+          entityId: contact.id,
+          sourceType: contact.source_type,
+        })))
+      }
     }
   }
 
   // ── 4. Opt out matching accounts ─────────────────────────────────────────
   if (emailNorm || phoneNorm) {
-    const accountQuery = supabase
-      .from('accounts')
-      .select('id')
-      .eq('org_id', orgId)
-
-    let accounts: Array<{ id: string }> | null = null
-
-    if (emailNorm && phoneNorm) {
-      // accounts don't have email_normalized, use raw email field
-      const { data } = await accountQuery.or(`phone.eq.${phoneNorm}`)
-      accounts = data
-    } else if (phoneNorm) {
-      const { data } = await accountQuery.eq('phone', phoneNorm)
-      accounts = data
+    const accountMap = new Map<string, { id: string; source_type?: string | null }>()
+    if (emailNorm) {
+      const { data } = await supabase
+        .from('accounts')
+        .select('id, source_type')
+        .eq('org_id', orgId)
+        .filter('custom_fields->>email', 'eq', emailNorm)
+      for (const account of data ?? []) accountMap.set(account.id, account)
     }
-    // Accounts typically don't have an email field — skip email-only lookup
+    if (phoneNorm) {
+      const { data } = await supabase
+        .from('accounts')
+        .select('id, source_type')
+        .eq('org_id', orgId)
+        .eq('phone', phoneNorm)
+      for (const account of data ?? []) accountMap.set(account.id, account)
+    }
+    const accounts = [...accountMap.values()]
 
-    if (accounts?.length) {
-      await optOutAccounts(supabase, orgId, accounts, source)
-      affectedRecords += accounts.length
+    if (accounts.length) {
+      const succeeded = await optOutAccounts(supabase, orgId, accounts, source)
+      if (succeeded) {
+        affectedRecords += accounts.length
+        changed = true
+        dirtyChanges.push(...accounts.map((account) => ({
+          entityType: 'account' as const,
+          entityId: account.id,
+          sourceType: account.source_type,
+        })))
+      }
     }
   }
 
@@ -166,7 +203,19 @@ export async function POST(request: Request): Promise<Response> {
     if (unsub_err) {
       // Non-fatal: log and continue
       console.error('[api/v1/optout] email_unsubscribes upsert error:', unsub_err)
+    } else {
+      changed = true
     }
+  }
+
+  if (changed) {
+    await markMetaAudiencesDirty(supabase, {
+      orgId,
+      reason: 'prospect_optout',
+      // An email suppression may affect a member even when no CRM row was
+      // found, so every enabled scope must be reconciled in that case.
+      changes: emailNorm ? undefined : dirtyChanges,
+    })
   }
 
   // Touch the API key last-used timestamp
@@ -189,12 +238,12 @@ type ServiceClient = ReturnType<typeof createServiceRoleClient>
 async function optOutContacts(
   supabase: ServiceClient,
   orgId: string,
-  contacts: Array<{ id: string }>,
+  contacts: Array<{ id: string; source_type?: string | null }>,
   source: string,
-): Promise<void> {
+): Promise<boolean> {
   const ids = contacts.map((c) => c.id)
 
-  await supabase
+  const { error } = await supabase
     .from('contacts')
     .update({
       engagement_status:   'unsubscribed',
@@ -203,6 +252,10 @@ async function optOutContacts(
     })
     .in('id', ids)
     .eq('org_id', orgId)
+  if (error) {
+    console.error('[api/v1/optout] contact update error:', error)
+    return false
+  }
 
   // Record engagement events
   const events = ids.map((id) => ({
@@ -213,18 +266,20 @@ async function optOutContacts(
     source_platform: source,
     payload:         { source } as Json,
   }))
-  await supabase.from('prospect_engagement_events').insert(events)
+  const { error: eventError } = await supabase.from('prospect_engagement_events').insert(events)
+  if (eventError) console.error('[api/v1/optout] contact event insert error:', eventError)
+  return true
 }
 
 async function optOutAccounts(
   supabase: ServiceClient,
   orgId: string,
-  accounts: Array<{ id: string }>,
+  accounts: Array<{ id: string; source_type?: string | null }>,
   source: string,
-): Promise<void> {
+): Promise<boolean> {
   const ids = accounts.map((a) => a.id)
 
-  await supabase
+  const { error } = await supabase
     .from('accounts')
     .update({
       engagement_status:   'unsubscribed',
@@ -233,6 +288,10 @@ async function optOutAccounts(
     })
     .in('id', ids)
     .eq('org_id', orgId)
+  if (error) {
+    console.error('[api/v1/optout] account update error:', error)
+    return false
+  }
 
   // Record engagement events
   const events = ids.map((id) => ({
@@ -243,5 +302,7 @@ async function optOutAccounts(
     source_platform: source,
     payload:         { source } as Json,
   }))
-  await supabase.from('prospect_engagement_events').insert(events)
+  const { error: eventError } = await supabase.from('prospect_engagement_events').insert(events)
+  if (eventError) console.error('[api/v1/optout] account event insert error:', eventError)
+  return true
 }

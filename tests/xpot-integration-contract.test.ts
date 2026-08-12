@@ -14,6 +14,12 @@ vi.mock('@/lib/supabase/admin', () => ({
   createServiceRoleClient: createServiceRoleClientMock,
 }))
 
+// Audience reconciliation has its own route-level coverage. Keep this file
+// focused on the Xpot payload contract and independent of audience tables.
+vi.mock('@/lib/meta/audience-dirty', () => ({
+  markMetaAudiencesDirty: vi.fn(async () => ({ marked: 0 })),
+}))
+
 type QueryResult = { data: unknown; error: unknown }
 
 function makeQueryBuilder(overrides: {

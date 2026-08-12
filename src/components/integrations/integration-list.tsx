@@ -5,8 +5,9 @@
 // the unified IntegrationSheet.
 
 import { useEffect, useMemo, useState } from 'react'
+import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
-import { ChevronRight } from 'lucide-react'
+import { ChevronRight, Target } from 'lucide-react'
 
 import { StatusPill } from '@/components/design-system/status-pill'
 import { cn } from '@/lib/utils'
@@ -104,6 +105,22 @@ export function IntegrationList({ saved, initialOpen }: IntegrationListProps) {
   return (
     <>
       <div className="space-y-6">
+        <section className="space-y-2">
+          <h3 className="text-[11px] font-medium uppercase tracking-[0.08em] text-text-tertiary">Advertising</h3>
+          <Link
+            href="/settings/integrations/meta-audience"
+            className="group flex w-full items-center gap-4 rounded-[12px] border border-border bg-bg-secondary px-4 py-3 text-left transition-colors hover:bg-bg-tertiary/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+          >
+            <span className="flex h-9 w-9 items-center justify-center rounded-[9px] bg-blue-600 text-white">
+              <Target className="h-4 w-4" />
+            </span>
+            <div className="min-w-0 flex-1">
+              <p className="text-[13.5px] font-medium text-text-primary">Meta Custom Audiences</p>
+              <p className="mt-0.5 line-clamp-1 text-[12px] text-text-tertiary">Sync hashed Xcraper prospects to tenant-owned ad audiences.</p>
+            </div>
+            <ChevronRight className="h-4 w-4 text-text-tertiary transition-transform group-hover:translate-x-0.5" />
+          </Link>
+        </section>
         {CATEGORY_ORDER.map((cat) => {
           const items = grouped[cat] ?? []
           if (items.length === 0) return null

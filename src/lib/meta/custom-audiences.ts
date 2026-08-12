@@ -1,5 +1,5 @@
 // Meta Marketing API — Custom Audiences (Customer File)
-// Graph API v20.0, schema: EMAIL_SHA256 + PHONE_SHA256
+// Graph API version is centralized in meta-oauth, schema: EMAIL_SHA256 + PHONE_SHA256
 // https://developers.facebook.com/docs/marketing-api/audiences/guides/custom-audiences
 
 import { sha256Hex, normalizePhone, graphPost, graphGet, graphDelete } from '@/lib/meta/graph'
@@ -9,6 +9,10 @@ const BATCH_SIZE = 10_000
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 export type AudienceUserOperation = 'ADD' | 'REMOVE'
+export type MetaCustomerFileSource =
+  | 'USER_PROVIDED_ONLY'
+  | 'PARTNER_PROVIDED_ONLY'
+  | 'BOTH_USER_AND_PARTNER_PROVIDED'
 
 export interface AudienceBatchResult {
   num_received: number
@@ -30,13 +34,13 @@ export interface AudienceStatus {
 export async function createCustomAudience(
   adAccountId: string,
   token: string,
-  opts: { name: string; description?: string; consentBasis?: string },
+  opts: { name: string; description?: string; consentBasis?: MetaCustomerFileSource },
 ): Promise<{ id: string }> {
   return graphPost<{ id: string }>(`${adAccountId}/customaudiences`, token, {
     name: opts.name,
     subtype: 'CUSTOM',
     description: opts.description ?? 'Xphere CRM sync',
-    customer_file_source: opts.consentBasis ?? 'CUSTOMER_FILE_WITH_CONSENT',
+    customer_file_source: opts.consentBasis ?? 'USER_PROVIDED_ONLY',
   })
 }
 
@@ -56,6 +60,12 @@ export async function getAudienceStatus(
 export interface ContactHashEntry {
   email?: string | null
   phone?: string | null
+}
+
+/** Already-normalized SHA-256 values from the durable membership projector. */
+export interface AudienceHashEntry {
+  emailHash?: string | null
+  phoneHash?: string | null
 }
 
 export interface HashedPayloadEntry {
@@ -78,6 +88,25 @@ export async function hashContacts(contacts: ContactHashEntry[]): Promise<Hashed
   return { schema, data }
 }
 
+const SHA256_HEX = /^[0-9a-f]{64}$/
+
+/** Build Meta's paired schema without ever reintroducing raw identifiers. */
+export function payloadFromHashes(entries: AudienceHashEntry[]): HashedPayloadEntry {
+  const schema = ['EMAIL_SHA256', 'PHONE_SHA256']
+  const data: string[][] = []
+
+  for (const entry of entries) {
+    const emailHash = entry.emailHash ?? ''
+    const phoneHash = entry.phoneHash ?? ''
+    if (emailHash && !SHA256_HEX.test(emailHash)) throw new Error('Invalid email SHA-256 hash')
+    if (phoneHash && !SHA256_HEX.test(phoneHash)) throw new Error('Invalid phone SHA-256 hash')
+    if (!emailHash && !phoneHash) continue
+    data.push([emailHash, phoneHash])
+  }
+
+  return { schema, data }
+}
+
 // ─── Sync batches ─────────────────────────────────────────────────────────────
 
 export async function syncUsersToAudience(
@@ -87,6 +116,27 @@ export async function syncUsersToAudience(
   operation: AudienceUserOperation,
 ): Promise<{ sent: number; invalid: number }> {
   const { schema, data } = await hashContacts(contacts)
+  return syncPayload(audienceId, token, schema, data, operation)
+}
+
+/** Submit the safe hash-only rows emitted by audience reconciliation. */
+export async function syncHashedUsersToAudience(
+  audienceId: string,
+  token: string,
+  entries: AudienceHashEntry[],
+  operation: AudienceUserOperation,
+): Promise<{ sent: number; invalid: number }> {
+  const { schema, data } = payloadFromHashes(entries)
+  return syncPayload(audienceId, token, schema, data, operation)
+}
+
+async function syncPayload(
+  audienceId: string,
+  token: string,
+  schema: string[],
+  data: string[][],
+  operation: AudienceUserOperation,
+): Promise<{ sent: number; invalid: number }> {
   if (data.length === 0) return { sent: 0, invalid: 0 }
 
   let totalSent = 0

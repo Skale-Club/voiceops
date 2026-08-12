@@ -25,6 +25,7 @@ import { createServiceRoleClient } from '@/lib/supabase/admin'
 import { normaliseEmail } from '@/lib/contacts/zod-schemas'
 import { normalizePhoneToE164 } from '@/lib/phone-numbers/normalize'
 import { hasScope } from '@/lib/api-keys/scopes'
+import { markMetaAudiencesDirty } from '@/lib/meta/audience-dirty'
 import { runAnalysis } from '@/services/website-analyzer'
 import type { Json } from '@/types/database'
 
@@ -179,6 +180,15 @@ export async function POST(request: Request): Promise<Response> {
           ? await ingestCompany(supabase, orgId, p, sourceType, runId, defaultCountry)
           : await ingestPerson(supabase, orgId, p, sourceType, runId, defaultCountry)
       if (outcome) {
+        if (outcome.action !== 'skipped') {
+          await markMetaAudiencesDirty(supabase, {
+            orgId,
+            reason: 'prospect_ingestion',
+            sourceType,
+            entityType: outcome.kind === 'company' ? 'account' : 'contact',
+            entityId: outcome.id,
+          })
+        }
         results.push(outcome)
         // Auto-trigger website analysis for newly created company prospects that have a domain
         if (outcome.kind === 'company' && outcome.action === 'created' && p.domain?.trim()) {
@@ -229,6 +239,39 @@ export async function POST(request: Request): Promise<Response> {
 // ── helpers ────────────────────────────────────────────────────────────────────
 
 type ServiceClient = ReturnType<typeof createServiceRoleClient>
+
+function isNonEmpty(value: unknown): boolean {
+  return value !== null && value !== undefined && (typeof value !== 'string' || value.trim().length > 0)
+}
+
+function mergePresentJson(
+  existing: unknown,
+  incoming: unknown,
+): Record<string, unknown> {
+  const existingRecord = existing && typeof existing === 'object' && !Array.isArray(existing)
+    ? existing as Record<string, unknown>
+    : {}
+  const incomingRecord = incoming && typeof incoming === 'object' && !Array.isArray(incoming)
+    ? incoming as Record<string, unknown>
+    : {}
+  const merged: Record<string, unknown> = { ...existingRecord }
+  for (const [key, value] of Object.entries(incomingRecord)) {
+    if (!isNonEmpty(value)) continue
+    const current = merged[key]
+    if (
+      value && typeof value === 'object' && !Array.isArray(value) &&
+      current && typeof current === 'object' && !Array.isArray(current)
+    ) {
+      merged[key] = mergePresentJson(
+        current as Record<string, unknown>,
+        value as Record<string, unknown>,
+      )
+    } else {
+      merged[key] = typeof value === 'string' ? value.trim() : value
+    }
+  }
+  return merged
+}
 
 /**
  * Fire-and-forget: create a website_analyses row and kick off analysis for a
@@ -353,7 +396,12 @@ async function ingestPerson(
     if (p.qualification_status) patch.qualification_status = p.qualification_status
     if (p.recommended_channel !== undefined) patch.recommended_channel = p.recommended_channel
     if (p.score !== undefined) patch.score = p.score
-    await supabase.from('contacts').update(patch).eq('id', existing.id)
+    const { error } = await supabase
+      .from('contacts')
+      .update(patch)
+      .eq('id', existing.id)
+      .eq('org_id', orgId)
+    if (error) throw new Error('Could not update prospect contact')
     await recordImport(supabase, orgId, 'contact', existing.id, sourceType, runId)
     return { id: existing.id, kind: 'person', action: 'updated' }
   }
@@ -406,11 +454,18 @@ async function ingestCompany(
   if (!name && !domain && !sourceId) return null
 
   // Dedup: source_id → domain → name
-  let existing: { id: string; lifecycle_stage: string } | null = null
+  type ExistingAccount = {
+    id: string
+    lifecycle_stage: string
+    custom_fields: Record<string, unknown> | null
+    source_payload: Json | null
+  }
+  let existing: ExistingAccount | null = null
+  const existingColumns = 'id, lifecycle_stage, custom_fields, source_payload'
   if (sourceId) {
     const { data } = await supabase
       .from('accounts')
-      .select('id, lifecycle_stage')
+      .select(existingColumns)
       .eq('org_id', orgId)
       .eq('source_type', sourceType)
       .eq('source_id', sourceId)
@@ -420,7 +475,7 @@ async function ingestCompany(
   if (!existing && domain) {
     const { data } = await supabase
       .from('accounts')
-      .select('id, lifecycle_stage')
+      .select(existingColumns)
       .eq('org_id', orgId)
       .eq('domain', domain)
       .maybeSingle()
@@ -429,7 +484,7 @@ async function ingestCompany(
   if (!existing && name) {
     const { data } = await supabase
       .from('accounts')
-      .select('id, lifecycle_stage')
+      .select(existingColumns)
       .eq('org_id', orgId)
       .ilike('name', name)
       .eq('lifecycle_stage', 'prospect')
@@ -444,13 +499,24 @@ async function ingestCompany(
     const patch: Record<string, unknown> = { updated_at: new Date().toISOString() }
     if (name) patch.name = name
     if (domain) patch.domain = domain
-    if (p.phone) patch.phone = normalizePhoneToE164(p.phone, phoneCountry)
+    const normalizedPhone = normalizePhoneToE164(p.phone, phoneCountry)
+    if (normalizedPhone) patch.phone = normalizedPhone
     if (p.tags?.length) patch.tags = p.tags
     if (p.intent_level) patch.intent_level = p.intent_level
     if (p.qualification_status) patch.qualification_status = p.qualification_status
     if (p.recommended_channel !== undefined) patch.recommended_channel = p.recommended_channel
     if (p.score !== undefined) patch.score = p.score
-    await supabase.from('accounts').update(patch).eq('id', existing.id)
+    patch.custom_fields = mergePresentJson(existing.custom_fields, p.custom_fields)
+    patch.source_payload = mergePresentJson(existing.source_payload, p.source_payload)
+    const website = typeof p.custom_fields?.website === 'string' ? p.custom_fields.website.trim() : ''
+    if (website) patch.website = website
+
+    const { error } = await supabase
+      .from('accounts')
+      .update(patch)
+      .eq('id', existing.id)
+      .eq('org_id', orgId)
+    if (error) throw new Error('Could not update prospect account')
     await recordImport(supabase, orgId, 'account', existing.id, sourceType, runId)
     return { id: existing.id, kind: 'company', action: 'updated' }
   }

@@ -1421,7 +1421,15 @@ function runAgentStreaming(
         finalStatus = 'error'
         errorDetail = String(err)
       } finally {
-        controller.close()
+        // Every early-exit guard above (no agent, kill switch, cost cap, channel
+        // not allowed, token cap) closes the controller itself before returning —
+        // and `finally` runs on return, so this second close() threw
+        // ERR_INVALID_STATE. Next then failed the WHOLE response pipe, which
+        // discarded the guard's already-enqueued fallback message: the widget
+        // received the session event and nothing else, with no error anywhere
+        // user-visible. A closed controller here is the NORMAL case for guard
+        // exits, not an anomaly — so a swallowed second close is correct.
+        try { controller.close() } catch { /* already closed by a guard path */ }
 
         // Post-stream side effects via after() (D-35-03)
         after(async () => {

@@ -759,6 +759,43 @@ export type ProspectAudienceRow = {
   createdAt: string
 }
 
+export type ProspectMetaAudienceSummary = {
+  configured: number
+  enabled: number
+  lastSuccessfulSync: string | null
+  errorCount: number
+}
+
+export async function getProspectMetaAudienceSummary(): Promise<
+  { ok: true; summary: ProspectMetaAudienceSummary } | { ok: false; error: string; forbidden?: boolean }
+> {
+  const guard = await requireProspectsAdmin()
+  if (!guard.ok) return guard
+  const supabase = await createClient()
+  const { data: orgId, error: orgError } = await supabase.rpc('get_current_org_id')
+  if (orgError || !orgId) return { ok: false, error: 'No active workspace found.' }
+  const { data, error } = await supabase
+    .from('meta_audience_config')
+    .select('sync_enabled, operational_status, last_synced_at')
+    .eq('org_id', orgId as string)
+  if (error) return { ok: false, error: 'Could not load Meta audience status.' }
+  const rows = data ?? []
+  const successful = rows
+    .map((row) => row.last_synced_at)
+    .filter((value): value is string => Boolean(value))
+    .sort()
+    .at(-1) ?? null
+  return {
+    ok: true,
+    summary: {
+      configured: rows.length,
+      enabled: rows.filter((row) => row.sync_enabled).length,
+      lastSuccessfulSync: successful,
+      errorCount: rows.filter((row) => row.operational_status === 'error' || row.operational_status === 'misconfigured').length,
+    },
+  }
+}
+
 export async function getProspectAudiences(): Promise<
   { ok: true; audiences: ProspectAudienceRow[] } | { ok: false; error: string; forbidden?: boolean }
 > {
