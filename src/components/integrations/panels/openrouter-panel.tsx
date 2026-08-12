@@ -370,7 +370,7 @@ function ModelSelector({ label, description, models, value, onChange }: ModelSel
               className="flex-1 bg-transparent py-2.5 text-[13px] outline-none placeholder:text-text-tertiary"
             />
           </div>
-          <ScrollArea className="max-h-[240px]">
+          <ScrollArea className="h-[240px]">
             {filtered.length === 0 ? (
               <p className="py-4 text-center text-[12px] text-text-tertiary">No results</p>
             ) : (
