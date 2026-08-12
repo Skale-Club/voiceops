@@ -1302,9 +1302,10 @@ export async function startOutreach(refs: ProspectRef[]): Promise<BulkResult> {
   if (contactIds.length) {
     const { data } = await supabase
       .from('contacts')
-      .select('id, name, email, phone, company')
+      .select('id, name, email, phone, company, engagement_status')
       .in('id', contactIds)
       .eq('lifecycle_stage', 'prospect')
+      .eq('engagement_status', 'not_contacted')
     for (const c of (data ?? []) as Array<Record<string, unknown>>) {
       const email = c.email as string | null
       if (!email) continue
@@ -1322,9 +1323,10 @@ export async function startOutreach(refs: ProspectRef[]): Promise<BulkResult> {
   if (accountIds.length) {
     const { data } = await supabase
       .from('accounts')
-      .select('id, name, phone, domain, custom_fields')
+      .select('id, name, phone, domain, custom_fields, engagement_status')
       .in('id', accountIds)
       .eq('lifecycle_stage', 'prospect')
+      .eq('engagement_status', 'not_contacted')
     for (const a of (data ?? []) as Array<Record<string, unknown>>) {
       const cf = (a.custom_fields as Record<string, unknown> | null) ?? {}
       const email = (cf.email as string | null) ?? null
@@ -1347,7 +1349,10 @@ export async function startOutreach(refs: ProspectRef[]): Promise<BulkResult> {
   }
 
   if (leads.length === 0) {
-    return { ok: false, error: 'None of the selected prospects have an email address.' }
+    return {
+      ok: false,
+      error: 'None of the selected prospects are both uncontacted and reachable by email.',
+    }
   }
 
   const result = await xmailBulkImportLeads(leads)

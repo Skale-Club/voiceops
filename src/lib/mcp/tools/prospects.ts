@@ -297,9 +297,13 @@ export const prospectsTools: McpToolDef[] = [
       .strict(),
     handler: async (input, { auth }) => {
       const { campaign_id, email_account_id, max, confirmed, ...filters } = input
+      // Outreach is intentionally one-way: callers may narrow the selection,
+      // but they cannot re-enrol a prospect whose CRM engagement has already
+      // advanced beyond the initial not_contacted state.
+      const outreachFilters = { ...filters, engagement: 'not_contacted' as const }
 
       if (!confirmed) {
-        const preview = await resolveProspects(auth.orgId, filters, { requireEmail: true })
+        const preview = await resolveProspects(auth.orgId, outreachFilters, { requireEmail: true })
         const capped = preview.slice(0, max ?? DEFAULT_MAX)
         const batch = await verifyProspectsBatch(
           auth.orgId,
@@ -326,10 +330,10 @@ export const prospectsTools: McpToolDef[] = [
       }
 
       const cap = Math.min(max ?? DEFAULT_MAX, HARD_MAX)
-      const allWithEmail = await resolveProspects(auth.orgId, filters, { requireEmail: true })
+      const allWithEmail = await resolveProspects(auth.orgId, outreachFilters, { requireEmail: true })
       const candidates = allWithEmail.slice(0, cap)
       if (candidates.length === 0) {
-        return { enrolled: 0, message: 'No matching prospects have an email to enrol.' }
+        return { enrolled: 0, message: 'No matching uncontacted prospects have an email to enrol.' }
       }
 
       // Verify every candidate's email before it ever reaches Xmail — this is
