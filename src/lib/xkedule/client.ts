@@ -4,7 +4,13 @@
 // resolves the tenant by host; apiKey is the connection token sent as
 // X-Xkedule-Key and validated against the tenant's stored value. No env vars.
 
-export const DEFAULT_TIMEOUT_MS = 5000
+// 15s, not 5s: measured against the live demo tenant, a cold-cache
+// availability computation (3 staff × union math) took 5.1s and the old 5s
+// budget aborted it mid-flight — the agent then had to tell the customer the
+// calendar was down. Booking creation does slot-lock + schedule re-validation
+// and can run longer still. The agent turn budget is 30s with tools, so 15s
+// leaves room for the LLM turn around one slow call.
+export const DEFAULT_TIMEOUT_MS = 15000
 
 export interface XkeduleCredentials {
   tenantBaseUrl: string
