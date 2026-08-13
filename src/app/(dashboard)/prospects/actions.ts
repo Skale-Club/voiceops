@@ -11,6 +11,7 @@ import { normaliseEmail } from '@/lib/contacts/zod-schemas'
 import { normalizePhoneToE164 } from '@/lib/phone-numbers/normalize'
 import { isXmailConfigured, xmailBulkImportLeads, type XmailLead } from '@/lib/xmail/client'
 import { loadWebsiteInsightsForAccounts } from '@/lib/xmail/website-insights'
+import { loadSourceRunIdsForEntities } from '@/lib/xmail/source-runs'
 import { isXpotConfigured, xpotSendLeads, type XpotLead } from '@/lib/xpot/client'
 import { generatePreviewForAnalysis } from '@/services/website-analyzer'
 import {
@@ -1298,6 +1299,7 @@ export async function startOutreach(refs: ProspectRef[]): Promise<BulkResult> {
   const { data: orgId } = await supabase.rpc('get_current_org_id')
   if (!orgId) return { ok: false, error: 'No active workspace found.' }
   const websiteInsights = await loadWebsiteInsightsForAccounts(supabase, orgId as string, accountIds)
+  const sourceRunIds = await loadSourceRunIdsForEntities(supabase, orgId as string, [...contactIds, ...accountIds])
 
   if (contactIds.length) {
     const { data } = await supabase
@@ -1309,12 +1311,17 @@ export async function startOutreach(refs: ProspectRef[]): Promise<BulkResult> {
     for (const c of (data ?? []) as Array<Record<string, unknown>>) {
       const email = c.email as string | null
       if (!email) continue
+      const sourceRunId = sourceRunIds.get(c.id as string)
       leads.push({
         email,
         firstName: (c.name as string | null) ?? null,
         companyName: (c.company as string | null) ?? null,
         phone: (c.phone as string | null) ?? null,
-        customFields: { xphere_id: c.id, xphere_kind: 'contact' },
+        customFields: {
+          xphere_id: c.id,
+          xphere_kind: 'contact',
+          ...(sourceRunId ? { source_run_id: sourceRunId } : {}),
+        },
       })
       touchedContacts.push(c.id as string)
     }
@@ -1331,6 +1338,7 @@ export async function startOutreach(refs: ProspectRef[]): Promise<BulkResult> {
       const cf = (a.custom_fields as Record<string, unknown> | null) ?? {}
       const email = (cf.email as string | null) ?? null
       if (!email) continue
+      const sourceRunId = sourceRunIds.get(a.id as string)
       leads.push({
         email,
         companyName: (a.name as string | null) ?? null,
@@ -1342,6 +1350,7 @@ export async function startOutreach(refs: ProspectRef[]): Promise<BulkResult> {
           ...(websiteInsights.get(a.id as string)
             ? { websiteInsights: websiteInsights.get(a.id as string) }
             : {}),
+          ...(sourceRunId ? { source_run_id: sourceRunId } : {}),
         },
       })
       touchedAccounts.push(a.id as string)

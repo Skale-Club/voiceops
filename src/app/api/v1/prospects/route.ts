@@ -27,6 +27,7 @@ import { normalizePhoneToE164 } from '@/lib/phone-numbers/normalize'
 import { hasScope } from '@/lib/api-keys/scopes'
 import { markMetaAudiencesDirty } from '@/lib/meta/audience-dirty'
 import { runAnalysis } from '@/services/website-analyzer'
+import { registerExternalRunWithXmail } from '@/lib/xmail/external-run-mapping'
 import type { Json } from '@/types/database'
 
 export const runtime = 'nodejs'
@@ -217,6 +218,12 @@ export async function POST(request: Request): Promise<Response> {
     .update({ last_used_at: new Date().toISOString() })
     .eq('id', apiKey.id)
     .then(() => {})
+
+  // Cost attribution (best-effort, fire-and-forget): register this run with
+  // Xmail so it can attribute outreach outcomes back to what it cost to
+  // source them. Must never affect this endpoint's response, status, or
+  // latency — see registerExternalRunWithXmail's doc comment.
+  registerExternalRunWithXmail(sourceType, externalRunId, source, prospects.length, created + updated)
 
   // ── 6. Respond ───────────────────────────────────────────────────────────────
   if (!isBatch) {

@@ -153,6 +153,40 @@ export async function xmailActivateCampaign(
   return { ok: true }
 }
 
+export interface XmailRegisterExternalRunParams {
+  /** Only value that has ever shipped a lead in production — see xmail's externalRunSchema. */
+  provider: 'xcraper'
+  externalRunId: string
+  label?: string
+  query?: string
+  location?: string
+  resultCount?: number
+  importedCount?: number
+  /** The ACTUAL total cost the provider (Apify) reported for this run, in USD. */
+  costUsd?: number
+  actorId?: string
+  template?: string
+}
+
+/**
+ * Register an external prospecting run (e.g. an xcraper/Apify scrape) with
+ * Xmail so it can attribute outreach outcomes back to what it cost to source
+ * them. Idempotent on externalRunId — Xmail upserts by
+ * (organizationId, provider, externalRunId) and never bills the same run
+ * twice, so this is safe to call more than once (e.g. after a retry).
+ */
+export async function xmailRegisterExternalRun(
+  input: XmailRegisterExternalRunParams,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const res = await xmailFetch('/api/outreach/prospecting/external-runs', {
+    method: 'POST',
+    query: { organizationId: XMAIL_ORG_ID },
+    body: input,
+  })
+  if (!res.ok) return res
+  return { ok: true }
+}
+
 export interface XmailSendMessageParams {
   from: string
   to: string
