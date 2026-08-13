@@ -28,6 +28,7 @@ import { hasScope } from '@/lib/api-keys/scopes'
 import { markMetaAudiencesDirty } from '@/lib/meta/audience-dirty'
 import { runAnalysis } from '@/services/website-analyzer'
 import { registerExternalRunWithXmail } from '@/lib/xmail/external-run-mapping'
+import { DEFAULT_STALE_MINUTES, isAnalysisRowStale } from '@/services/website-analyzer/staleness'
 import type { Json } from '@/types/database'
 
 export const runtime = 'nodejs'
@@ -295,21 +296,35 @@ function triggerAnalysisForAccount(
     const wa = (supabase as any).from('website_analyses')
     // Avoid duplicate runs: skip if a running/pending row already exists
     const { data: existing } = await wa
-      .select('id, status')
+      .select('id, status, updated_at')
       .eq('account_id', accountId)
+      .eq('org_id', orgId)
       .in('status', ['pending', 'running'])
       .limit(1)
       .maybeSingle()
 
     if (existing) {
-      console.log(`[orchestration] analysis already in progress for account_id=${accountId}, skipping`)
-      return
+      if (!isAnalysisRowStale(existing, new Date())) {
+        console.log(`[orchestration] analysis already in progress for account_id=${accountId}, skipping`)
+        return
+      }
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await (supabase as any).rpc('reclaim_stale_website_analyses', {
+        p_stale_minutes: DEFAULT_STALE_MINUTES,
+        p_account_id: accountId,
+      })
+      console.log(`[orchestration] reclaimed orphaned analysis for account_id=${accountId}`)
     }
 
     const { data: analysis, error: insertError } = await wa
       .insert({ org_id: orgId, account_id: accountId, status: 'pending' })
       .select('id')
       .single()
+
+    if (insertError?.code === '23505') {
+      console.log(`[orchestration] analysis for account_id=${accountId} claimed concurrently, skipping`)
+      return
+    }
 
     if (insertError || !analysis) {
       console.error('[orchestration] failed to create analysis row for account_id=' + accountId, insertError)

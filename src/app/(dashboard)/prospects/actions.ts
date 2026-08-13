@@ -14,6 +14,7 @@ import { loadWebsiteInsightsForAccounts } from '@/lib/xmail/website-insights'
 import { loadSourceRunIdsForEntities } from '@/lib/xmail/source-runs'
 import { isXpotConfigured, xpotSendLeads, type XpotLead } from '@/lib/xpot/client'
 import { generatePreviewForAnalysis } from '@/services/website-analyzer'
+import { resolveLatestAnalysisForDisplay, type AnalysisRowStatus } from '@/services/website-analyzer/display'
 import {
   resolveProspectRecipients,
   applyNameToken,
@@ -1072,8 +1073,7 @@ export async function getProspectDetail(
           .select('id, status, lead_score, url, brand_colors, logo_url, services, pain_points, outreach_insights, screenshot_desktop_url, screenshot_mobile_url, preview_url, raw_evidence, analyzed_at, error_message, created_at')
           .eq('account_id', id)
           .order('created_at', { ascending: false })
-          .limit(1)
-          .maybeSingle()
+          .limit(5)
       : Promise.resolve({ data: null }),
   ])
 
@@ -1131,7 +1131,10 @@ export async function getProspectDetail(
     })),
     conversationCount: (convResult as { count: number | null }).count ?? 0,
     websiteAnalysis: (() => {
-      const a = (analysisResult as { data: Record<string, unknown> | null }).data
+      const analysisRows = (analysisResult as { data: Array<Record<string, unknown>> | null }).data ?? []
+      const a = resolveLatestAnalysisForDisplay(
+        analysisRows as Array<{ status: AnalysisRowStatus; error_message?: unknown } & Record<string, unknown>>,
+      )
       if (!a) return null
       return {
         id: a.id as string,

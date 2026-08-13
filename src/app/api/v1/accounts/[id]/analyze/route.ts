@@ -14,6 +14,7 @@ import { createHash }              from 'node:crypto'
 import { createServiceRoleClient } from '@/lib/supabase/admin'
 import { hasScope }                from '@/lib/api-keys/scopes'
 import { runAnalysis }             from '@/services/website-analyzer'
+import { resolveLatestAnalysisForDisplay, type AnalysisRowStatus } from '@/services/website-analyzer/display'
 
 export const runtime = 'nodejs'
 
@@ -138,7 +139,7 @@ export async function GET(
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data: analysis } = await (supabase as any)
+  const { data } = await (supabase as any)
     .from('website_analyses')
     .select(
       'id, account_id, status, lead_score, brand_colors, logo_url, services, pain_points, outreach_insights, screenshot_desktop_url, screenshot_mobile_url, analyzed_at, error_message',
@@ -146,8 +147,11 @@ export async function GET(
     .eq('account_id', accountId)
     .eq('org_id', apiKey.org_id)
     .order('created_at', { ascending: false })
-    .limit(1)
-    .maybeSingle()
+    .limit(5)
+
+  const analysis = resolveLatestAnalysisForDisplay(
+    (data ?? []) as Array<{ status: AnalysisRowStatus; error_message?: unknown }>,
+  )
 
   if (!analysis) {
     return Response.json({ error: 'No analysis found for this account' }, { status: 404, headers: CORS_HEADERS })

@@ -23,7 +23,7 @@ export function normaliseUrl(input: string): string {
 }
 
 /** Convert rgb(r,g,b) / rgba(r,g,b,a) to #rrggbb. Returns null on failure. */
-function rgbToHex(rgb: string): string | null {
+export function rgbToHex(rgb: string): string | null {
   const match = rgb.match(/rgba?\(\s*(\d+),\s*(\d+),\s*(\d+)/)
   if (!match) return null
   const [, r, g, b] = match
@@ -35,6 +35,22 @@ function rgbToHex(rgb: string): string | null {
   )
 }
 
+/** Convert raw color samples into deduped BrandColor entries, preserving first-seen order. */
+export function toBrandColors(samples: Array<{ value: string; role: string }>): BrandColor[] {
+  const seen = new Set<string>()
+  const colors: BrandColor[] = []
+
+  for (const { value, role } of samples) {
+    const hex = rgbToHex(value)
+    if (hex && !seen.has(hex)) {
+      seen.add(hex)
+      colors.push({ hex, role: role as BrandColor['role'] })
+    }
+  }
+
+  return colors
+}
+
 /** Extract brand colors from a live page using JS evaluation. */
 async function extractColors(page: import('playwright').Page): Promise<{ colors: BrandColor[]; cssVars: Record<string, string> }> {
   const raw = await page.evaluate(() => {
@@ -42,8 +58,8 @@ async function extractColors(page: import('playwright').Page): Promise<{ colors:
     const colorValues: Array<{ value: string; role: string }> = []
 
     // Harvest CSS custom properties from :root
-    try {
-      for (const sheet of document.styleSheets) {
+    for (const sheet of document.styleSheets) {
+      try {
         for (const rule of sheet.cssRules) {
           if (rule instanceof CSSStyleRule && rule.selectorText === ':root') {
             for (const prop of rule.style) {
@@ -52,9 +68,9 @@ async function extractColors(page: import('playwright').Page): Promise<{ colors:
             }
           }
         }
+      } catch {
+        // Cross-origin stylesheet — skip just this one
       }
-    } catch {
-      // Cross-origin stylesheet — skip
     }
 
     // Sample computed colors from key structural elements
@@ -79,18 +95,7 @@ async function extractColors(page: import('playwright').Page): Promise<{ colors:
     return { cssVars, colorValues }
   })
 
-  const seen = new Set<string>()
-  const colors: BrandColor[] = []
-
-  for (const { value, role } of raw.colorValues) {
-    const hex = rgbToHex(value)
-    if (hex && !seen.has(hex)) {
-      seen.add(hex)
-      colors.push({ hex, role: role as BrandColor['role'] })
-    }
-  }
-
-  return { colors, cssVars: raw.cssVars }
+  return { colors: toBrandColors(raw.colorValues), cssVars: raw.cssVars }
 }
 
 /** Extract logo URL from a live page. */

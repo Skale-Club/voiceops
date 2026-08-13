@@ -60,7 +60,11 @@ Returns the latest `website_analyses` row for the account (status, score, colors
 GET /api/cron/website-analyzer
 Authorization: Bearer <CRON_SECRET>
 ```
-Picks up any rows stuck in `pending` and kicks off their analysis.
+Reclaims stale analyses: rows in `pending`/`running` whose `updated_at` is older than a
+10-minute threshold are marked `failed` via the `reclaim_stale_website_analyses` RPC
+(added in migration 1273). This frees the account to be picked up again on a later tick —
+a reclaimed row is never resurrected back to `pending`; a fresh analysis row is inserted
+instead.
 
 ## Architecture
 
