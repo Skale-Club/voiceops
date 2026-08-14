@@ -35,6 +35,8 @@ function makeQueryBuilder(overrides: {
   builder.ilike = vi.fn(() => builder)
   builder.limit = vi.fn(() => builder)
   builder.in = vi.fn(() => builder)
+  builder.order = vi.fn(() => builder)
+  builder.contains = vi.fn(() => builder)
   builder.insert = vi.fn(() => builder)
   builder.update = vi.fn(() => builder)
   builder.maybeSingle = vi.fn(async () => overrides.maybeSingleResult ?? { data: null, error: null })
@@ -153,7 +155,7 @@ describe('POST /api/v1/contacts — xpot lead sync target', () => {
 
   it('updates the existing contact (dedup by phone) and returns action: updated with a 200', async () => {
     const apiKeysBuilder = makeApiKeyBuilder(VALID_KEY)
-    const phoneLookup = makeQueryBuilder({ maybeSingleResult: { data: { id: 'contact-existing-1' }, error: null } })
+    const phoneLookup = makeQueryBuilder({ thenResult: { data: [{ id: 'contact-existing-1' }], error: null } })
     const updateBuilder = makeQueryBuilder({ thenResult: { data: null, error: null } })
     const contactsBuilders = [phoneLookup, updateBuilder]
     let contactsCall = 0
@@ -308,9 +310,8 @@ describe('POST /api/v1/prospects — xpot lead sync target (company-kind)', () =
     const apiKeysBuilder = makeApiKeyBuilder({ id: 'key-1', org_id: 'org-1', scopes: ['prospects:write'] })
     const sourceRunInsert = makeQueryBuilder({ singleResult: { data: { id: 'run-1' }, error: null } })
     const sourceIdLookup = makeQueryBuilder({ maybeSingleResult: { data: null, error: null } })
-    const nameLookup = makeQueryBuilder({ maybeSingleResult: { data: null, error: null } })
     const accountInsert = makeQueryBuilder({ singleResult: { data: { id: 'account-new-1' }, error: null } })
-    const accountsCalls = [sourceIdLookup, nameLookup, accountInsert]
+    const accountsCalls = [sourceIdLookup, accountInsert]
     let accountsCall = 0
     const eventInsert = makeQueryBuilder()
 

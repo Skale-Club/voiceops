@@ -19,7 +19,7 @@ function makeBuilder(results: {
   awaited?: QueryResult
 } = {}) {
   const builder: Record<string, unknown> = {}
-  for (const method of ['select', 'eq', 'is', 'ilike', 'insert', 'update', 'in', 'neq', 'limit']) {
+  for (const method of ['select', 'eq', 'is', 'ilike', 'insert', 'update', 'in', 'neq', 'limit', 'contains']) {
     builder[method] = vi.fn(() => builder)
   }
   builder.maybeSingle = vi.fn(async () => results.maybeSingle ?? { data: null, error: null })
@@ -68,6 +68,46 @@ beforeEach(() => {
 })
 
 describe('Xcraper company enrichment', () => {
+  it('does not merge an unknown provider id into an account with a shared domain', async () => {
+    const apiKey = makeBuilder({
+      maybeSingle: { data: { id: 'key-1', org_id: 'org-skale', scopes: ['prospects:write'] }, error: null },
+    })
+    const runInsert = makeBuilder({ single: { data: { id: 'run-1' }, error: null } })
+    const sourceLookup = makeBuilder({ maybeSingle: { data: null, error: null } })
+    const accountInsert = makeBuilder({ single: { data: { id: 'account-new' }, error: null } })
+    const runClose = makeBuilder()
+    const eventInsert = makeBuilder()
+    const apiKeyTouch = makeBuilder()
+    let prospectSourceCalls = 0
+    let accountCalls = 0
+    let apiKeyCalls = 0
+    const from = vi.fn((table: string) => {
+      if (table === 'api_keys') return apiKeyCalls++ === 0 ? apiKey : apiKeyTouch
+      if (table === 'prospect_sources') return prospectSourceCalls++ === 0 ? runInsert : runClose
+      if (table === 'accounts') return accountCalls++ === 0 ? sourceLookup : accountInsert
+      if (table === 'prospect_engagement_events') return eventInsert
+      if (table === 'website_analyses') return makeBuilder()
+      throw new Error(`unexpected table: ${table}`)
+    })
+    createServiceRoleClientMock.mockReturnValue({ from })
+
+    const { POST } = await import('@/app/api/v1/prospects/route')
+    const response = await POST(requestFor({
+      kind: 'company',
+      name: 'Independent Buffalo Barber',
+      domain: 'facebook.com',
+      source_id: 'google-place-new',
+    }))
+
+    expect(response.status).toBe(201)
+    expect(accountCalls).toBe(2)
+    expect(accountInsert.insert).toHaveBeenCalledWith(expect.objectContaining({
+      name: 'Independent Buffalo Barber',
+      domain: 'facebook.com',
+      source_id: 'google-place-new',
+    }))
+  })
+
   it('deep-merges new enrichment and socials without erasing existing values', async () => {
     const { accountUpdate } = arrangeExistingAccount({
       id: 'account-1',

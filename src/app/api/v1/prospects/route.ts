@@ -567,7 +567,10 @@ async function ingestCompany(
 
   if (!name && !domain && !sourceId) return null
 
-  // Dedup: source_id → domain → name
+  // A stable provider id is authoritative within its source. If it is present but
+  // unknown, this is a new entity: falling through to domain/name can merge unrelated
+  // local businesses that share facebook.com, instagram.com, Booksy, or another host.
+  // Domain/name remain useful fallbacks only for records without a provider identity.
   type ExistingAccount = {
     id: string
     lifecycle_stage: string
@@ -588,7 +591,7 @@ async function ingestCompany(
       .maybeSingle()
     if (data) existing = data
   }
-  if (!existing && domain) {
+  if (!existing && !sourceId && domain) {
     const { data } = await supabase
       .from('accounts')
       .select(existingColumns)
@@ -597,7 +600,7 @@ async function ingestCompany(
       .maybeSingle()
     if (data) existing = data
   }
-  if (!existing && name) {
+  if (!existing && !sourceId && name) {
     const { data } = await supabase
       .from('accounts')
       .select(existingColumns)
