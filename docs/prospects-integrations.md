@@ -71,6 +71,12 @@ sending on `channel: 'email'`. In both tools, if verification is blocked for
 lack of credits the response sets `verification_unavailable: true` with a
 loud warning — nothing is sent unverified.
 
+**Consent gate**: before verification or import, both MCP outreach paths honor
+contact-level `dnd_enabled`/`dnd_channels` and the organization-scoped
+`email_unsubscribes` table. Bulk preview reports `blocked_from_email`; direct
+messages return `dnd_blocked` or `email_suppressed`. Suppression lookup fails
+closed, so an unavailable consent check cannot turn into a send.
+
 **`email_verification_status`** (MCP tool) returns
 `getVerificationCreditStatus()` (per-provider configured/credits/ok, plus
 `anyAvailable`/`lowCredit`) and a breakdown of the org's prospects by
@@ -100,7 +106,7 @@ A bulk action only appears when its service is configured.
 
 | Service | Env (on Xphere) | What Xphere calls |
 |---------|-----------------|-------------------|
-| Xmail | `XMAIL_API_URL`, `XMAIL_USER_ID`, `XMAIL_ORG_ID`, `XMAIL_SERVICE_KEY` | `POST {XMAIL_API_URL}/api/outreach/leads/bulk-import` (`x-user-id`, `x-service-key`) |
+| Xmail | `XMAIL_API_URL`, `XMAIL_USER_ID`, `XMAIL_ORG_ID`, `XMAIL_SERVICE_KEY` | Lead import/enrollment plus `POST {XMAIL_API_URL}/api/outreach/prospecting/external-runs` for Journey registration (`x-user-id`, `x-service-key`) |
 | Xmail (1:1 send) | same as above, plus optional `XMAIL_ESTIMATE_FROM` | `POST {XMAIL_API_URL}/api/outreach/send-message` (`x-user-id`, `x-service-key`) — used by the `prospect_send_message` MCP tool |
 | Xpot | `XPOT_API_URL`, `XPOT_API_KEY` | `POST {XPOT_API_URL}/api/xpot/inbound/prospects` (Bearer) |
 
@@ -110,7 +116,10 @@ A bulk action only appears when its service is configured.
 Scraped businesses → company prospects. On the search-results view, **Push to
 Xphere** calls `pushRunToXphere`, which posts the run's contacts to
 `/api/v1/prospects` (`source.type=xcraper`, `external_run_id`). Dedup key is the
-Google Place ID. Env: `XPHERE_API_URL`, `XPHERE_API_KEY`.
+Google Place ID. The Xcraper metadata includes query, location, result count,
+and measured `cost_usd`. Xphere automatically registers that external run in
+Xmail's Journey ledger, then propagates its id as `source_run_id` when the
+prospect later becomes an Xmail lead. Env: `XPHERE_API_URL`, `XPHERE_API_KEY`.
 
 ### Xmail (email outreach) — repo `skaleclub-mail` (config only)
 The **Start outreach** bulk action resolves each prospect's email and bulk-imports
@@ -129,6 +138,20 @@ connected Twilio number. Gated by `confirmed:true` — the agent must preview
 (no `confirmed`) and get human approval before it actually sends. On success
 it logs a `sent` row in `prospect_engagement_events` and sets
 `engagement_status='contacted'` on the prospect, same as the bulk path.
+
+### Meta/Facebook Custom Audiences
+
+Xphere can reconcile either every scraped prospect (`xcraper_master`) or an
+explicit saved prospect segment into a tenant-owned Meta Custom Audience. The
+projection normalizes identifiers locally and sends SHA-256 hashes only. It
+excludes deleted/duplicate records, contact DND, `engagement_status` opt-outs,
+and organization-scoped `email_unsubscribes` before any Graph API mutation.
+
+Hermes uses `meta_audiences_status` to inspect configuration and
+`meta_audience_sync` without confirmation for a count-only preview. A real
+ADD/REMOVE reconciliation requires `confirmed:true`, an active tenant Meta
+connection, accepted Customer List terms, and `sync_enabled=true`. The MCP
+response never includes raw identifiers, hashes, or access tokens.
 
 ### Xpot (field visits) — repo `xpot`
 The **Send to Xpot** bulk action posts prospects to `/api/xpot/inbound/prospects`,
@@ -158,7 +181,8 @@ never converts.
 4. **Xpot**: apply migration `0005` (`drizzle push`); set `XPHERE_INBOUND_API_KEY`
    (any shared secret) + `XPHERE_API_KEY=<token>` on Xpot; set `XPOT_API_URL` +
    `XPOT_API_KEY=<same shared secret>` on Xphere. → "Send to Xpot" appears.
-5. Promote the Xphere `dev` branch to `main` to deploy; merge the
-   `feat/xphere-integration` branches in `xcraper` and `xpot`.
+5. Before outreach, run the MCP dry-run, verify `blocked_from_email`, email
+   verification credits, campaign sequence, and assigned sending inbox. Use
+   `confirmed:true` only after explicit human approval.
 
 All connection config is environment-driven — no product domains are hardcoded.

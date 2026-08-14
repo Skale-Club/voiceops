@@ -22,6 +22,7 @@ import {
 } from '@/lib/xmail/client'
 import { loadWebsiteInsightsForAccounts } from '@/lib/xmail/website-insights'
 import { loadSourceRunIdsForEntities } from '@/lib/xmail/source-runs'
+import { isDndBlocked, loadEmailSuppressions, normalizeOutreachEmail } from '@/lib/prospects/outreach-eligibility'
 import type { WebsiteInsights } from '@/services/website-analyzer/outreach-insights'
 import { verifyProspectsBatch, type BatchAggregate, type EmailVerified, type ProspectKind } from '@/lib/email-verification/verify'
 import type { McpToolDef } from '../tool-types'
@@ -61,6 +62,7 @@ type ResolvedProspect = {
   source_type: string | null
   engagement_status: string
   website: string | null
+  emailDndBlocked?: boolean
 }
 
 function composeName(r: { first_name?: string | null; last_name?: string | null; name?: string | null }): string | null {
@@ -145,7 +147,7 @@ async function resolveProspects(
   if (wantPeople) {
     let q = db()
       .from('contacts')
-      .select('id, first_name, last_name, name, email, score, source_type, engagement_status')
+      .select('id, first_name, last_name, name, email, score, source_type, engagement_status, dnd_enabled, dnd_channels')
       .eq('org_id', orgId)
       .eq('lifecycle_stage', 'prospect')
       .limit(cap)
@@ -166,6 +168,11 @@ async function resolveProspects(
         source_type: (r.source_type as string | null) ?? null,
         engagement_status: r.engagement_status as string,
         website: null,
+        emailDndBlocked: isDndBlocked(
+          r.dnd_enabled as boolean | null,
+          r.dnd_channels as string[] | null,
+          'email',
+        ),
       })
     }
   }
@@ -195,12 +202,19 @@ async function resolveProspects(
         source_type: (r.source_type as string | null) ?? null,
         engagement_status: r.engagement_status as string,
         website: (r.domain as string | null) ?? (r.website as string | null) ?? null,
+        emailDndBlocked: false,
       })
     }
   }
 
   out.sort((a, b) => b.score - a.score)
-  return out
+  if (!opts.requireEmail) return out
+
+  const suppressedEmails = await loadEmailSuppressions(db(), orgId, out.map((prospect) => prospect.email))
+  return out.filter((prospect) => {
+    const email = normalizeOutreachEmail(prospect.email)
+    return Boolean(email && !prospect.emailDndBlocked && !suppressedEmails.has(email))
+  })
 }
 
 /** Mark enrolled prospects as contacted + log a timeline event (bulk). */
@@ -245,16 +259,20 @@ export const prospectsTools: McpToolDef[] = [
       .strict(),
     handler: async (input, { auth }) => {
       const all = await resolveProspects(auth.orgId, input)
-      const withEmail = all.filter((p) => p.email)
+      const rawWithEmail = all.filter((p) => p.email)
+      const withEmail = await resolveProspects(auth.orgId, input, { requireEmail: true })
       const pool = input.has_email ? withEmail : all
       const limit = input.limit ?? 50
       const offset = input.offset ?? 0
       return {
         total: all.length,
         with_email: withEmail.length,
+        blocked_from_email: rawWithEmail.length - withEmail.length,
         emailable_note:
           withEmail.length === 0 && all.length > 0
-            ? 'None of these have an email — they were scraped "standard" (no email extraction). Re-scrape with scrapeType "enriched" to get emails before outreach.'
+            ? rawWithEmail.length > 0
+              ? 'Every prospect with an email is blocked by Xphere DND or email suppression. Nothing can be enrolled.'
+              : 'None of these have an email — they were scraped "standard" (no email extraction). Re-scrape with scrapeType "enriched" to get emails before outreach.'
             : undefined,
         prospects: pool.slice(offset, offset + limit),
         limit,

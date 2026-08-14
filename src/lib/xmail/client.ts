@@ -166,6 +166,11 @@ export interface XmailRegisterExternalRunParams {
   costUsd?: number
   actorId?: string
   template?: string
+  hypothesis?: {
+    premise?: string
+    expected?: Record<string, string | number>
+    basis?: string
+  }
 }
 
 /**

@@ -27,6 +27,11 @@ describe('buildExternalRunRegistration', () => {
           result_count: 87,
           actor_id: 'actor-123',
           template: 'gmaps',
+          hypothesis: {
+            premise: 'Barbershops need better online booking',
+            expected: { discovered: '>=20', reply_rate: 0.03 },
+            basis: 'First run in this segment',
+          },
         },
       },
       'xcraper',
@@ -45,6 +50,11 @@ describe('buildExternalRunRegistration', () => {
       costUsd: 4.2,
       actorId: 'actor-123',
       template: 'gmaps',
+      hypothesis: {
+        premise: 'Barbershops need better online booking',
+        expected: { discovered: '>=20', reply_rate: 0.03 },
+        basis: 'First run in this segment',
+      },
     })
   })
 

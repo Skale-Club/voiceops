@@ -47,6 +47,20 @@ export function buildExternalRunRegistration(
     const v = meta[key]
     return typeof v === 'number' && Number.isFinite(v) ? v : undefined
   }
+  const metaHypothesis = (): XmailRegisterExternalRunParams['hypothesis'] | undefined => {
+    const value = meta.hypothesis
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
+    const record = value as Record<string, unknown>
+    const premise = typeof record.premise === 'string' && record.premise.trim() ? record.premise.trim() : undefined
+    const basis = typeof record.basis === 'string' && record.basis.trim() ? record.basis.trim() : undefined
+    const expected = record.expected && typeof record.expected === 'object' && !Array.isArray(record.expected)
+      ? Object.fromEntries(Object.entries(record.expected as Record<string, unknown>).filter((entry): entry is [string, string | number] => (
+          typeof entry[1] === 'string' || (typeof entry[1] === 'number' && Number.isFinite(entry[1]))
+        )))
+      : undefined
+    const hypothesis = { premise, expected, basis }
+    return JSON.stringify(hypothesis).length <= 4096 ? hypothesis : undefined
+  }
 
   return {
     provider: 'xcraper',
@@ -59,6 +73,7 @@ export function buildExternalRunRegistration(
     costUsd: metaNumber('cost_usd'),
     actorId: metaString('actor_id'),
     template: metaString('template'),
+    hypothesis: metaHypothesis(),
   }
 }
 

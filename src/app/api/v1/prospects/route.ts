@@ -498,6 +498,8 @@ async function ingestCompany(
     lifecycle_stage: string
     custom_fields: Record<string, unknown> | null
     source_payload: Json | null
+    recommended_channel: string | null
+    phone: string | null
   }
   let existing: ExistingAccount | null = null
   const existingColumns = 'id, lifecycle_stage, custom_fields, source_payload, recommended_channel, phone'

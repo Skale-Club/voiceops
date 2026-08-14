@@ -21,6 +21,7 @@ import { sendSms } from '@/lib/twilio/send-sms'
 import type { ActionContext } from '@/lib/action-engine/execute-action'
 import { emailFromCustomFields } from './prospects'
 import { verifyProspectEmail, isSendable } from '@/lib/email-verification/verify'
+import { isDndBlocked, loadEmailSuppressions, normalizeOutreachEmail } from '@/lib/prospects/outreach-eligibility'
 import type { McpToolDef } from '../tool-types'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -45,6 +46,8 @@ type ResolvedTarget = {
   name: string | null
   email: string | null
   phone: string | null
+  dndEnabled: boolean
+  dndChannels: string[]
 }
 
 function composeName(r: { first_name?: string | null; last_name?: string | null; name?: string | null }): string | null {
@@ -57,7 +60,7 @@ async function resolveTarget(orgId: string, kind: EntityKind, id: string): Promi
   if (kind === 'contact') {
     const { data } = await db()
       .from('contacts')
-      .select('id, first_name, last_name, name, email, phone, phone_e164, custom_fields')
+      .select('id, first_name, last_name, name, email, phone, phone_e164, custom_fields, dnd_enabled, dnd_channels')
       .eq('org_id', orgId)
       .eq('id', id)
       .eq('lifecycle_stage', 'prospect')
@@ -70,6 +73,8 @@ async function resolveTarget(orgId: string, kind: EntityKind, id: string): Promi
       name: composeName(data as { first_name?: string | null; last_name?: string | null; name?: string | null }),
       email,
       phone: (data.phone_e164 as string | null) ?? (data.phone as string | null) ?? null,
+      dndEnabled: Boolean(data.dnd_enabled),
+      dndChannels: (data.dnd_channels as string[] | null) ?? [],
     }
   }
 
@@ -88,6 +93,8 @@ async function resolveTarget(orgId: string, kind: EntityKind, id: string): Promi
     name: (data.name as string | null) ?? null,
     email: emailFromCustomFields(data.custom_fields),
     phone: (data.phone as string | null) ?? null,
+    dndEnabled: false,
+    dndChannels: [],
   }
 }
 
@@ -163,6 +170,13 @@ export const prospectSendMessageTools: McpToolDef[] = [
         }
       }
 
+      if (isDndBlocked(target.dndEnabled, target.dndChannels, channel)) {
+        return {
+          error: 'dnd_blocked',
+          detail: `Prospect ${target.name ?? target.id} has ${channel} blocked in Xphere.`,
+        }
+      }
+
       if (channel === 'email') {
         if (!subject) {
           return { error: 'missing_subject', detail: 'channel=email requires a subject.' }
@@ -184,6 +198,17 @@ export const prospectSendMessageTools: McpToolDef[] = [
 
       const to = channel === 'email' ? (target.email as string) : (target.phone as string)
       const fromEmail = from_email || DEFAULT_FROM_EMAIL
+
+      if (channel === 'email') {
+        const suppressed = await loadEmailSuppressions(db(), orgId, [to])
+        const normalized = normalizeOutreachEmail(to)
+        if (normalized && suppressed.has(normalized)) {
+          return {
+            error: 'email_suppressed',
+            detail: `Prospect ${target.name ?? target.id} has unsubscribed from email outreach.`,
+          }
+        }
+      }
 
       // Email is verified (cache-first) before it is ever previewed as sendable
       // or actually sent — this is the prospect's source of truth, checked once
