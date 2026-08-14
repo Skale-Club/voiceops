@@ -93,7 +93,7 @@ jobs:
             exit 0
           fi
           echo "Triggering Coolify rolling deploy for app ${APP_UUID}…"
-          curl --fail-with-body -sS --retry 3 --retry-all-errors \
+          curl --fail-with-body -sS --retry 3 --retry-all-errors --request POST \
             "${COOLIFY_BASE}/api/v1/deploy?uuid=${APP_UUID}" \
             -H "Authorization: Bearer ${COOLIFY_TOKEN}"
           echo
