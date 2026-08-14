@@ -5,10 +5,8 @@
 // from a route.ts file — anything else (like a pure helper exported for unit
 // testing) fails `tsc` against the generated `.next/types/.../route.ts`.
 //
-// registerExternalRunWithXmail() is fire-and-forget by design: an
-// unreachable or unconfigured Xmail must never delay or break ingestion (see
-// CLAUDE.md's outreach section — ingestion succeeding cannot depend on Xmail
-// being reachable).
+// Registration is awaited so serverless runtimes cannot freeze it after the
+// response. The helper remains best-effort: Xmail failure never breaks import.
 
 import { isXmailConfigured, xmailRegisterExternalRun, type XmailRegisterExternalRunParams } from './client'
 
@@ -78,23 +76,25 @@ export function buildExternalRunRegistration(
 }
 
 /**
- * Fire-and-forget: register this batch's run with Xmail for cost
- * attribution. Never awaited by the caller and never throws.
+ * Best-effort registration for cost attribution. Resolves after the request
+ * and never throws.
  */
-export function registerExternalRunWithXmail(
+export async function registerExternalRunWithXmail(
   sourceType: string,
   externalRunId: string | null,
   source: ExternalRunSourceMeta,
   prospectCount: number,
   importedCount: number,
-): void {
+): Promise<void> {
   if (!isXmailConfigured()) return
   const params = buildExternalRunRegistration(source, sourceType, externalRunId, prospectCount, importedCount)
   if (!params) return
-  ;(async () => {
+  try {
     const result = await xmailRegisterExternalRun(params)
     if (!result.ok) {
       console.error('[api/v1/prospects] xmailRegisterExternalRun failed:', result.error)
     }
-  })().catch((err) => console.error('[api/v1/prospects] registerExternalRunWithXmail error:', err))
+  } catch (err) {
+    console.error('[api/v1/prospects] registerExternalRunWithXmail error:', err)
+  }
 }

@@ -37,6 +37,9 @@ import { DEFAULT_STALE_MINUTES, isAnalysisRowStale } from '@/services/website-an
 import type { Json } from '@/types/database'
 
 export const runtime = 'nodejs'
+export const maxDuration = 60
+
+const INGEST_CONCURRENCY = 5
 
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
@@ -96,6 +99,24 @@ function hashToken(token: string): string {
 }
 
 type IngestOutcome = { id: string; kind: 'person' | 'company'; action: 'created' | 'updated' | 'skipped' }
+
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  concurrency: number,
+  worker: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const results = new Array<R>(items.length)
+  let nextIndex = 0
+  const workers = Array.from({ length: Math.min(concurrency, items.length) }, async () => {
+    while (nextIndex < items.length) {
+      const index = nextIndex
+      nextIndex += 1
+      results[index] = await worker(items[index])
+    }
+  })
+  await Promise.all(workers)
+  return results
+}
 
 export async function POST(request: Request): Promise<Response> {
   // ── 1. Auth ────────────────────────────────────────────────────────────────
@@ -159,28 +180,72 @@ export async function POST(request: Request): Promise<Response> {
   const externalRunId = source.external_run_id?.trim() || null
 
   // ── 3. Open a source/run row ─────────────────────────────────────────────────
-  const { data: run } = await supabase
-    .from('prospect_sources')
-    .insert({
-      org_id: orgId,
-      source_type: sourceType,
-      source_key: sourceKey,
-      label: source.label?.trim() || null,
-      external_run_id: externalRunId,
-      status: 'running',
-      total_count: prospects.length,
-      metadata: (source.metadata ?? {}) as Json,
-    })
-    .select('id')
-    .single()
+  const reportedTotal = typeof source.metadata?.result_count === 'number' && Number.isFinite(source.metadata.result_count)
+    ? Math.max(prospects.length, Math.floor(source.metadata.result_count))
+    : prospects.length
+  let runId: string | null = null
 
-  const runId = run?.id ?? null
+  if (externalRunId) {
+    const { data: existingRun } = await supabase
+      .from('prospect_sources')
+      .select('id')
+      .eq('org_id', orgId)
+      .eq('source_type', sourceType)
+      .eq('external_run_id', externalRunId)
+      .order('created_at', { ascending: true })
+      .limit(1)
+      .maybeSingle()
+    runId = existingRun?.id ?? null
+  }
+
+  if (runId) {
+    await supabase
+      .from('prospect_sources')
+      .update({
+        source_key: sourceKey,
+        label: source.label?.trim() || null,
+        status: 'running',
+        total_count: reportedTotal,
+        metadata: (source.metadata ?? {}) as Json,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', runId)
+      .eq('org_id', orgId)
+  } else {
+    const { data: run, error: runError } = await supabase
+      .from('prospect_sources')
+      .insert({
+        org_id: orgId,
+        source_type: sourceType,
+        source_key: sourceKey,
+        label: source.label?.trim() || null,
+        external_run_id: externalRunId,
+        status: 'running',
+        total_count: reportedTotal,
+        metadata: (source.metadata ?? {}) as Json,
+      })
+      .select('id')
+      .single()
+
+    if (runError?.code === '23505' && externalRunId) {
+      const { data: concurrentRun } = await supabase
+        .from('prospect_sources')
+        .select('id')
+        .eq('org_id', orgId)
+        .eq('source_type', sourceType)
+        .eq('external_run_id', externalRunId)
+        .maybeSingle()
+      runId = concurrentRun?.id ?? null
+    } else {
+      runId = run?.id ?? null
+    }
+  }
   const defaultCountry = source.default_country?.trim() || null
 
   // ── 4. Ingest each prospect ──────────────────────────────────────────────────
   const results: IngestOutcome[] = []
   let errors = 0
-  for (const p of prospects) {
+  const outcomes = await mapWithConcurrency(prospects, INGEST_CONCURRENCY, async (p) => {
     try {
       const outcome =
         p.kind === 'company'
@@ -196,27 +261,37 @@ export async function POST(request: Request): Promise<Response> {
             entityId: outcome.id,
           })
         }
-        results.push(outcome)
         // Auto-trigger website analysis for newly created company prospects that have a domain
         if (outcome.kind === 'company' && outcome.action === 'created' && p.domain?.trim()) {
           triggerAnalysisForAccount(supabase, orgId, outcome.id, p.domain.trim())
         }
       }
+      return outcome
     } catch (err) {
       errors++
       console.error('[api/v1/prospects] ingest error:', err)
+      return null
     }
-  }
+  })
+  results.push(...outcomes.filter((outcome): outcome is IngestOutcome => outcome !== null))
 
   const created = results.filter((r) => r.action === 'created').length
   const updated = results.filter((r) => r.action === 'updated').length
   const skipped = results.filter((r) => r.action === 'skipped').length
+  let importedCount = created + updated
 
   // ── 5. Close the run + touch the key ─────────────────────────────────────────
   if (runId) {
+    const { count: distinctImportedCount } = await supabase
+      .from('prospect_engagement_events')
+      .select('id', { count: 'exact', head: true })
+      .eq('org_id', orgId)
+      .eq('event_type', 'imported')
+      .contains('payload', { source_run_id: runId })
+    importedCount = distinctImportedCount ?? importedCount
     await supabase
       .from('prospect_sources')
-      .update({ status: 'completed', imported_count: created + updated, updated_at: new Date().toISOString() })
+      .update({ status: 'completed', imported_count: importedCount, updated_at: new Date().toISOString() })
       .eq('id', runId)
   }
   supabase
@@ -225,11 +300,11 @@ export async function POST(request: Request): Promise<Response> {
     .eq('id', apiKey.id)
     .then(() => {})
 
-  // Cost attribution (best-effort, fire-and-forget): register this run with
+  // Cost attribution (best-effort): register this run with
   // Xmail so it can attribute outreach outcomes back to what it cost to
-  // source them. Must never affect this endpoint's response, status, or
-  // latency — see registerExternalRunWithXmail's doc comment.
-  registerExternalRunWithXmail(sourceType, externalRunId, source, prospects.length, created + updated)
+  // source them. The helper never throws, so Xmail availability cannot break
+  // a completed import.
+  await registerExternalRunWithXmail(sourceType, externalRunId, source, reportedTotal, importedCount)
 
   // ── 6. Respond ───────────────────────────────────────────────────────────────
   if (!isBatch) {
