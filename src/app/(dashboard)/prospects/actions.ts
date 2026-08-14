@@ -86,6 +86,7 @@ export type ProspectSort = 'recent' | 'score' | 'name'
 
 /** 'unverified' is a sentinel for "email_status IS NULL" — not a real EmailStatus value. */
 export type ProspectEmailFilter = EmailStatus | 'unverified'
+export type ProspectChannelFilter = CrmRecommendedChannel | 'has_phone'
 
 export type ProspectFilters = {
   q?: string
@@ -100,6 +101,8 @@ export type ProspectFilters = {
   pageSize?: number
   /** Filter by email verification status. See ProspectEmailFilter for the 'unverified' sentinel. */
   emailStatus?: ProspectEmailFilter
+  /** Filter by outreach channel. 'has_phone' is a sentinel for "reachable by phone at all". */
+  channel?: ProspectChannelFilter
 }
 
 export type ProspectsPageResult =
@@ -208,6 +211,11 @@ export async function getProspects(filters: ProspectFilters = {}): Promise<Prosp
   if (filters.qualification) query = query.eq('qualification_status', filters.qualification)
   if (filters.emailStatus === 'unverified') query = query.is('email_status', null)
   else if (filters.emailStatus) query = query.eq('email_status', filters.emailStatus)
+  // `has_phone` is deliberately broader than channel === 'call': it answers
+  // "who can we reach by phone at all", including prospects whose recommended
+  // channel is email but who also left a number.
+  if (filters.channel === 'has_phone') query = query.not('phone', 'is', null).neq('phone', '')
+  else if (filters.channel) query = query.eq('recommended_channel', filters.channel)
   if (safeCity) query = query.ilike('city', `%${safeCity}%`)
   if (safeQ)
     query = query.or(

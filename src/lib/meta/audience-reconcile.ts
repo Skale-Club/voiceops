@@ -3,10 +3,14 @@ import { normaliseEmail } from '@/lib/contacts/zod-schemas'
 import { diffAudienceMemberships, type StoredAudienceMembership } from '@/lib/meta/audience-diff'
 import {
   projectAudienceMembers,
-  type AudienceSourceDefinition,
   type AudienceSourceEntity,
   type ProjectedAudienceMember,
 } from '@/lib/meta/audience-members'
+import {
+  audienceSourceTypes,
+  normalizeAudienceSourceDefinition,
+  type AudienceSourceDefinition,
+} from '@/lib/meta/audience-source'
 import {
   MetaAudienceConnectionError,
   type MetaConnectionProvider,
@@ -281,21 +285,7 @@ type RpcCall = (name: string, params: Record<string, unknown>) => Promise<RpcRes
 const SOURCE_PAGE_SIZE = 1_000
 
 function sourceDefinition(config: ReconcileConfig): AudienceSourceDefinition {
-  const raw = config.sourceDefinition
-  if (config.audienceKind === 'prospect_segment') {
-    const record = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {}
-    const keys = 'entityKeys' in record && Array.isArray(record.entityKeys)
-      ? record.entityKeys.filter((value): value is string => typeof value === 'string')
-      : []
-    return { kind: 'prospect_segment', entityKeys: keys }
-  }
-  const record = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {}
-  return {
-    kind: 'xcraper_master',
-    sourceType: 'sourceType' in record && typeof record.sourceType === 'string'
-      ? record.sourceType
-      : 'xcraper',
-  }
+  return normalizeAudienceSourceDefinition(config.audienceKind, config.sourceDefinition)
 }
 
 function accountEmail(customFields: Record<string, unknown>): string | null {
@@ -356,7 +346,10 @@ export class SupabaseAudienceReconcileStore implements AudienceReconcileStore {
     const source = sourceDefinition(config)
     const entities: AudienceSourceEntity[] = []
     const segmentKeys = source.kind === 'prospect_segment' ? new Set(source.entityKeys) : null
-    const sourceType = source.kind === 'xcraper_master' ? source.sourceType ?? 'xcraper' : null
+    // A scrape audience spans every source type the definition selects, so this
+    // filters with `.in`, not `.eq`. Narrowing it to a single value here would
+    // silently drop entities that projectAudienceMember would have accepted.
+    const sourceTypes = audienceSourceTypes(source)
 
     const contactIds = segmentKeys
       ? [...segmentKeys].filter((key) => key.startsWith('contact:')).map((key) => key.slice(8))
@@ -371,7 +364,7 @@ export class SupabaseAudienceReconcileStore implements AudienceReconcileStore {
           .from('contacts')
           .select('id, source_type, lifecycle_stage, email, phone, phone_e164, email_status, dnd_enabled, engagement_status, identity_status')
           .eq('org_id', config.orgId)
-        if (sourceType) query = query.eq('source_type', sourceType).eq('lifecycle_stage', 'prospect')
+        if (sourceTypes) query = query.in('source_type', sourceTypes).eq('lifecycle_stage', 'prospect')
         if (contactIds.length > 0) query = query.in('id', contactIds)
         const { data, error } = await query
           .order('id', { ascending: true })
@@ -395,7 +388,7 @@ export class SupabaseAudienceReconcileStore implements AudienceReconcileStore {
           .from('accounts')
           .select('id, source_type, lifecycle_stage, phone, custom_fields, email_status, engagement_status')
           .eq('org_id', config.orgId)
-        if (sourceType) query = query.eq('source_type', sourceType).eq('lifecycle_stage', 'prospect')
+        if (sourceTypes) query = query.in('source_type', sourceTypes).eq('lifecycle_stage', 'prospect')
         if (accountIds.length > 0) query = query.in('id', accountIds)
         const { data, error } = await query
           .order('id', { ascending: true })

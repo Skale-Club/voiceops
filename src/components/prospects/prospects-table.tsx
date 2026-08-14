@@ -290,6 +290,21 @@ export function ProspectsTable({
             { value: 'invalid', label: 'Invalid' },
           ]}
         />
+        <FilterSelect
+          value={filters.channel ?? ALL}
+          onChange={(v) => updateParam({ channel: v })}
+          placeholder="Channel"
+          options={[
+            { value: ALL, label: 'Any channel' },
+            // Broader than "Call": everyone with a number, whatever their
+            // recommended channel — the working list for a phone campaign.
+            { value: 'has_phone', label: 'Has phone' },
+            { value: 'call', label: 'Call' },
+            { value: 'email', label: 'Email' },
+            { value: 'whatsapp', label: 'WhatsApp' },
+            { value: 'sms', label: 'SMS' },
+          ]}
+        />
         <form onSubmit={submitCity}>
           <Input
             value={cityValue}

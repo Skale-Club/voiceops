@@ -7,6 +7,7 @@ import { createServiceRoleClient } from '@/lib/supabase/admin'
 import { createClient, getUser } from '@/lib/supabase/server'
 import { getRbacContext } from '@/lib/rbac/server'
 import { OrgOAuthProvider, type AdsConnectionQueryClient } from '@/lib/meta/audience-provider'
+import { DEFAULT_SCRAPE_SOURCE_TYPES } from '@/lib/meta/audience-source'
 import {
   reconcileMetaAudience,
   SupabaseAudienceReconcileStore,
@@ -252,7 +253,11 @@ export async function saveMetaAudienceConfig(input: SaveMetaAudienceConfigInput)
     .maybeSingle()
   if (!connection) return { ok: false, code: 'CONNECTION_NOT_FOUND', error: 'Select a Meta connection from this workspace.' }
 
-  let sourceDefinition: Json = { kind: 'xcraper_master', sourceType: 'xcraper' }
+  // Every scrape source, not just the current one: prospects have shipped under
+  // both `xcraper` and the earlier `google-maps` push, and "everyone we scraped"
+  // has to mean both. Written as the plural form so the saved scope says so
+  // explicitly instead of relying on the reader's default.
+  let sourceDefinition: Json = { kind: 'xcraper_master', sourceTypes: [...DEFAULT_SCRAPE_SOURCE_TYPES] }
   if (parsed.data.audience_kind === 'prospect_segment') {
     if (!parsed.data.saved_segment_id) return { ok: false, code: 'INVALID_SCOPE', error: 'Choose a saved prospect segment.' }
     const { data: segment } = await supabase

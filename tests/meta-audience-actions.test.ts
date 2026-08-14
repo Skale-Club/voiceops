@@ -105,7 +105,8 @@ describe('Meta audience operator actions', () => {
       org_id: CONFIG.org_id,
       ads_connection_id: CONFIG.ads_connection_id,
       meta_ad_account_id: 'act_123',
-      source_definition: { kind: 'xcraper_master', sourceType: 'xcraper' },
+      // A scrape audience covers every scrape push path, not just the newest one.
+      source_definition: { kind: 'xcraper_master', sourceTypes: ['xcraper', 'google-maps'] },
       terms_accepted_by: 'user-1',
       sync_enabled: false,
     }))

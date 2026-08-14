@@ -1,12 +1,13 @@
 import { normaliseEmail } from '@/lib/contacts/zod-schemas'
 import { normalizePhone, sha256Hex } from '@/lib/meta/graph'
+import { matchesAudienceSourceType, type AudienceSourceDefinition } from '@/lib/meta/audience-source'
 import type { Json } from '@/types/database'
 
 export type AudienceEntityType = 'contact' | 'account'
 
-export type AudienceSourceDefinition =
-  | { kind: 'xcraper_master'; sourceType?: string }
-  | { kind: 'prospect_segment'; entityKeys: string[] }
+// Re-exported so existing importers keep working; the definition itself now
+// lives in audience-source.ts, shared with dirty-marking and reconciliation.
+export type { AudienceSourceDefinition }
 
 export interface AudienceSourceEntity {
   entityType: AudienceEntityType
@@ -61,7 +62,7 @@ function entityKey(entity: Pick<AudienceSourceEntity, 'entityType' | 'entityId'>
 
 function isSelected(entity: AudienceSourceEntity, source: AudienceSourceDefinition) {
   if (source.kind === 'xcraper_master') {
-    return entity.sourceType === (source.sourceType ?? 'xcraper') && entity.lifecycleStage === 'prospect'
+    return matchesAudienceSourceType(entity.sourceType, source) && entity.lifecycleStage === 'prospect'
   }
   return source.entityKeys.includes(entityKey(entity))
 }

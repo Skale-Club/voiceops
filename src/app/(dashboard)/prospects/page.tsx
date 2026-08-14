@@ -2,6 +2,7 @@ import { ShieldAlert, UserPlus } from 'lucide-react'
 
 import {
   getProspects,
+  type ProspectChannelFilter,
   type ProspectEmailFilter,
   type ProspectFilters,
   type ProspectKind,
@@ -29,6 +30,7 @@ type SearchParams = {
   sort?: string
   page?: string
   emailStatus?: string
+  channel?: string
 }
 
 export default async function ProspectsPage({
@@ -51,6 +53,19 @@ export default async function ProspectsPage({
     ? (sp.emailStatus as ProspectEmailFilter)
     : undefined
 
+  const CHANNEL_FILTER_VALUES: ProspectChannelFilter[] = [
+    'has_phone',
+    'call',
+    'email',
+    'sms',
+    'whatsapp',
+    'visit',
+    'linkedin',
+  ]
+  const channel = (CHANNEL_FILTER_VALUES as string[]).includes(sp.channel ?? '')
+    ? (sp.channel as ProspectChannelFilter)
+    : undefined
+
   const filters: ProspectFilters = {
     q: sp.q,
     kind: (sp.kind as 'all' | ProspectKind) || 'all',
@@ -63,6 +78,7 @@ export default async function ProspectsPage({
     page: sp.page ? Math.max(1, parseInt(sp.page, 10) || 1) : 1,
     pageSize: 25,
     emailStatus,
+    channel,
   }
 
   const result = await getProspects(filters)

@@ -5,7 +5,7 @@ import {
   type AudienceSourceEntity,
 } from '@/lib/meta/audience-members'
 
-const xcraperMaster = { kind: 'xcraper_master' as const, sourceType: 'xcraper' }
+const xcraperMaster = { kind: 'xcraper_master' as const, sourceTypes: ['xcraper'] }
 
 const contact: AudienceSourceEntity = {
   entityType: 'contact',

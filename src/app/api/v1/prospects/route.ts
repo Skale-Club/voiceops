@@ -26,6 +26,11 @@ import { normaliseEmail } from '@/lib/contacts/zod-schemas'
 import { normalizePhoneToE164 } from '@/lib/phone-numbers/normalize'
 import { hasScope } from '@/lib/api-keys/scopes'
 import { markMetaAudiencesDirty } from '@/lib/meta/audience-dirty'
+import {
+  accountEmailFromCustomFields,
+  deriveRecommendedChannel,
+  resolveRecommendedChannel,
+} from '@/lib/prospects/recommended-channel'
 import { runAnalysis } from '@/services/website-analyzer'
 import { registerExternalRunWithXmail } from '@/lib/xmail/external-run-mapping'
 import { DEFAULT_STALE_MINUTES, isAnalysisRowStale } from '@/services/website-analyzer/staleness'
@@ -371,11 +376,11 @@ async function ingestPerson(
   if (!phoneNorm && !emailNorm && !p.name && !sourceId) return null
 
   // Dedup: source_id → email → phone
-  let existing: { id: string; lifecycle_stage: string } | null = null
+  let existing: { id: string; lifecycle_stage: string; recommended_channel: string | null; email: string | null; phone: string | null } | null = null
   if (sourceId) {
     const { data } = await supabase
       .from('contacts')
-      .select('id, lifecycle_stage')
+      .select('id, lifecycle_stage, recommended_channel, email, phone')
       .eq('org_id', orgId)
       .eq('source_type', sourceType)
       .eq('source_id', sourceId)
@@ -385,7 +390,7 @@ async function ingestPerson(
   if (!existing && emailNorm) {
     const { data } = await supabase
       .from('contacts')
-      .select('id, lifecycle_stage')
+      .select('id, lifecycle_stage, recommended_channel, email, phone')
       .eq('org_id', orgId)
       .eq('email_normalized', emailNorm)
       .neq('identity_status', 'archived_duplicate')
@@ -395,7 +400,7 @@ async function ingestPerson(
   if (!existing && phoneNorm) {
     const { data } = await supabase
       .from('contacts')
-      .select('id, lifecycle_stage')
+      .select('id, lifecycle_stage, recommended_channel, email, phone')
       .eq('org_id', orgId)
       .eq('phone_e164', phoneNorm)
       .neq('identity_status', 'archived_duplicate')
@@ -416,8 +421,17 @@ async function ingestPerson(
     if (p.tags?.length) patch.tags = p.tags
     if (p.intent_level) patch.intent_level = p.intent_level
     if (p.qualification_status) patch.qualification_status = p.qualification_status
-    if (p.recommended_channel !== undefined) patch.recommended_channel = p.recommended_channel
     if (p.score !== undefined) patch.score = p.score
+    // Same fill-only-when-empty rule as the company path above.
+    if (p.recommended_channel !== undefined) {
+      patch.recommended_channel = p.recommended_channel
+    } else if (!existing.recommended_channel) {
+      const derived = deriveRecommendedChannel({
+        email: emailNorm ?? existing.email,
+        phone: phoneNorm ?? existing.phone,
+      })
+      if (derived) patch.recommended_channel = derived
+    }
     const { error } = await supabase
       .from('contacts')
       .update(patch)
@@ -442,7 +456,10 @@ async function ingestPerson(
       engagement_status: 'not_contacted',
       intent_level: p.intent_level ?? 'none',
       qualification_status: p.qualification_status ?? 'needs_review',
-      recommended_channel: p.recommended_channel ?? null,
+      recommended_channel: resolveRecommendedChannel(p.recommended_channel, {
+        email: emailNorm,
+        phone: phoneNorm,
+      }),
       score: p.score ?? 0,
       source_type: sourceType,
       source_id: sourceId,
@@ -483,7 +500,7 @@ async function ingestCompany(
     source_payload: Json | null
   }
   let existing: ExistingAccount | null = null
-  const existingColumns = 'id, lifecycle_stage, custom_fields, source_payload'
+  const existingColumns = 'id, lifecycle_stage, custom_fields, source_payload, recommended_channel, phone'
   if (sourceId) {
     const { data } = await supabase
       .from('accounts')
@@ -526,10 +543,21 @@ async function ingestCompany(
     if (p.tags?.length) patch.tags = p.tags
     if (p.intent_level) patch.intent_level = p.intent_level
     if (p.qualification_status) patch.qualification_status = p.qualification_status
-    if (p.recommended_channel !== undefined) patch.recommended_channel = p.recommended_channel
     if (p.score !== undefined) patch.score = p.score
     patch.custom_fields = mergePresentJson(existing.custom_fields, p.custom_fields)
     patch.source_payload = mergePresentJson(existing.source_payload, p.source_payload)
+
+    // Fill the channel only when it is still empty, so a re-import can heal a row
+    // that predates the field without ever overriding a decision already recorded.
+    if (p.recommended_channel !== undefined) {
+      patch.recommended_channel = p.recommended_channel
+    } else if (!existing.recommended_channel) {
+      const derived = deriveRecommendedChannel({
+        email: accountEmailFromCustomFields(patch.custom_fields),
+        phone: normalizedPhone ?? existing.phone,
+      })
+      if (derived) patch.recommended_channel = derived
+    }
     const website = typeof p.custom_fields?.website === 'string' ? p.custom_fields.website.trim() : ''
     if (website) patch.website = website
 
@@ -560,7 +588,10 @@ async function ingestCompany(
       engagement_status: 'not_contacted',
       intent_level: p.intent_level ?? 'none',
       qualification_status: p.qualification_status ?? 'needs_review',
-      recommended_channel: p.recommended_channel ?? null,
+      recommended_channel: resolveRecommendedChannel(p.recommended_channel, {
+        email: accountEmailFromCustomFields(p.custom_fields),
+        phone: normalizePhoneToE164(p.phone, phoneCountry),
+      }),
       score: p.score ?? 0,
       source_type: sourceType,
       source_id: sourceId,

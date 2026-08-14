@@ -1,5 +1,6 @@
 import { createServiceRoleClient } from '@/lib/supabase/admin'
-import type { AudienceEntityType, AudienceSourceDefinition } from '@/lib/meta/audience-members'
+import type { AudienceEntityType } from '@/lib/meta/audience-members'
+import { matchesAudienceSourceType, normalizeAudienceSourceDefinition } from '@/lib/meta/audience-source'
 
 type ServiceClient = ReturnType<typeof createServiceRoleClient>
 
@@ -24,30 +25,10 @@ interface AudienceScope {
   source_definition: unknown
 }
 
-function asSourceDefinition(scope: AudienceScope): AudienceSourceDefinition {
-  const raw = scope.source_definition
-  if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
-    const value = raw as Record<string, unknown>
-    if (scope.audience_kind === 'prospect_segment' && Array.isArray(value.entityKeys)) {
-      return {
-        kind: 'prospect_segment',
-        entityKeys: value.entityKeys.filter((key): key is string => typeof key === 'string'),
-      }
-    }
-    return {
-      kind: 'xcraper_master',
-      sourceType: typeof value.sourceType === 'string' ? value.sourceType : undefined,
-    }
-  }
-  return scope.audience_kind === 'prospect_segment'
-    ? { kind: 'prospect_segment', entityKeys: [] }
-    : { kind: 'xcraper_master' }
-}
-
 function changeMatchesScope(change: AudienceDirtyChange, scope: AudienceScope): boolean {
-  const definition = asSourceDefinition(scope)
+  const definition = normalizeAudienceSourceDefinition(scope.audience_kind, scope.source_definition)
   if (definition.kind === 'xcraper_master') {
-    return Boolean(change.sourceType) && change.sourceType === (definition.sourceType ?? 'xcraper')
+    return matchesAudienceSourceType(change.sourceType, definition)
   }
   if (!change.entityType || !change.entityId) return false
   return definition.entityKeys.includes(`${change.entityType}:${change.entityId}`)
