@@ -14,6 +14,8 @@ type Signals = {
   hasCTA?: boolean
   hasContactInfo?: boolean
   loadMs?: number
+  bookingMode?: string
+  bookingProvider?: string
 }
 
 function signalsFrom(input: WebsiteInsightInput): Signals {
@@ -35,6 +37,16 @@ function signalsFrom(input: WebsiteInsightInput): Signals {
     hasCTA: typeof evidence.hasCTA === 'boolean' ? evidence.hasCTA : undefined,
     hasContactInfo: typeof evidence.hasContactInfo === 'boolean' ? evidence.hasContactInfo : undefined,
     loadMs: typeof evidence.loadMs === 'number' && Number.isFinite(evidence.loadMs) ? evidence.loadMs : undefined,
+    bookingMode:
+      evidence.booking && typeof evidence.booking === 'object' && !Array.isArray(evidence.booking) &&
+      typeof (evidence.booking as Record<string, unknown>).mode === 'string'
+        ? (evidence.booking as Record<string, unknown>).mode as string
+        : undefined,
+    bookingProvider:
+      evidence.booking && typeof evidence.booking === 'object' && !Array.isArray(evidence.booking) &&
+      typeof (evidence.booking as Record<string, unknown>).primaryProvider === 'string'
+        ? (evidence.booking as Record<string, unknown>).primaryProvider as string
+        : undefined,
   }
 }
 
@@ -51,6 +63,15 @@ function isHost(host: string, domains: string[]): boolean {
  */
 export function buildWebsiteInsights(input: WebsiteInsightInput): WebsiteInsights {
   const signals = signalsFrom(input)
+
+  if (signals.bookingMode === 'third_party' && signals.bookingProvider) {
+    return {
+      en: `I noticed your website sends clients to ${signals.bookingProvider} to schedule. Bringing the branded site and booking flow together could make the journey more consistent.`,
+      'pt-BR': `Notei que seu site envia os clientes para ${signals.bookingProvider} para agendar. Unir o site personalizado e o agendamento pode deixar essa jornada mais consistente.`,
+      pt: `Notei que o seu site envia os clientes para ${signals.bookingProvider} para marcar. Unir o site personalizado e a marcação pode tornar essa jornada mais consistente.`,
+      es: `Noté que el sitio envía a los clientes a ${signals.bookingProvider} para reservar. Unir el sitio personalizado y las reservas podría hacer que la experiencia sea más consistente.`,
+    }
+  }
 
   if (isHost(signals.host, ['google.com', 'facebook.com', 'instagram.com', 'yelp.com'])) {
     return {

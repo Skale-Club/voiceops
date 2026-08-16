@@ -86,6 +86,15 @@ const ENGAGEMENT_OPTIONS: CrmEngagementStatus[] = [
 const INTENT_OPTIONS: CrmIntentLevel[] = ['none', 'low', 'medium', 'high']
 const QUALIFICATION_OPTIONS: CrmQualificationStatus[] = ['unqualified', 'needs_review', 'qualified']
 const ALL = '__all__'
+const BOOKING_PLATFORMS = ['Booksy', 'TheCut', 'GlossGenius', 'Square Appointments', 'Vagaro', 'Fresha', 'StyleSeat', 'Schedulicity']
+
+function presenceLabel(row: ProspectRow): string | null {
+  if (row.bookingPlatform) return `Booking: ${row.bookingPlatform}`
+  if (row.hasOwnedWebsite === true) return 'Own website'
+  if (row.webPresencePlatform) return row.webPresencePlatform
+  if (row.hasOwnedWebsite === false) return 'No website'
+  return null
+}
 
 function scoreStyle(score: number | null | undefined): React.CSSProperties {
   const s = score ?? 0
@@ -249,6 +258,30 @@ export function ProspectsTable({
             { value: 'all', label: 'All types' },
             { value: 'person', label: 'People' },
             { value: 'company', label: 'Companies' },
+          ]}
+        />
+        <FilterSelect
+          value={filters.webPresence ?? ALL}
+          onChange={(v) => updateParam({ presence: v })}
+          placeholder="Web presence"
+          options={[
+            { value: ALL, label: 'Any web presence' },
+            { value: 'no_owned_website', label: 'No owned website' },
+            { value: 'owned_website', label: 'Owned website' },
+            { value: 'booking_platform', label: 'Booking platform only' },
+            { value: 'social_profile', label: 'Social profile only' },
+            { value: 'directory_listing', label: 'Directory / Maps only' },
+            { value: 'link_hub', label: 'Link hub only' },
+            { value: 'none', label: 'No detected presence' },
+          ]}
+        />
+        <FilterSelect
+          value={filters.bookingPlatform ?? ALL}
+          onChange={(v) => updateParam({ booking: v })}
+          placeholder="Booking"
+          options={[
+            { value: ALL, label: 'Any booking platform' },
+            ...BOOKING_PLATFORMS.map((platform) => ({ value: platform, label: platform })),
           ]}
         />
         <FilterSelect
@@ -488,6 +521,11 @@ export function ProspectsTable({
                             showLabel={false}
                             className="shrink-0"
                           />
+                        )}
+                        {presenceLabel(row) && (
+                          <Badge variant="outline" className="h-5 max-w-[150px] truncate px-1.5 text-[10px] font-medium">
+                            {presenceLabel(row)}
+                          </Badge>
                         )}
                       </div>
                     </div>

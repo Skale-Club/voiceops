@@ -11,6 +11,18 @@ function expectBriefMultilingual(value: Record<string, string>) {
 }
 
 describe('buildWebsiteInsights', () => {
+  it('uses detected third-party booking evidence before generic site observations', () => {
+    const insights = buildWebsiteInsights({
+      url: 'https://barber.example',
+      rawEvidence: {
+        booking: { mode: 'third_party', primaryProvider: 'Booksy' },
+        isMobileResponsive: false,
+      },
+    })
+    expect(insights.en).toContain('Booksy')
+    expect(insights.en).toContain('sends clients')
+  })
+
   it('describes a missing dedicated website without pretending Google is the business site', () => {
     const insights = buildWebsiteInsights({
       url: 'https://google.com/maps/place/a-barbershop',

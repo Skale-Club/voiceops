@@ -32,6 +32,7 @@ import {
   resolveRecommendedChannel,
 } from '@/lib/prospects/recommended-channel'
 import { runAnalysis } from '@/services/website-analyzer'
+import { mergePresentJson, mergeProspectCustomFields } from '@/lib/prospects/web-presence-merge'
 import { registerExternalRunWithXmail } from '@/lib/xmail/external-run-mapping'
 import { DEFAULT_STALE_MINUTES, isAnalysisRowStale } from '@/services/website-analyzer/staleness'
 import type { Json } from '@/types/database'
@@ -328,39 +329,6 @@ export async function POST(request: Request): Promise<Response> {
 
 type ServiceClient = ReturnType<typeof createServiceRoleClient>
 
-function isNonEmpty(value: unknown): boolean {
-  return value !== null && value !== undefined && (typeof value !== 'string' || value.trim().length > 0)
-}
-
-function mergePresentJson(
-  existing: unknown,
-  incoming: unknown,
-): Record<string, unknown> {
-  const existingRecord = existing && typeof existing === 'object' && !Array.isArray(existing)
-    ? existing as Record<string, unknown>
-    : {}
-  const incomingRecord = incoming && typeof incoming === 'object' && !Array.isArray(incoming)
-    ? incoming as Record<string, unknown>
-    : {}
-  const merged: Record<string, unknown> = { ...existingRecord }
-  for (const [key, value] of Object.entries(incomingRecord)) {
-    if (!isNonEmpty(value)) continue
-    const current = merged[key]
-    if (
-      value && typeof value === 'object' && !Array.isArray(value) &&
-      current && typeof current === 'object' && !Array.isArray(current)
-    ) {
-      merged[key] = mergePresentJson(
-        current as Record<string, unknown>,
-        value as Record<string, unknown>,
-      )
-    } else {
-      merged[key] = typeof value === 'string' ? value.trim() : value
-    }
-  }
-  return merged
-}
-
 /**
  * Fire-and-forget: create a website_analyses row and kick off analysis for a
  * newly-ingested company prospect. Skips if an analysis is already running.
@@ -561,6 +529,7 @@ async function ingestCompany(
   defaultCountry: string | null,
 ): Promise<IngestOutcome | null> {
   const name = (p.name ?? p.company)?.trim() || null
+  const domainWasProvided = Object.prototype.hasOwnProperty.call(p, 'domain')
   const domain = p.domain?.trim() || null
   const sourceId = p.source_id?.trim() || null
   const phoneCountry = p.phone_country ?? defaultCountry
@@ -617,14 +586,14 @@ async function ingestCompany(
     }
     const patch: Record<string, unknown> = { updated_at: new Date().toISOString() }
     if (name) patch.name = name
-    if (domain) patch.domain = domain
+    if (domainWasProvided) patch.domain = domain
     const normalizedPhone = normalizePhoneToE164(p.phone, phoneCountry)
     if (normalizedPhone) patch.phone = normalizedPhone
     if (p.tags?.length) patch.tags = p.tags
     if (p.intent_level) patch.intent_level = p.intent_level
     if (p.qualification_status) patch.qualification_status = p.qualification_status
     if (p.score !== undefined) patch.score = p.score
-    patch.custom_fields = mergePresentJson(existing.custom_fields, p.custom_fields)
+    patch.custom_fields = mergeProspectCustomFields(existing.custom_fields, p.custom_fields)
     patch.source_payload = mergePresentJson(existing.source_payload, p.source_payload)
 
     // Fill the channel only when it is still empty, so a re-import can heal a row
@@ -638,8 +607,10 @@ async function ingestCompany(
       })
       if (derived) patch.recommended_channel = derived
     }
-    const website = typeof p.custom_fields?.website === 'string' ? p.custom_fields.website.trim() : ''
-    if (website) patch.website = website
+    if (p.custom_fields && Object.prototype.hasOwnProperty.call(p.custom_fields, 'website')) {
+      const website = typeof p.custom_fields.website === 'string' ? p.custom_fields.website.trim() : ''
+      patch.website = website || null
+    }
 
     const { error } = await supabase
       .from('accounts')

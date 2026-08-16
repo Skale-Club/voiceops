@@ -1,3 +1,5 @@
+import type { BookingDiscovery } from './booking-discovery'
+
 // Types for the Website Analyzer service (Active Prospect System).
 // These match the website_analyses table columns + internal extraction shapes.
 
@@ -19,6 +21,7 @@ export interface RawExtraction {
   headings: string[]      // h1–h3 text (first 10)
   navItems: string[]      // nav/header link text
   heroText: string[]      // hero section paragraphs/taglines
+  booking: BookingDiscovery
   desktopScreenshot: Buffer
   mobileScreenshot: Buffer
   rawCssVars: Record<string, string>
@@ -36,6 +39,7 @@ export interface AnalysisResult {
   screenshotMobileUrl: string | null
   rawEvidence: Record<string, unknown>
   outreachInsights: Record<string, string>
+  booking: BookingDiscovery
 }
 
 /** Status shape returned by GET /api/v1/accounts/:id/analyze */

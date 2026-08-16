@@ -195,6 +195,45 @@ describe('Xcraper company enrichment', () => {
     }))
   })
 
+  it('clears a stale Maps domain when Xcraper reclassifies it as a directory listing', async () => {
+    const { accountUpdate } = arrangeExistingAccount({
+      id: 'account-1',
+      lifecycle_stage: 'prospect',
+      custom_fields: {
+        website: 'https://google.com/maps/place-1',
+        has_owned_website: true,
+        web_presence_type: 'owned_website',
+      },
+      source_payload: {},
+    })
+    const { POST } = await import('@/app/api/v1/prospects/route')
+    const response = await POST(requestFor({
+      kind: 'company',
+      name: 'Hudson Barber',
+      domain: null,
+      source_id: 'place-1',
+      custom_fields: {
+        website: null,
+        has_owned_website: false,
+        web_presence_type: 'directory_listing',
+        web_presence_url: 'https://google.com/maps/place-1',
+        web_presence_platform: 'Google Maps',
+      },
+    }))
+
+    expect(response.status).toBe(201)
+    expect(accountUpdate.update).toHaveBeenCalledWith(expect.objectContaining({
+      domain: null,
+      website: null,
+      custom_fields: expect.objectContaining({
+        website: null,
+        has_owned_website: false,
+        web_presence_type: 'directory_listing',
+        web_presence_platform: 'Google Maps',
+      }),
+    }))
+  })
+
   it('skips a converted account and neither updates nor marks it dirty', async () => {
     const { accountUpdate } = arrangeExistingAccount({
       id: 'account-1', lifecycle_stage: 'customer', custom_fields: {}, source_payload: {},

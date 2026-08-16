@@ -48,6 +48,14 @@ import type {
 } from '@/types/database'
 
 export type ProspectKind = 'person' | 'company'
+export type ProspectWebPresenceFilter =
+  | 'owned_website'
+  | 'booking_platform'
+  | 'social_profile'
+  | 'directory_listing'
+  | 'link_hub'
+  | 'none'
+  | 'no_owned_website'
 
 export type ProspectRow = {
   id: string
@@ -76,6 +84,12 @@ export type ProspectRow = {
   emailVerifiedAt: string | null
   emailVerificationProvider: string | null
   emailRisk: EmailRisk | null
+  hasOwnedWebsite?: boolean | null
+  webPresenceType?: string | null
+  webPresenceUrl?: string | null
+  webPresencePlatform?: string | null
+  bookingPlatform?: string | null
+  bookingUrl?: string | null
 }
 
 export type ProspectListResult =
@@ -103,6 +117,8 @@ export type ProspectFilters = {
   emailStatus?: ProspectEmailFilter
   /** Filter by outreach channel. 'has_phone' is a sentinel for "reachable by phone at all". */
   channel?: ProspectChannelFilter
+  webPresence?: ProspectWebPresenceFilter
+  bookingPlatform?: string
 }
 
 export type ProspectsPageResult =
@@ -216,6 +232,9 @@ export async function getProspects(filters: ProspectFilters = {}): Promise<Prosp
   // channel is email but who also left a number.
   if (filters.channel === 'has_phone') query = query.not('phone', 'is', null).neq('phone', '')
   else if (filters.channel) query = query.eq('recommended_channel', filters.channel)
+  if (filters.webPresence === 'no_owned_website') query = query.filter('has_owned_website', 'eq', false)
+  else if (filters.webPresence) query = query.filter('web_presence_type', 'eq', filters.webPresence)
+  if (filters.bookingPlatform) query = query.filter('booking_platform', 'eq', filters.bookingPlatform)
   if (safeCity) query = query.ilike('city', `%${safeCity}%`)
   if (safeQ)
     query = query.or(
@@ -268,6 +287,12 @@ export async function getProspects(filters: ProspectFilters = {}): Promise<Prosp
     emailVerifiedAt: (row.email_verified_at as string | null) ?? null,
     emailVerificationProvider: (row.email_verification_provider as string | null) ?? null,
     emailRisk: (row.email_risk as EmailRisk | null) ?? null,
+    hasOwnedWebsite: (row.has_owned_website as boolean | null) ?? null,
+    webPresenceType: (row.web_presence_type as string | null) ?? null,
+    webPresenceUrl: (row.web_presence_url as string | null) ?? null,
+    webPresencePlatform: (row.web_presence_platform as string | null) ?? null,
+    bookingPlatform: (row.booking_platform as string | null) ?? null,
+    bookingUrl: (row.booking_url as string | null) ?? null,
   }))
 
   const lists = ((listsResult.data ?? []) as Array<{ id: string; name: string }>).map((l) => ({
@@ -1074,7 +1099,7 @@ export async function getProspectDetail(
       ? supabase.from('conversations').select('id', { count: 'exact', head: true }).eq('contact_id', id)
       : Promise.resolve({ count: 0 }),
     // Website analysis only applies to company prospects.
-    kind === 'company'
+    kind === 'company' && Boolean(row.domain)
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       ? (supabase as any)
           .from('website_analyses')
@@ -1118,6 +1143,15 @@ export async function getProspectDetail(
     emailVerifiedAt: (row.email_verified_at as string | null) ?? null,
     emailVerificationProvider: (row.email_verification_provider as string | null) ?? null,
     emailRisk: (row.email_risk as EmailRisk | null) ?? null,
+    hasOwnedWebsite:
+      typeof (row.custom_fields as Record<string, unknown> | null)?.has_owned_website === 'boolean'
+        ? (row.custom_fields as Record<string, unknown>).has_owned_website as boolean
+        : row.domain ? true : null,
+    webPresenceType: ((row.custom_fields as Record<string, unknown> | null)?.web_presence_type as string | null) ?? null,
+    webPresenceUrl: ((row.custom_fields as Record<string, unknown> | null)?.web_presence_url as string | null) ?? null,
+    webPresencePlatform: ((row.custom_fields as Record<string, unknown> | null)?.web_presence_platform as string | null) ?? null,
+    bookingPlatform: ((row.custom_fields as Record<string, unknown> | null)?.booking_platform as string | null) ?? null,
+    bookingUrl: ((row.custom_fields as Record<string, unknown> | null)?.booking_url as string | null) ?? null,
     events: ((eventsResult.data ?? []) as Array<Record<string, unknown>>).map((e) => ({
       id: e.id as string,
       eventType: e.event_type as string,

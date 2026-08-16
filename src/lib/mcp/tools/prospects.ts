@@ -42,6 +42,10 @@ const filterShape = {
   kind: z.enum(['person', 'company', 'all']).optional().describe("'company' (scraped businesses), 'person', or 'all'. Default 'all'."),
   qualification: z.enum(['unqualified', 'needs_review', 'qualified']).optional(),
   engagement: z.string().max(40).optional().describe("e.g. 'not_contacted' to skip anyone already enrolled/contacted."),
+  web_presence: z.enum(['owned_website', 'booking_platform', 'social_profile', 'directory_listing', 'link_hub', 'none']).optional()
+    .describe("Company web presence. Use 'booking_platform' for Booksy/TheCut-style profiles or 'none' for no detected presence."),
+  booking_platform: z.string().trim().min(1).max(80).optional()
+    .describe("Only companies using this booking provider, e.g. 'Booksy', 'TheCut', or 'GlossGenius'."),
 }
 
 type Filters = {
@@ -51,6 +55,8 @@ type Filters = {
   kind?: 'person' | 'company' | 'all'
   qualification?: 'unqualified' | 'needs_review' | 'qualified'
   engagement?: string
+  web_presence?: 'owned_website' | 'booking_platform' | 'social_profile' | 'directory_listing' | 'link_hub' | 'none'
+  booking_platform?: string
 }
 
 type ResolvedProspect = {
@@ -62,7 +68,39 @@ type ResolvedProspect = {
   source_type: string | null
   engagement_status: string
   website: string | null
+  has_owned_website?: boolean | null
+  web_presence_type?: string | null
+  web_presence_url?: string | null
+  web_presence_platform?: string | null
+  booking_platform?: string | null
+  booking_url?: string | null
   emailDndBlocked?: boolean
+}
+
+function stringField(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() ? value.trim() : null
+}
+
+function presenceSummary(prospects: ResolvedProspect[]) {
+  const companies = prospects.filter((prospect) => prospect.kind === 'company')
+  const byType: Record<string, number> = {}
+  const bookingPlatforms: Record<string, number> = {}
+  for (const prospect of companies) {
+    const type = prospect.web_presence_type ?? 'unclassified'
+    byType[type] = (byType[type] ?? 0) + 1
+    if (prospect.booking_platform) {
+      bookingPlatforms[prospect.booking_platform] = (bookingPlatforms[prospect.booking_platform] ?? 0) + 1
+    }
+  }
+  const owned = companies.filter((prospect) => prospect.has_owned_website === true).length
+  return {
+    companies: companies.length,
+    owned_website: owned,
+    no_owned_website: companies.filter((prospect) => prospect.has_owned_website === false).length,
+    unclassified: companies.filter((prospect) => prospect.has_owned_website === null).length,
+    by_type: byType,
+    booking_platforms: bookingPlatforms,
+  }
 }
 
 function composeName(r: { first_name?: string | null; last_name?: string | null; name?: string | null }): string | null {
@@ -140,7 +178,8 @@ async function resolveProspects(
 ): Promise<ResolvedProspect[]> {
   const cap = opts.cap ?? 1000
   const kind = f.kind ?? 'all'
-  const wantPeople = kind === 'all' || kind === 'person'
+  const presenceFilterActive = Boolean(f.web_presence || f.booking_platform)
+  const wantPeople = !presenceFilterActive && (kind === 'all' || kind === 'person')
   const wantCompanies = kind === 'all' || kind === 'company'
   const out: ResolvedProspect[] = []
 
@@ -168,6 +207,12 @@ async function resolveProspects(
         source_type: (r.source_type as string | null) ?? null,
         engagement_status: r.engagement_status as string,
         website: null,
+        has_owned_website: null,
+        web_presence_type: null,
+        web_presence_url: null,
+        web_presence_platform: null,
+        booking_platform: null,
+        booking_url: null,
         emailDndBlocked: isDndBlocked(
           r.dnd_enabled as boolean | null,
           r.dnd_channels as string[] | null,
@@ -189,9 +234,20 @@ async function resolveProspects(
     if (f.source_type) q = q.eq('source_type', f.source_type)
     if (f.qualification) q = q.eq('qualification_status', f.qualification)
     if (f.engagement) q = q.eq('engagement_status', f.engagement)
+    if (f.web_presence) q = q.eq('custom_fields->>web_presence_type', f.web_presence)
+    if (f.booking_platform) q = q.ilike('custom_fields->>booking_platform', f.booking_platform)
     const { data } = await q
     for (const r of (data ?? []) as Array<Record<string, unknown>>) {
       const email = emailFromCustomFields(r.custom_fields)
+      const customFields = r.custom_fields && typeof r.custom_fields === 'object' && !Array.isArray(r.custom_fields)
+        ? r.custom_fields as Record<string, unknown>
+        : {}
+      const storedWebsite = (r.domain as string | null) ?? (r.website as string | null) ?? null
+      const hasOwnedWebsite = typeof customFields.has_owned_website === 'boolean'
+        ? customFields.has_owned_website
+        : storedWebsite
+          ? true
+          : null
       if (opts.requireEmail && !email) continue
       out.push({
         kind: 'company',
@@ -201,7 +257,13 @@ async function resolveProspects(
         score: (r.score as number | null) ?? 0,
         source_type: (r.source_type as string | null) ?? null,
         engagement_status: r.engagement_status as string,
-        website: (r.domain as string | null) ?? (r.website as string | null) ?? null,
+        website: storedWebsite,
+        has_owned_website: hasOwnedWebsite,
+        web_presence_type: stringField(customFields.web_presence_type) ?? (hasOwnedWebsite ? 'owned_website' : null),
+        web_presence_url: stringField(customFields.web_presence_url) ?? storedWebsite,
+        web_presence_platform: stringField(customFields.web_presence_platform),
+        booking_platform: stringField(customFields.booking_platform),
+        booking_url: stringField(customFields.booking_url),
         emailDndBlocked: false,
       })
     }
@@ -268,6 +330,7 @@ export const prospectsTools: McpToolDef[] = [
         total: all.length,
         with_email: withEmail.length,
         blocked_from_email: rawWithEmail.length - withEmail.length,
+        web_presence_summary: presenceSummary(all),
         emailable_note:
           withEmail.length === 0 && all.length > 0
             ? rawWithEmail.length > 0

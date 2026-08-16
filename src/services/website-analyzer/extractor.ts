@@ -9,6 +9,7 @@
 // are not yet available in the standalone output. The actual browser
 // and parser are only needed when analyzeWebsite() is called.
 import type { BrandColor, RawExtraction } from './types'
+import { discoverBooking, type BookingCandidate } from './booking-discovery'
 
 const DESKTOP_VIEWPORT = { width: 1280, height: 800 }
 const MOBILE_VIEWPORT  = { width: 390, height: 844 }
@@ -259,6 +260,36 @@ export async function analyzeWebsite(rawUrl: string): Promise<RawExtraction> {
     const { colors: brandColors, cssVars: rawCssVars } = await extractColors(desktopPage)
     const logoUrl = await extractLogo(desktopPage, resolvedUrl)
 
+    const bookingCandidates = await desktopPage.evaluate(() => {
+      const candidates: Array<{ url: string; label?: string; source: 'link' | 'iframe' | 'form' }> = []
+      const add = (raw: string | null, label: string | null, source: 'link' | 'iframe' | 'form') => {
+        if (!raw) return
+        try {
+          candidates.push({
+            url: new URL(raw, document.baseURI).href,
+            label: label?.replace(/\s+/g, ' ').trim().slice(0, 160) || undefined,
+            source,
+          })
+        } catch {
+          // Ignore malformed and non-navigation URLs.
+        }
+      }
+      document.querySelectorAll('a[href]').forEach((node) => {
+        const element = node as HTMLAnchorElement
+        add(element.getAttribute('href'), element.innerText || element.getAttribute('aria-label'), 'link')
+      })
+      document.querySelectorAll('iframe[src]').forEach((node) => {
+        const element = node as HTMLIFrameElement
+        add(element.getAttribute('src'), element.title, 'iframe')
+      })
+      document.querySelectorAll('form[action]').forEach((node) => {
+        const element = node as HTMLFormElement
+        add(element.getAttribute('action'), element.getAttribute('aria-label'), 'form')
+      })
+      return candidates.slice(0, 300)
+    }) as BookingCandidate[]
+    const booking = discoverBooking(resolvedUrl, bookingCandidates)
+
     // Detect mobile responsiveness via viewport meta tag
     const isMobileResponsive = await desktopPage.evaluate(() => {
       const meta = document.querySelector('meta[name="viewport"]')
@@ -267,8 +298,10 @@ export async function analyzeWebsite(rawUrl: string): Promise<RawExtraction> {
 
     // Detect CTA
     const hasClearlyCTA = await desktopPage.evaluate(() => {
-      const ctaSels = ['[class*="cta"]', '[class*="btn"]', '.button', 'button[type="submit"]', 'a[href*="contact"]', 'a[href*="get-started"]', 'a[href*="signup"]']
-      return ctaSels.some((s) => document.querySelector(s) !== null)
+      const ctaSels = ['[class*="cta"]', '[class*="btn"]', '.button', 'button[type="submit"]', 'a[href*="contact"]', 'a[href*="get-started"]', 'a[href*="signup"]', 'a[href*="book"]', 'a[href*="appointment"]', 'a[href*="schedule"]', 'a[href*="reserve"]']
+      const bookingText = /\b(book(?:ing)?|appointment|schedule|reserve|agendar|agendamento|marcar|reservar)\b/i
+      return ctaSels.some((s) => document.querySelector(s) !== null) ||
+        Array.from(document.querySelectorAll('a, button')).some((node) => bookingText.test(node.textContent ?? ''))
     })
 
     // Detect contact info
@@ -305,6 +338,7 @@ export async function analyzeWebsite(rawUrl: string): Promise<RawExtraction> {
       headings,
       navItems,
       heroText,
+      booking,
       desktopScreenshot,
       mobileScreenshot,
       rawCssVars,

@@ -7,6 +7,7 @@ import {
   type ProspectFilters,
   type ProspectKind,
   type ProspectSort,
+  type ProspectWebPresenceFilter,
 } from './actions'
 import { ProspectsTable } from '@/components/prospects/prospects-table'
 import { EntityPageTemplate } from '@/components/crm/entity-template'
@@ -31,6 +32,8 @@ type SearchParams = {
   page?: string
   emailStatus?: string
   channel?: string
+  presence?: string
+  booking?: string
 }
 
 export default async function ProspectsPage({
@@ -79,6 +82,11 @@ export default async function ProspectsPage({
     pageSize: 25,
     emailStatus,
     channel,
+    webPresence: ([
+      'owned_website', 'booking_platform', 'social_profile', 'directory_listing',
+      'link_hub', 'none', 'no_owned_website',
+    ] as string[]).includes(sp.presence ?? '') ? sp.presence as ProspectWebPresenceFilter : undefined,
+    bookingPlatform: sp.booking?.trim() || undefined,
   }
 
   const result = await getProspects(filters)

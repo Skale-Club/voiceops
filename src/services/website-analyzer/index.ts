@@ -175,6 +175,7 @@ export async function runAnalysis(opts: {
       headings:           extraction.headings,
       navItems:           extraction.navItems,
       heroText:           extraction.heroText,
+      booking:            extraction.booking,
       cssVarCount:        Object.keys(extraction.rawCssVars).length,
     }
 
@@ -189,6 +190,7 @@ export async function runAnalysis(opts: {
       screenshotMobileUrl,
       rawEvidence,
       outreachInsights: buildWebsiteInsights({ url: extraction.resolvedUrl, services, rawEvidence }),
+      booking: extraction.booking,
     }
 
     // ── 6. Persist analysis row ──────────────────────────────────────────────
@@ -210,11 +212,32 @@ export async function runAnalysis(opts: {
       .eq('id', analysisId)
 
     // ── 7. Update the account record ─────────────────────────────────────────
+    const { data: account } = await supabase
+      .from('accounts')
+      .select('custom_fields')
+      .eq('id', accountId)
+      .eq('org_id', orgId)
+      .maybeSingle()
+    const existingCustomFields = account?.custom_fields && typeof account.custom_fields === 'object' && !Array.isArray(account.custom_fields)
+      ? account.custom_fields as Record<string, unknown>
+      : {}
+    const bookingFields: Record<string, unknown> = {
+      booking_detected: extraction.booking.detected,
+      booking_mode: extraction.booking.mode,
+      booking_detection_source: 'website_analyzer',
+    }
+    if (extraction.booking.detected) {
+      bookingFields.booking_platform = extraction.booking.primaryProvider
+      bookingFields.booking_url = extraction.booking.primaryUrl
+      bookingFields.booking_platforms = extraction.booking.platforms
+    }
+
     await supabase
       .from('accounts')
       .update({
         score:                leadScore,
         qualification_status: leadScore >= 60 ? 'qualified' : leadScore >= 30 ? 'needs_review' : 'unqualified',
+        custom_fields:        { ...existingCustomFields, ...bookingFields },
         updated_at:           new Date().toISOString(),
       })
       .eq('id', accountId)
@@ -238,6 +261,9 @@ export async function runAnalysis(opts: {
         has_logo:            extraction.logoUrl !== null,
         has_cta:             extraction.hasClearlyCTA,
         load_ms:             extraction.loadMs,
+        booking_detected:    extraction.booking.detected,
+        booking_mode:        extraction.booking.mode,
+        booking_platform:    extraction.booking.primaryProvider,
       } as Json,
     })
 

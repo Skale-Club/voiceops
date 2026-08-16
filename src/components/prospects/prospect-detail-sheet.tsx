@@ -251,6 +251,18 @@ export function ProspectDetailSheet({ prospect, onOpenChange, onChanged }: Prosp
                 <DetailRow label="Phone" value={formatPhoneDisplay(detail.phone) || null} />
                 <DetailRow label="Company" value={detail.company} />
                 <DetailRow
+                  label="Web presence"
+                  value={
+                    detail.bookingPlatform
+                      ? `Booking: ${detail.bookingPlatform}`
+                      : detail.hasOwnedWebsite === true
+                        ? 'Owned website'
+                        : detail.webPresencePlatform || (detail.hasOwnedWebsite === false ? 'No owned website' : null)
+                  }
+                />
+                <DetailRow label="Booking URL" value={detail.bookingUrl ?? null} />
+                {!detail.bookingUrl && <DetailRow label="Presence URL" value={detail.webPresenceUrl ?? null} />}
+                <DetailRow
                   label="Source"
                   value={[detail.sourceType || detail.source, detail.sourceId].filter(Boolean).join(' · ')}
                 />
