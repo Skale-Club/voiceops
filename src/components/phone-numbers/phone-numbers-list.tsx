@@ -161,9 +161,11 @@ export function PhoneNumbersList({ initial, twilioConnected, embedded = false }:
           <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-bg-secondary">
             <Phone className="h-5 w-5 text-text-tertiary" />
           </div>
-          <p className="text-[14px] font-medium text-text-primary">No phone numbers yet</p>
+          <p className="text-[14px] font-medium text-text-primary">No Twilio numbers yet</p>
           <p className="mt-1 text-[12.5px] text-text-secondary max-w-sm mx-auto">
-            Connect a Twilio number to enable inbound/outbound calls and SMS.
+            Connect a Twilio number to enable your own dialer, SMS, and call routing. If you
+            only need an AI answering bot on a number you already own, import it under AI Phone
+            Numbers below instead.
           </p>
           <Button size="sm" className="mt-4 gap-1.5" onClick={() => setAddOpen(true)}>
             <Plus className="h-3.5 w-3.5" /> Add a number

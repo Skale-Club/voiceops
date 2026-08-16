@@ -2,6 +2,8 @@ import { createClient } from '@/lib/supabase/server'
 
 export interface CampaignProviderAvailability {
   hasTwilio: boolean
+  /** Voice campaigns place calls through the Vapi API — Twilio is never involved. */
+  hasVapi: boolean
   hasResend: boolean
   hasWhatsApp: boolean
   whatsappCampaignProvider: 'meta_cloud' | 'zernio' | null
@@ -36,6 +38,7 @@ export async function getCampaignProviderAvailability(): Promise<CampaignProvide
 
   return {
     hasTwilio: providers.has('twilio'),
+    hasVapi: providers.has('vapi'),
     hasResend: (resendRes.data ?? []).length > 0,
     hasWhatsApp: hasMetaCloudWhatsApp || hasZernioWhatsApp,
     whatsappCampaignProvider: hasMetaCloudWhatsApp

@@ -12,6 +12,7 @@ import { VapiEndOfCallMessageSchema } from '@/types/vapi'
 import { verifyVapiSecret } from '@/lib/vapi/verify-signature'
 import { createServiceRoleClient } from '@/lib/supabase/admin'
 import { persistCallRecord, updateCampaignContactFromReport, getCampaignContactId } from '@/lib/vapi/end-of-call'
+import { buildVapiCallEventPayload, emitVapiCallEndedEvent } from '@/lib/vapi/events'
 import { log } from '@/lib/logger'
 import { createLogger } from '@/lib/obs/logger'
 
@@ -86,6 +87,21 @@ export async function POST(request: Request): Promise<Response> {
           call_type: message.call?.type ?? null,
         },
       })
+
+      // Fire the `vapi.call.ended` workflow trigger. Gated on `inserted` so a
+      // Vapi retry — or the same report landing on /api/vapi/campaigns too —
+      // can't run the workflow twice: the duplicate insert is rejected by the
+      // vapi_call_id UNIQUE index, which is the same signal.
+      if (result.inserted && result.organizationId && result.callId) {
+        await emitVapiCallEndedEvent(
+          result.organizationId,
+          buildVapiCallEventPayload(message, {
+            callId: result.callId,
+            phoneNumberId: result.phoneNumberId,
+          }),
+          { supabase },
+        )
+      }
 
       // Outbound campaign calls can land on this route if the assistant's server
       // URL points here instead of /api/vapi/campaigns — keep campaign_contacts

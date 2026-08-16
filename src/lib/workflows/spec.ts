@@ -252,6 +252,28 @@ export const TRIGGERS: TriggerSpec[] = [
     },
   },
 
+  // ─── Vapi AI call events. Emitted by src/lib/vapi/events.ts from the
+  // end-of-call webhook, only when the `calls` insert actually won (so a Vapi
+  // retry can't re-fire the workflow). Works for Vapi-native numbers with no
+  // Twilio account attached — phone.* is populated whenever the number was
+  // imported locally.
+  {
+    type: 'event:vapi.call.ended',
+    description:
+      'A Vapi AI call ended. Variables expose the call (outcome, transcript summary, ' +
+      'recording), the number it landed on, and the resolved contact (if any).',
+    variables: ['call.*', 'phone.*', 'contact.*', 'trigger.fired_at'],
+    config_schema: {
+      type: 'object',
+      properties: {
+        phone_number_id: {
+          type: 'string',
+          description: 'Optional twilio_phone_numbers.id. If set, only fires for that number.',
+        },
+      },
+    },
+  },
+
   // ─── Social comment events (Zernio). Emitted by lib/zernio/events.ts after
   // processCommentReceived stores the comment and runs any agent reply.
   {

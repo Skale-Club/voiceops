@@ -84,15 +84,15 @@ export default async function CampaignsPage({ searchParams }: PageProps) {
           </div>
         </div>
       )}
-      {activeChannel === 'calls' && !availability.hasTwilio && (
+      {activeChannel === 'calls' && !availability.hasVapi && (
         <div className="rounded-[10px] border border-amber-500/20 bg-amber-500/5 px-4 py-3 flex items-center gap-3">
           <Phone className="h-4 w-4 text-amber-400 shrink-0" />
           <div>
             <p className="text-[13px] font-medium text-text-primary">Voice provider not connected</p>
             <p className="text-[12px] text-text-secondary mt-0.5">
-              Connect Twilio to enable voice campaigns.{' '}
-              <Link href="/integrations/twilio" className="underline hover:text-text-primary">
-                Set up Twilio
+              Connect Vapi to enable voice campaigns.{' '}
+              <Link href="/integrations" className="underline hover:text-text-primary">
+                Set up Vapi
               </Link>
             </p>
           </div>
@@ -124,6 +124,7 @@ export default async function CampaignsPage({ searchParams }: PageProps) {
           <NewCampaignDialog
             assistants={[]}
             hasTwilio={availability.hasTwilio}
+            hasVapi={availability.hasVapi}
             hasResend={availability.hasResend}
             hasWhatsApp={availability.hasWhatsApp}
             defaultChannel={activeChannel ?? undefined}

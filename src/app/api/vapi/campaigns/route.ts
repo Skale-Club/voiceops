@@ -12,6 +12,7 @@ import { VapiEndOfCallMessageSchema } from '@/types/vapi'
 import { verifyVapiSecret } from '@/lib/vapi/verify-signature'
 import { createServiceRoleClient } from '@/lib/supabase/admin'
 import { persistCallRecord, updateCampaignContactFromReport, getCampaignContactId } from '@/lib/vapi/end-of-call'
+import { buildVapiCallEventPayload, emitVapiCallEndedEvent } from '@/lib/vapi/events'
 import { createLogger } from '@/lib/obs/logger'
 
 export const runtime = 'nodejs'
@@ -66,6 +67,20 @@ export async function POST(request: Request): Promise<Response> {
       const result = await persistCallRecord(message, supabase)
       if (!result.organizationId) {
         obs.warn('vapi_no_assistant_mapping', { assistantId: message.call?.assistantId })
+        return
+      }
+
+      // Same gate as /api/vapi/calls: only the route that actually won the
+      // insert emits, so a report reaching both routes fires workflows once.
+      if (result.inserted && result.callId) {
+        await emitVapiCallEndedEvent(
+          result.organizationId,
+          buildVapiCallEventPayload(message, {
+            callId: result.callId,
+            phoneNumberId: result.phoneNumberId,
+          }),
+          { supabase },
+        )
       }
     })
 

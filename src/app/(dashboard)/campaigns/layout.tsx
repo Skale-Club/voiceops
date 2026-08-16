@@ -17,6 +17,7 @@ export default async function CampaignsLayout({ children }: { children: React.Re
       nav={
         <CampaignsSubNav
           hasTwilio={availability.hasTwilio}
+          hasVapi={availability.hasVapi}
           hasResend={availability.hasResend}
           hasWhatsApp={availability.hasWhatsApp}
         />

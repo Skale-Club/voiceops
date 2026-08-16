@@ -1279,7 +1279,9 @@ export interface Database {
           id: string
           organization_id: string
           e164: string
+          provider: 'twilio' | 'vapi'
           phone_sid: string | null
+          vapi_phone_number_id: string | null
           friendly_name: string
           capability_sms: boolean
           capability_mms: boolean
@@ -1303,7 +1305,9 @@ export interface Database {
           id?: string
           organization_id: string
           e164: string
+          provider?: 'twilio' | 'vapi'
           phone_sid?: string | null
+          vapi_phone_number_id?: string | null
           friendly_name: string
           capability_sms?: boolean
           capability_mms?: boolean
@@ -1325,7 +1329,9 @@ export interface Database {
         }
         Update: {
           e164?: string
+          provider?: 'twilio' | 'vapi'
           phone_sid?: string | null
+          vapi_phone_number_id?: string | null
           friendly_name?: string
           capability_sms?: boolean
           capability_mms?: boolean
@@ -2173,6 +2179,9 @@ export interface Database {
           recording_url: string | null
           success_evaluation: string | null
           structured_data: Json | null
+          phone_number_id: string | null
+          vapi_phone_number_id: string | null
+          org_number: string | null
           created_at: string
         }
         Insert: {
@@ -2194,10 +2203,20 @@ export interface Database {
           recording_url?: string | null
           success_evaluation?: string | null
           structured_data?: Json | null
+          phone_number_id?: string | null
+          vapi_phone_number_id?: string | null
+          org_number?: string | null
           created_at?: string
         }
         Update: Record<string, never>
         Relationships: [
+          {
+            foreignKeyName: 'calls_phone_number_id_fkey'
+            columns: ['phone_number_id']
+            isOneToOne: false
+            referencedRelation: 'twilio_phone_numbers'
+            referencedColumns: ['id']
+          },
           {
             foreignKeyName: 'calls_organization_id_fkey'
             columns: ['organization_id']
@@ -3756,6 +3775,8 @@ export interface Database {
           cost: number | null
           assistant_id: string | null
           routing_mode: string | null
+          phone_number_id: string | null
+          org_number: string | null
           started_at: string | null
           ended_at: string | null
           created_at: string

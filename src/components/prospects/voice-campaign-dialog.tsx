@@ -56,7 +56,6 @@ export function VoiceCampaignDialog({ selectedRefs, selectedRows, disabled, onDo
   const router = useRouter()
   const [open, setOpen] = React.useState(false)
   const [loadingSetup, setLoadingSetup] = React.useState(false)
-  const [hasTwilio, setHasTwilio] = React.useState(true)
   const [hasVapi, setHasVapi] = React.useState(true)
   const [assistants, setAssistants] = React.useState<VoiceCampaignAssistantOption[]>([])
   const [phoneNumbers, setPhoneNumbers] = React.useState<VapiPhoneNumber[]>([])
@@ -83,7 +82,6 @@ export function VoiceCampaignDialog({ selectedRefs, selectedRows, disabled, onDo
         const setup = await getVoiceCampaignSetup()
         if (cancelled) return
         if (setup.ok) {
-          setHasTwilio(setup.hasTwilio)
           setHasVapi(setup.hasVapi)
           setAssistants(setup.assistants)
         } else {
@@ -112,7 +110,10 @@ export function VoiceCampaignDialog({ selectedRefs, selectedRows, disabled, onDo
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open])
 
-  const blocked = !loadingSetup && (!hasTwilio || !hasVapi)
+  // Vapi places the call itself (lib/campaigns/outbound.ts POSTs api.vapi.ai/call),
+  // so Twilio is never in the path — a customer whose number lives in Vapi has no
+  // Twilio account to connect.
+  const blocked = !loadingSetup && !hasVapi
   const canSubmit = !submitting && !blocked && withPhone > 0 && name.trim().length > 0 && !!assistantId && !!phoneNumberId
 
   async function submit() {
@@ -168,8 +169,7 @@ export function VoiceCampaignDialog({ selectedRefs, selectedRows, disabled, onDo
 
           {blocked && (
             <div className="rounded-[8px] border border-amber-500/40 bg-amber-500/10 p-3 text-[12.5px] text-amber-200">
-              {!hasTwilio && <p>Twilio is not connected. Set up Twilio in Integrations to place calls.</p>}
-              {!hasVapi && <p>Vapi is not connected. Add a Vapi integration to place calls.</p>}
+              <p>Vapi is not connected. Add a Vapi integration to place calls.</p>
             </div>
           )}
 

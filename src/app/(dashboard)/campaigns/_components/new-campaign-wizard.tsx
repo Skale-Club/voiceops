@@ -18,6 +18,7 @@ import type { CampaignChannel } from '@/types/database'
 interface Props {
   assistants: Array<{ id: string; name: string }>
   hasTwilio: boolean
+  hasVapi: boolean
   hasResend: boolean
   hasWhatsApp: boolean
   /** When set, skips step 1 and pre-selects this channel. */
@@ -64,7 +65,7 @@ const CHANNELS: Array<{
   },
 ]
 
-export function NewCampaignWizard({ assistants, hasTwilio, hasResend, hasWhatsApp, defaultChannel, onCancel }: Props) {
+export function NewCampaignWizard({ assistants, hasTwilio, hasVapi, hasResend, hasWhatsApp, defaultChannel, onCancel }: Props) {
   const router = useRouter()
   // Skip step 1 when a channel is pre-selected.
   const [step, setStep] = useState(defaultChannel ? 2 : 1)
@@ -157,14 +158,18 @@ export function NewCampaignWizard({ assistants, hasTwilio, hasResend, hasWhatsAp
   function isChannelGated(c: CampaignChannel): boolean {
     if (c === 'email') return !hasResend
     if (c === 'whatsapp') return !hasWhatsApp
-    if (c === 'calls' || c === 'sms') return !hasTwilio
+    // Voice campaigns are placed through the Vapi API (lib/campaigns/outbound.ts)
+    // and never touch Twilio — a customer whose number lives in Vapi has no
+    // Twilio account at all. SMS is genuinely Twilio-bound.
+    if (c === 'calls') return !hasVapi
+    if (c === 'sms') return !hasTwilio
     return false
   }
 
   function getGatedMessage(c: CampaignChannel): string {
     if (c === 'email') return 'Connect Resend to unlock email campaigns.'
     if (c === 'whatsapp') return 'Connect WhatsApp Official or Zernio to unlock WhatsApp campaigns.'
-    if (c === 'calls') return 'Connect Twilio to unlock voice campaigns.'
+    if (c === 'calls') return 'Connect Vapi to unlock voice campaigns.'
     if (c === 'sms') return 'Connect Twilio to unlock SMS campaigns.'
     return ''
   }

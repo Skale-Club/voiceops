@@ -31,41 +31,102 @@ export type EndOfCallReportMessage = VapiEndOfCallMessage['message']
 // Org resolution
 // ---------------------------------------------------------------------------
 
-/**
- * Resolve org for a Vapi assistant ID.
- *
- * assistant_mappings is checked FIRST: vapi_assistant_id is UNIQUE (global)
- * there, so a hit is always unambiguous. twilio_phone_numbers.vapi_assistant_id
- * has no unique constraint — two numbers (even across orgs, by
- * misconfiguration) could reference the same assistant — so that fallback
- * orders by created_at ascending to make the pick deterministic instead of
- * whatever row order Postgres happens to return.
- */
-export async function resolveOrgForAssistant(
-  assistantId: string | null | undefined,
-  supabase: SupabaseClient<Database>,
-): Promise<string | null> {
-  if (!assistantId) return null
+/** Minimal shape both webhook payloads share for tenant resolution. */
+export interface CallIdentity {
+  assistantId?: string | null
+  /** Vapi's phone-number UUID (call.phoneNumberId), when the call rode a number. */
+  phoneNumberId?: string | null
+}
 
-  const { data: mapping } = await supabase
-    .from('assistant_mappings')
-    .select('organization_id')
-    .eq('vapi_assistant_id', assistantId)
-    .eq('is_active', true)
-    .maybeSingle()
-  if (mapping?.organization_id) return mapping.organization_id
+export interface ResolvedCallOrg {
+  organizationId: string | null
+  /** twilio_phone_numbers.id of the org-side number, when one is registered locally. */
+  phoneNumberId: string | null
+}
+
+/**
+ * Resolve the owning org for a Vapi call, and the local phone-number row it
+ * landed on when there is one.
+ *
+ * Three paths, in order of how unambiguous they are:
+ *
+ *   1. assistant_mappings.vapi_assistant_id — UNIQUE (global), so a hit is
+ *      always unambiguous.
+ *   2. twilio_phone_numbers.vapi_phone_number_id — the Vapi-native path. A
+ *      customer who owns their number in Vapi and only uses Vapi as the
+ *      answering bot may never register the assistant, so the number is the
+ *      only tenant signal we get.
+ *   3. twilio_phone_numbers.vapi_assistant_id — legacy fallback. No unique
+ *      constraint there, so two numbers (even across orgs, by
+ *      misconfiguration) could reference the same assistant; ordering by
+ *      created_at makes the pick deterministic instead of whatever row order
+ *      Postgres happens to return.
+ *
+ * Path 1 wins on org, but we still run path 2 to recover the number, so a call
+ * on a mapped assistant is attributed to its number too.
+ */
+export async function resolveOrgForCall(
+  identity: CallIdentity,
+  supabase: SupabaseClient<Database>,
+): Promise<ResolvedCallOrg> {
+  const assistantId = identity.assistantId ?? null
+  const vapiNumberId = identity.phoneNumberId ?? null
+
+  // Look up both signals concurrently — they're independent, and we want the
+  // number row regardless of which one ends up deciding the org.
+  const [mappingResult, numberResult] = await Promise.all([
+    assistantId
+      ? supabase
+          .from('assistant_mappings')
+          .select('organization_id')
+          .eq('vapi_assistant_id', assistantId)
+          .eq('is_active', true)
+          .maybeSingle()
+      : Promise.resolve({ data: null }),
+    vapiNumberId
+      ? supabase
+          .from('twilio_phone_numbers')
+          .select('id, organization_id')
+          .eq('vapi_phone_number_id', vapiNumberId)
+          .eq('is_active', true)
+          .order('created_at', { ascending: true })
+          .limit(1)
+          .maybeSingle()
+      : Promise.resolve({ data: null }),
+  ])
+
+  const numberRow = numberResult.data as { id: string; organization_id: string } | null
+
+  const orgFromMapping = (mappingResult.data as { organization_id: string } | null)?.organization_id
+  if (orgFromMapping) {
+    // Only trust the number row if it belongs to the same tenant — a mismatch
+    // means a misconfiguration, and silently attributing the call to another
+    // org's number would leak across tenants.
+    return {
+      organizationId: orgFromMapping,
+      phoneNumberId: numberRow?.organization_id === orgFromMapping ? numberRow.id : null,
+    }
+  }
+
+  if (numberRow) {
+    return { organizationId: numberRow.organization_id, phoneNumberId: numberRow.id }
+  }
+
+  if (!assistantId) return { organizationId: null, phoneNumberId: null }
 
   const { data: phoneRow } = await supabase
     .from('twilio_phone_numbers')
-    .select('organization_id')
+    .select('id, organization_id')
     .eq('vapi_assistant_id', assistantId)
     .eq('is_active', true)
     .order('created_at', { ascending: true })
     .limit(1)
     .maybeSingle()
 
-  return phoneRow?.organization_id ?? null
+  if (!phoneRow) return { organizationId: null, phoneNumberId: null }
+  return { organizationId: phoneRow.organization_id, phoneNumberId: phoneRow.id }
 }
+
 
 // ---------------------------------------------------------------------------
 // Call persistence
@@ -77,6 +138,10 @@ export interface PersistCallRecordResult {
   /** true when a new `calls` row was written (false on missing org, dup, or DB error). */
   inserted: boolean
   endedReason: string | null
+  /** `calls.id` of the freshly inserted row — null unless `inserted` is true. */
+  callId: string | null
+  /** twilio_phone_numbers.id the call landed on, when registered locally. */
+  phoneNumberId: string | null
 }
 
 export async function persistCallRecord(
@@ -88,13 +153,33 @@ export async function persistCallRecord(
   const vapiCallId = call?.id ?? null
   if (!vapiCallId) {
     obs.warn('vapi_missing_call_id')
-    return { organizationId: null, vapiCallId: null, inserted: false, endedReason: endedReason ?? null }
+    return {
+      organizationId: null,
+      vapiCallId: null,
+      inserted: false,
+      endedReason: endedReason ?? null,
+      callId: null,
+      phoneNumberId: null,
+    }
   }
 
-  const organizationId = await resolveOrgForAssistant(call?.assistantId, supabase)
+  const { organizationId, phoneNumberId } = await resolveOrgForCall(
+    { assistantId: call?.assistantId, phoneNumberId: call?.phoneNumberId },
+    supabase,
+  )
   if (!organizationId) {
-    obs.warn('vapi_no_assistant_mapping', { assistantId: call?.assistantId })
-    return { organizationId: null, vapiCallId, inserted: false, endedReason: endedReason ?? null }
+    obs.warn('vapi_no_assistant_mapping', {
+      assistantId: call?.assistantId,
+      vapiPhoneNumberId: call?.phoneNumberId,
+    })
+    return {
+      organizationId: null,
+      vapiCallId,
+      inserted: false,
+      endedReason: endedReason ?? null,
+      callId: null,
+      phoneNumberId: null,
+    }
   }
 
   const recordingUrl = artifact?.recordingUrl ?? artifact?.stereoRecordingUrl ?? null
@@ -103,9 +188,12 @@ export async function persistCallRecord(
       ? null
       : String(analysis.successEvaluation)
 
-  const { error } = await supabase.from('calls').insert({
+  const { data: insertedRow, error } = await supabase.from('calls').insert({
     organization_id: organizationId,
     vapi_call_id: vapiCallId,
+    phone_number_id: phoneNumberId,
+    vapi_phone_number_id: call?.phoneNumberId ?? null,
+    org_number: call?.phoneNumber?.number ?? null,
     assistant_id: call?.assistantId ?? null,
     call_type: call?.type ?? null,
     status: call?.status ?? null,
@@ -122,6 +210,11 @@ export async function persistCallRecord(
     success_evaluation: successEvaluation,
     structured_data: (analysis?.structuredData ?? null) as Json,
   })
+    // The row id is what the workflow emitter records as event_dispatches.source_id.
+    // On the duplicate path the insert errors and data comes back null, which is
+    // exactly the signal that keeps a Vapi retry from re-firing workflows.
+    .select('id')
+    .maybeSingle()
 
   let inserted = true
   if (error) {
@@ -150,7 +243,14 @@ export async function persistCallRecord(
     })
   }
 
-  return { organizationId, vapiCallId, inserted, endedReason: endedReason ?? null }
+  return {
+    organizationId,
+    vapiCallId,
+    inserted,
+    endedReason: endedReason ?? null,
+    callId: inserted ? ((insertedRow as { id: string } | null)?.id ?? null) : null,
+    phoneNumberId,
+  }
 }
 
 // ---------------------------------------------------------------------------

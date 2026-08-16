@@ -25,6 +25,8 @@ import {
   type TwilioRemoteNumber,
 } from '@/lib/phone-numbers/import'
 import { configureTwilioSmsWebhook, configureTwilioVoiceWebhook } from '@/lib/twilio/configure-number'
+import { getVapiApiKey } from '@/lib/vapi/client'
+import { syncVapiPhoneNumbers } from '@/lib/vapi/sync-phone-numbers'
 
 export type TwilioPhoneNumberRow =
   Database['public']['Tables']['twilio_phone_numbers']['Row']
@@ -35,9 +37,14 @@ const E164_REGEX = /^\+[1-9]\d{6,14}$/
 const PHONE_SID_REGEX = /^PN[a-f0-9]{32}$/i
 
 const RoutingMode = z.enum(['browser', 'sip', 'forward'])
+const Provider = z.enum(['twilio', 'vapi'])
 
 const BaseShape = z.object({
   e164: z.string().regex(E164_REGEX, 'Invalid E.164 format (e.g. +14155551234).'),
+  // 'vapi' rows describe a number the customer owns inside Vapi, with no Twilio
+  // account behind it: no phone_sid, no webhook sync, voice only.
+  provider: Provider.default('twilio'),
+  vapi_phone_number_id: z.string().trim().max(128).optional().or(z.literal('')),
   phone_sid: z
     .string()
     .regex(PHONE_SID_REGEX, 'Phone SID must look like PN followed by 32 hex chars.')
@@ -65,11 +72,26 @@ const BaseShape = z.object({
 })
 
 function refineCapabilitiesAndForward(data: z.infer<typeof BaseShape>, ctx: z.RefinementCtx) {
-  if (!data.capability_sms && !data.capability_mms && !data.capability_voice) {
+  // Vapi numbers are voice-only by construction — Vapi has no SMS/MMS product —
+  // so the capability picker isn't shown for them and the "pick at least one"
+  // rule would be an unanswerable error. createTwilioNumber forces voice=true.
+  if (
+    data.provider !== 'vapi' &&
+    !data.capability_sms &&
+    !data.capability_mms &&
+    !data.capability_voice
+  ) {
     ctx.addIssue({
       code: 'custom',
       message: 'Enable at least one capability (SMS, MMS, or Voice).',
       path: ['capability_sms'],
+    })
+  }
+  if (data.provider === 'vapi' && !data.vapi_phone_number_id) {
+    ctx.addIssue({
+      code: 'custom',
+      message: 'A Vapi number requires its Vapi phone-number ID.',
+      path: ['vapi_phone_number_id'],
     })
   }
   if (data.default_routing_mode === 'forward' && !data.forward_to_number) {
@@ -86,9 +108,10 @@ const CreateNumberSchema = BaseShape.superRefine(refineCapabilitiesAndForward)
 const UpdateNumberSchema = BaseShape.partial().superRefine((data, ctx) => {
   // Only apply combined refinements when the relevant fields are present.
   if (
-    data.capability_sms !== undefined ||
-    data.capability_mms !== undefined ||
-    data.capability_voice !== undefined
+    data.provider !== 'vapi' &&
+    (data.capability_sms !== undefined ||
+      data.capability_mms !== undefined ||
+      data.capability_voice !== undefined)
   ) {
     const sms = data.capability_sms ?? false
     const mms = data.capability_mms ?? false
@@ -270,12 +293,15 @@ export async function resyncTwilioNumberWebhooks(id: string): Promise<{ error?: 
 
   const { data: row, error } = await supabase
     .from('twilio_phone_numbers')
-    .select('phone_sid, capability_sms, capability_voice, organization_id')
+    .select('provider, phone_sid, capability_sms, capability_voice, organization_id')
     .eq('id', id)
     .maybeSingle()
 
   if (error) return { error: error.message }
   if (!row) return { error: 'Phone number not found.' }
+  if (row.provider === 'vapi') {
+    return { error: 'Vapi numbers have no Twilio webhooks — Vapi delivers the call itself.' }
+  }
   if (!row.phone_sid) {
     return { error: 'No Twilio Phone SID on this number. Re-import it from Twilio first.' }
   }
@@ -355,6 +381,36 @@ export async function listIncomingTwilioNumbers(): Promise<{
   return { data: parseTwilioIncomingNumbers(payload, localRefs) }
 }
 
+/**
+ * Register the org's Vapi phone numbers locally so they can be attributed,
+ * labelled and used as workflow triggers. Idempotent: numbers already present
+ * are skipped, so local edits survive a re-run.
+ */
+export async function importVapiNumbers(): Promise<{
+  imported?: number
+  existing?: number
+  skipped?: number
+  error?: string
+}> {
+  const user = await getUser()
+  if (!user) return { error: 'Not authenticated.' }
+
+  const apiKey = await getVapiApiKey()
+  if (!apiKey) {
+    return { error: 'Vapi is not connected for this org. Connect it in Integrations first.' }
+  }
+
+  const supabase = await createClient()
+  const { data: orgId } = await supabase.rpc('get_current_org_id')
+  if (!orgId) return { error: 'No active organization.' }
+
+  const result = await syncVapiPhoneNumbers(supabase, orgId as string, apiKey)
+  if (!result.ok) return { error: result.error }
+
+  revalidateAll()
+  return { imported: result.imported, existing: result.existing, skipped: result.skipped }
+}
+
 export async function listTwilioNumbers(): Promise<TwilioPhoneNumberRow[]> {
   const user = await getUser()
   if (!user) return []
@@ -383,6 +439,8 @@ export async function createTwilioNumber(
   }
   const body = parsed.data
 
+  const isVapi = body.provider === 'vapi'
+
   const supabase = await createClient()
   const { data: orgId } = await supabase.rpc('get_current_org_id')
   if (!orgId) return { error: 'No active organization.' }
@@ -402,11 +460,13 @@ export async function createTwilioNumber(
     .insert({
       organization_id: orgId,
       e164: body.e164,
-      phone_sid: nullableString(body.phone_sid),
+      provider: body.provider,
+      vapi_phone_number_id: isVapi ? nullableString(body.vapi_phone_number_id) : null,
+      phone_sid: isVapi ? null : nullableString(body.phone_sid),
       friendly_name: body.friendly_name,
-      capability_sms: body.capability_sms,
-      capability_mms: body.capability_mms,
-      capability_voice: body.capability_voice,
+      capability_sms: isVapi ? false : body.capability_sms,
+      capability_mms: isVapi ? false : body.capability_mms,
+      capability_voice: isVapi ? true : body.capability_voice,
       default_routing_mode: body.default_routing_mode ?? null,
       forward_to_number: nullableString(body.forward_to_number),
       is_default: body.is_default,
@@ -424,6 +484,9 @@ export async function createTwilioNumber(
   if (error) {
     if (error.code === '23505' && error.message.includes('e164')) {
       return { error: `A number with E.164 ${body.e164} already exists.` }
+    }
+    if (error.code === '23505' && error.message.includes('vapi_number')) {
+      return { error: 'That Vapi number is already registered for this org.' }
     }
     return { error: error.message }
   }
@@ -469,6 +532,9 @@ export async function updateTwilioNumber(
 
   const patch: Record<string, unknown> = {}
   if (body.e164 !== undefined) patch.e164 = body.e164
+  // provider and vapi_phone_number_id are set at import time and identify the
+  // number — changing them would silently repoint an existing row (and its call
+  // history) at a different number, so they aren't editable here.
   if (body.phone_sid !== undefined) patch.phone_sid = nullableString(body.phone_sid)
   if (body.friendly_name !== undefined) patch.friendly_name = body.friendly_name
   if (body.capability_sms !== undefined) patch.capability_sms = body.capability_sms

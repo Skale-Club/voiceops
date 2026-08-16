@@ -9,10 +9,13 @@ import type { Database } from '@/types/database'
 export interface PhoneScopePhone {
   id: string | null
   e164: string | null
+  provider: string | null
   friendly_name: string | null
   inbox_label: string | null
   business_purpose: string | null
   vapi_assistant_id: string | null
+  /** Transfer/forward target. For Vapi numbers this is the human hand-off number. */
+  forward_to_number: string | null
   responsible_user_id: string | null
   is_default: boolean
   capability_sms: boolean
@@ -30,10 +33,12 @@ export interface ContactScopeMinimal {
 const NULL_PHONE: PhoneScopePhone = {
   id: null,
   e164: null,
+  provider: null,
   friendly_name: null,
   inbox_label: null,
   business_purpose: null,
   vapi_assistant_id: null,
+  forward_to_number: null,
   responsible_user_id: null,
   is_default: false,
   capability_sms: false,
@@ -56,7 +61,7 @@ export async function buildPhoneScope(
 
   const { data } = await supabase
     .from('twilio_phone_numbers')
-    .select('id,e164,friendly_name,inbox_label,business_purpose,vapi_assistant_id,responsible_user_id,is_default,capability_sms,capability_voice,capability_mms')
+    .select('id,e164,provider,friendly_name,inbox_label,business_purpose,vapi_assistant_id,forward_to_number,responsible_user_id,is_default,capability_sms,capability_voice,capability_mms')
     .eq('id', phoneNumberId)
     .maybeSingle()
 
@@ -65,10 +70,12 @@ export async function buildPhoneScope(
   return {
     id: data.id,
     e164: data.e164,
+    provider: data.provider,
     friendly_name: data.friendly_name,
     inbox_label: data.inbox_label,
     business_purpose: data.business_purpose,
     vapi_assistant_id: data.vapi_assistant_id,
+    forward_to_number: data.forward_to_number,
     responsible_user_id: data.responsible_user_id,
     is_default: data.is_default,
     capability_sms: data.capability_sms,

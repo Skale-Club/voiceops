@@ -22,13 +22,14 @@ async function getSetupData() {
   return {
     assistants,
     hasTwilio: availability.hasTwilio,
+    hasVapi: availability.hasVapi,
     hasResend: availability.hasResend,
     hasWhatsApp: availability.hasWhatsApp,
   }
 }
 
 export default async function NewCampaignPage() {
-  const { assistants, hasTwilio, hasResend, hasWhatsApp } = await getSetupData()
+  const { assistants, hasTwilio, hasVapi, hasResend, hasWhatsApp } = await getSetupData()
 
   return (
     <PageContainer>
@@ -43,6 +44,7 @@ export default async function NewCampaignPage() {
         <NewCampaignWizard
           assistants={assistants}
           hasTwilio={hasTwilio}
+          hasVapi={hasVapi}
           hasResend={hasResend}
           hasWhatsApp={hasWhatsApp}
         />

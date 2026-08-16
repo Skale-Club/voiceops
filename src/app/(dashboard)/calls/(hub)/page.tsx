@@ -234,10 +234,16 @@ function NumbersTab({
   twilioConnected: boolean
   numbers: TwilioPhoneNumberRow[]
 }) {
+  // The two providers get their own section: the Twilio list carries webhook
+  // sync, capabilities and routing modes, none of which apply to a Vapi-native
+  // number where Vapi itself owns the call leg.
+  const twilioNumbers = numbers.filter((n) => n.provider !== 'vapi')
+  const vapiNumbers = numbers.filter((n) => n.provider === 'vapi')
+
   return (
     <>
-      <PhoneNumbersList initial={numbers} twilioConnected={twilioConnected} embedded />
-      <VapiNumbersSection twilioNumbers={numbers} />
+      <PhoneNumbersList initial={twilioNumbers} twilioConnected={twilioConnected} embedded />
+      <VapiNumbersSection numbers={vapiNumbers} twilioNumbers={twilioNumbers} />
     </>
   )
 }

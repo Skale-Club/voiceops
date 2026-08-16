@@ -5,8 +5,14 @@
 // requires HTTP Basic Auth. When Hetzner object storage isn't configured we store
 // the raw Twilio URL in call_logs.recording_url, so the browser player can't fetch
 // it directly (401 Unauthorized). This route streams the audio server-side with the
-// org's Twilio credentials. For recordings already moved to our own storage it just
-// redirects to the stored (public/CDN) URL.
+// org's Twilio credentials.
+//
+// Everything else — Vapi-hosted AI-call recordings, and Twilio recordings already
+// copied to our own object storage — is streamed too rather than redirected. The
+// player (components/calls/call-waveform-player.tsx) runs WaveSurfer on the
+// WebAudio backend, which fetches the URL and decodes it, so a cross-origin
+// redirect only works if the upstream host sends CORS headers. Streaming keeps the
+// response same-origin and makes playback independent of whoever hosts the file.
 //
 // Access is gated by the authenticated Supabase client: the unified_calls lookup is
 // RLS-scoped, so a user can only ever proxy recordings belonging to their org.
@@ -45,32 +51,40 @@ export async function GET(
     return new Response('Recording not found', { status: 404 })
   }
 
-  // Already on our own storage (or any non-Twilio public URL) — hand it straight back.
-  if (!isTwilioMediaUrl(call.recording_url)) {
-    return Response.redirect(call.recording_url, 302)
+  const fromTwilio = isTwilioMediaUrl(call.recording_url)
+
+  // Only Twilio needs credentials — Vapi recording URLs and our own storage URLs
+  // are fetched anonymously.
+  let authHeader: string | null = null
+  if (fromTwilio) {
+    const creds = await resolveTwilioCredentialsForOrg(call.org_id)
+    if (!creds) {
+      return new Response('Twilio credentials unavailable', { status: 502 })
+    }
+    authHeader = `Basic ${btoa(`${creds.accountSid}:${creds.authToken}`)}`
   }
 
-  const creds = await resolveTwilioCredentialsForOrg(call.org_id)
-  if (!creds) {
-    return new Response('Twilio credentials unavailable', { status: 502 })
-  }
-
-  // Ensure we request the playable media (.mp3) rather than the JSON resource.
+  // Twilio's resource URL returns JSON unless an extension is appended; other
+  // hosts already point at the media file, so leave those untouched.
   const mediaUrl =
-    call.recording_url.endsWith('.mp3') || call.recording_url.endsWith('.wav')
-      ? call.recording_url
-      : `${call.recording_url}.mp3`
+    fromTwilio && !/\.(mp3|wav)$/.test(call.recording_url)
+      ? `${call.recording_url}.mp3`
+      : call.recording_url
 
-  const basicAuth = `Basic ${btoa(`${creds.accountSid}:${creds.authToken}`)}`
   const range = request.headers.get('range')
 
-  const upstream = await fetch(mediaUrl, {
-    headers: {
-      Authorization: basicAuth,
-      ...(range ? { Range: range } : {}),
-    },
-    cache: 'no-store',
-  })
+  let upstream: Response
+  try {
+    upstream = await fetch(mediaUrl, {
+      headers: {
+        ...(authHeader ? { Authorization: authHeader } : {}),
+        ...(range ? { Range: range } : {}),
+      },
+      cache: 'no-store',
+    })
+  } catch {
+    return new Response('Failed to fetch recording', { status: 502 })
+  }
 
   if (!upstream.ok && upstream.status !== 206) {
     return new Response('Failed to fetch recording', { status: 502 })

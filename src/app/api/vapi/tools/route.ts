@@ -5,7 +5,7 @@
 
 import { after } from 'next/server'
 import { VapiToolCallMessageSchema, getToolArguments } from '@/types/vapi'
-import { resolveOrgForAssistant } from '@/lib/vapi/end-of-call'
+import { resolveOrgForCall } from '@/lib/vapi/end-of-call'
 import { resolveTool } from '@/lib/action-engine/resolve-tool'
 import { executeAction } from '@/lib/action-engine/execute-action'
 import { logToolRun } from '@/lib/workflows/log-tool-run'
@@ -51,11 +51,14 @@ export async function POST(request: Request): Promise<Response> {
     // 2. Create service-role Supabase client (bypasses RLS | no user JWT in Vapi requests)
     const supabase = createServiceRoleClient()
 
-    // 3. Resolve org from assistant ID | assistant_mappings first (globally unique),
-    // falling back to twilio_phone_numbers (ordered for determinism) — same
-    // resolution used by the end-of-call webhooks so a call and its tool-calls
-    // never disagree on which org owns them.
-    const orgId = await resolveOrgForAssistant(call.assistantId, supabase)
+    // 3. Resolve org from the call's assistant AND number | assistant_mappings
+    // first (globally unique), then the Vapi-native number, then the legacy
+    // per-number assistant override — same resolution used by the end-of-call
+    // webhooks so a call and its tool-calls never disagree on which org owns them.
+    const { organizationId: orgId } = await resolveOrgForCall(
+      { assistantId: call.assistantId, phoneNumberId: call.phoneNumberId },
+      supabase,
+    )
     if (!orgId) {
       return Response.json({
         results: [{ toolCallId: toolCall.id, result: 'Service unavailable.' }]

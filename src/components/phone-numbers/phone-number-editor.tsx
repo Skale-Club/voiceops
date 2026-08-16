@@ -52,6 +52,7 @@ type RoutingMode = 'browser' | 'sip' | 'forward'
 
 export function PhoneNumberEditor({ number, members, onClose }: Props) {
   const router = useRouter()
+  const isVapi = number.provider === 'vapi'
   const [saving, setSaving] = React.useState(false)
   const [actionLoading, setActionLoading] = React.useState<'default' | 'archive' | null>(null)
 
@@ -84,28 +85,41 @@ export function PhoneNumberEditor({ number, members, onClose }: Props) {
   const [forwardTo, setForwardTo] = React.useState(number.forward_to_number ?? '')
 
   const handleSave = React.useCallback(async () => {
-    if (!capVoice && !capSms && !capMms) {
+    // Vapi numbers don't show the capability picker (voice-only by construction)
+    // or the TwiML routing modes, so neither rule applies to them.
+    if (!isVapi && !capVoice && !capSms && !capMms) {
       toast.error('Enable at least one capability (Voice, SMS, or MMS).')
       return
     }
-    if (routingMode === 'forward' && !E164_REGEX.test(forwardTo.trim())) {
+    const trimmedForward = forwardTo.trim()
+    if (isVapi) {
+      if (trimmedForward && !E164_REGEX.test(trimmedForward)) {
+        toast.error('Transfer target must be a valid E.164 number.')
+        return
+      }
+    } else if (routingMode === 'forward' && !E164_REGEX.test(trimmedForward)) {
       toast.error('Forward target must be a valid E.164 number.')
       return
     }
     setSaving(true)
     try {
       const result = await updateTwilioNumber(number.id, {
+        provider: number.provider,
         friendly_name: friendlyName.trim() || number.friendly_name,
         inbox_label: inboxLabel.trim() || '',
         business_purpose: businessPurpose.trim() || '',
         vapi_assistant_id: vapiAssistantId.trim() || '',
         responsible_user_id: responsibleUserId === UNASSIGNED ? null : responsibleUserId,
         notes: notes.trim() || '',
-        capability_voice: capVoice,
-        capability_sms: capSms,
-        capability_mms: capMms,
-        default_routing_mode: routingMode === 'none' ? null : routingMode,
-        forward_to_number: routingMode === 'forward' ? forwardTo.trim() : '',
+        ...(isVapi
+          ? { forward_to_number: trimmedForward }
+          : {
+              capability_voice: capVoice,
+              capability_sms: capSms,
+              capability_mms: capMms,
+              default_routing_mode: routingMode === 'none' ? null : routingMode,
+              forward_to_number: routingMode === 'forward' ? trimmedForward : '',
+            }),
       })
       if (result.error) {
         toast.error(result.error)
@@ -120,6 +134,8 @@ export function PhoneNumberEditor({ number, members, onClose }: Props) {
   }, [
     number.id,
     number.friendly_name,
+    number.provider,
+    isVapi,
     friendlyName,
     inboxLabel,
     businessPurpose,
@@ -273,49 +289,22 @@ export function PhoneNumberEditor({ number, members, onClose }: Props) {
         </div>
       </section>
 
-      {/* Capabilities & routing */}
-      <section className="space-y-4">
-        <header>
-          <h3 className="text-sm font-semibold text-text-primary">Capabilities & routing</h3>
-          <p className="text-[11px] text-text-tertiary">
-            Mark the capabilities enabled on the Twilio side, and how inbound calls to this
-            number are routed by default.
-          </p>
-        </header>
-        <div className="space-y-2">
-          <Label>Capabilities</Label>
-          <div className="flex flex-wrap items-center gap-4">
-            <CapabilityCheckbox label="Voice" checked={capVoice} onChange={setCapVoice} />
-            <CapabilityCheckbox label="SMS" checked={capSms} onChange={setCapSms} />
-            <CapabilityCheckbox label="MMS" checked={capMms} onChange={setCapMms} />
-          </div>
-          <p className="text-[11px] text-text-tertiary">
-            Xphere refuses to send SMS from a number without the SMS capability.
-          </p>
-        </div>
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-          <div className="space-y-1.5">
-            <Label htmlFor="routing_mode">Default routing mode</Label>
-            <Select
-              value={routingMode === 'none' ? ROUTING_NONE : routingMode}
-              onValueChange={(v) =>
-                setRoutingMode(v === ROUTING_NONE ? 'none' : (v as RoutingMode))
-              }
-            >
-              <SelectTrigger id="routing_mode">
-                <SelectValue placeholder="None" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value={ROUTING_NONE}>None | handled per call</SelectItem>
-                <SelectItem value="browser">Browser dialer</SelectItem>
-                <SelectItem value="sip">SIP (Zoiper, softphone)</SelectItem>
-                <SelectItem value="forward">Forward to number</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-          {routingMode === 'forward' && (
+      {/* Capabilities & routing — Twilio only.
+          A Vapi-native number has no Twilio capabilities to mirror, and the
+          routing modes below are all TwiML (browser dialer, SIP, <Dial>), which
+          never runs for a call Vapi answers itself. Vapi numbers get the
+          transfer target instead. */}
+      {isVapi ? (
+        <section className="space-y-4">
+          <header>
+            <h3 className="text-sm font-semibold text-text-primary">Call transfer</h3>
+            <p className="text-[11px] text-text-tertiary">
+              Where the assistant sends the caller when it hands off to a human.
+            </p>
+          </header>
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
             <div className="space-y-1.5">
-              <Label htmlFor="forward_to">Forward to (E.164)</Label>
+              <Label htmlFor="forward_to">Transfer to (E.164)</Label>
               <Input
                 id="forward_to"
                 value={forwardTo}
@@ -324,10 +313,70 @@ export function PhoneNumberEditor({ number, members, onClose }: Props) {
                 className="font-mono text-[12.5px]"
                 autoComplete="off"
               />
+              <p className="text-[11px] text-text-tertiary">
+                Available to workflows as{' '}
+                <code className="font-mono">{'{{phone.forward_to_number}}'}</code>. The assistant&apos;s
+                own transfer destination is still configured in Vapi.
+              </p>
             </div>
-          )}
-        </div>
-      </section>
+          </div>
+        </section>
+      ) : (
+        <section className="space-y-4">
+          <header>
+            <h3 className="text-sm font-semibold text-text-primary">Capabilities & routing</h3>
+            <p className="text-[11px] text-text-tertiary">
+              Mark the capabilities enabled on the Twilio side, and how inbound calls to this
+              number are routed by default.
+            </p>
+          </header>
+          <div className="space-y-2">
+            <Label>Capabilities</Label>
+            <div className="flex flex-wrap items-center gap-4">
+              <CapabilityCheckbox label="Voice" checked={capVoice} onChange={setCapVoice} />
+              <CapabilityCheckbox label="SMS" checked={capSms} onChange={setCapSms} />
+              <CapabilityCheckbox label="MMS" checked={capMms} onChange={setCapMms} />
+            </div>
+            <p className="text-[11px] text-text-tertiary">
+              Xphere refuses to send SMS from a number without the SMS capability.
+            </p>
+          </div>
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+            <div className="space-y-1.5">
+              <Label htmlFor="routing_mode">Default routing mode</Label>
+              <Select
+                value={routingMode === 'none' ? ROUTING_NONE : routingMode}
+                onValueChange={(v) =>
+                  setRoutingMode(v === ROUTING_NONE ? 'none' : (v as RoutingMode))
+                }
+              >
+                <SelectTrigger id="routing_mode">
+                  <SelectValue placeholder="None" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={ROUTING_NONE}>None | handled per call</SelectItem>
+                  <SelectItem value="browser">Browser dialer</SelectItem>
+                  <SelectItem value="sip">SIP (Zoiper, softphone)</SelectItem>
+                  <SelectItem value="forward">Forward to number</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            {routingMode === 'forward' && (
+              <div className="space-y-1.5">
+                <Label htmlFor="forward_to">Forward to (E.164)</Label>
+                <Input
+                  id="forward_to"
+                  value={forwardTo}
+                  onChange={(e) => setForwardTo(e.target.value)}
+                  placeholder="+14155557890"
+                  className="font-mono text-[12.5px]"
+                  autoComplete="off"
+                />
+              </div>
+            )}
+          </div>
+        </section>
+      )}
 
       {/* Assistant & ownership */}
       <section className="space-y-4">

@@ -18,6 +18,7 @@ import type { CampaignChannel } from '@/types/database'
 interface NewCampaignDialogProps {
   assistants: Array<{ id: string; name: string }>
   hasTwilio: boolean
+  hasVapi: boolean
   hasResend: boolean
   hasWhatsApp: boolean
   /** When set, skips step 1 (channel selection) and pre-selects this channel. */
@@ -31,6 +32,7 @@ interface NewCampaignDialogProps {
 export function NewCampaignDialog({
   assistants,
   hasTwilio,
+  hasVapi,
   hasResend,
   hasWhatsApp,
   defaultChannel,
@@ -57,6 +59,7 @@ export function NewCampaignDialog({
         <NewCampaignWizard
           assistants={assistants}
           hasTwilio={hasTwilio}
+          hasVapi={hasVapi}
           hasResend={hasResend}
           hasWhatsApp={hasWhatsApp}
           defaultChannel={defaultChannel}

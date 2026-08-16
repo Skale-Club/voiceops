@@ -30,6 +30,13 @@ export const VapiToolCallMessageSchema = z.object({
         number: z.string().optional(),
         name: z.string().optional(),
       }).passthrough().optional(),
+      // The org-side number the call landed on. Vapi has always sent these; they
+      // were dropped by passthrough() until Vapi-native numbers needed them to
+      // resolve the tenant when the assistant isn't mapped.
+      phoneNumberId: z.string().optional(),
+      phoneNumber: z.object({
+        number: z.string().optional(),
+      }).passthrough().optional(),
     }).passthrough(),            // allow additional Vapi fields without validation failure
     toolCallList: z.array(VapiToolCallSchema),
   }),
@@ -81,6 +88,11 @@ export const VapiEndOfCallMessageSchema = z.object({
         number: z.string().optional(),
         name: z.string().optional(),
       }).optional(),
+      // See VapiToolCallMessageSchema — same fields, same reason.
+      phoneNumberId: z.string().optional(),
+      phoneNumber: z.object({
+        number: z.string().optional(),
+      }).passthrough().optional(),
     }).passthrough().optional(),
     artifact: z.object({
       transcript: z.string().optional(),

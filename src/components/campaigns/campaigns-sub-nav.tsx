@@ -11,6 +11,7 @@ import type { CampaignChannel } from '@/types/database'
 interface Props {
   hasTwilio: boolean
   hasResend: boolean
+  hasVapi: boolean
   hasWhatsApp: boolean
 }
 
@@ -26,7 +27,7 @@ const ALL_CHANNELS: Array<{
   { value: 'whatsapp', label: 'WhatsApp',  icon: MessageCircle },
 ]
 
-export function CampaignsSubNav({ hasTwilio, hasResend, hasWhatsApp }: Props) {
+export function CampaignsSubNav({ hasTwilio, hasVapi, hasResend, hasWhatsApp }: Props) {
   const searchParams = useSearchParams()
   const { onNavigate } = useSubSidebar()
   const activeChannel = searchParams.get('channel') as CampaignChannel | null
@@ -46,6 +47,7 @@ export function CampaignsSubNav({ hasTwilio, hasResend, hasWhatsApp }: Props) {
         <NewCampaignDialog
           defaultChannel={activeChannel ?? undefined}
           hasTwilio={hasTwilio}
+          hasVapi={hasVapi}
           hasResend={hasResend}
           hasWhatsApp={hasWhatsApp}
           assistants={[]}

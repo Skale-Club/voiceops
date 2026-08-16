@@ -85,10 +85,12 @@ describe('buildPhoneScope', () => {
     expect(scope).toEqual({
       id: null,
       e164: null,
+      provider: null,
       friendly_name: null,
       inbox_label: null,
       business_purpose: null,
       vapi_assistant_id: null,
+      forward_to_number: null,
       responsible_user_id: null,
       is_default: false,
       capability_sms: false,

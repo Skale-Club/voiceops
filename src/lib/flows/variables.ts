@@ -78,6 +78,24 @@ const PHONE_GROUP: VariableGroup = {
     v('phone.e164', 'Phone number'),
     v('phone.friendly_name', 'Friendly name'),
     v('phone.inbox_label', 'Inbox label'),
+    v('phone.business_purpose', 'Business purpose'),
+    v('phone.forward_to_number', 'Transfer target'),
+  ],
+}
+
+const CALL_GROUP: VariableGroup = {
+  label: 'Call',
+  items: [
+    v('call.direction', 'Direction'),
+    v('call.duration_seconds', 'Duration (seconds)'),
+    v('call.ended_reason', 'Ended reason'),
+    v('call.success_evaluation', 'Outcome'),
+    v('call.summary', 'Summary'),
+    v('call.recording_url', 'Recording URL'),
+    v('call.customer_number', 'Caller number'),
+    v('call.customer_name', 'Caller name'),
+    v('call.org_number', 'Number called'),
+    v('call.external_id', 'Vapi call ID'),
   ],
 }
 
@@ -108,9 +126,14 @@ export function variablesForTrigger(eventType: string | undefined): VariableGrou
     return [PHONE_GROUP, CONTACT_GROUP, TRIGGER_GROUP]
   }
 
+  // Vapi calls expose the call itself plus the number it landed on — the number
+  // scope is only populated when that number was imported locally.
+  if (e === 'vapi.call.ended') {
+    return [CALL_GROUP, PHONE_GROUP, CONTACT_GROUP, TRIGGER_GROUP]
+  }
+
   // Channel-message triggers carry a linked contact when one is resolved.
   if (
-    e === 'vapi.call.ended' ||
     e === 'manychat.inbound' ||
     e === 'meta.message.received' ||
     e === 'chat.message.received'
