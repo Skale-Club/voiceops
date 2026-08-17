@@ -5,7 +5,7 @@ import { headers } from 'next/headers'
 import { createClient, getUser } from '@/lib/supabase/server'
 import { createServiceRoleClient } from '@/lib/supabase/admin'
 import { revalidatePath } from 'next/cache'
-import { addMinutes, startOfDay, endOfDay, addDays } from 'date-fns'
+import { addMinutes } from 'date-fns'
 import { fromZonedTime } from 'date-fns-tz'
 import { generateSlots, generateSlotsWithReasons, type DebugTimeSlot } from '@/lib/calendar/slots'
 import { lookBusyConfigFor } from '@/lib/calendar/look-busy'
@@ -254,7 +254,8 @@ export async function cancelBooking(id: string): Promise<ActionResult<void>> {
   if (!result.ok) return { ok: false, error: result.error ?? 'cancel_failed' }
 
   revalidatePath('/calendar/bookings')
-  void sendCancellationEmailForBooking(id).catch(() => {})
+  // orgId already resolved above via get_current_org_id() — no extra round trip.
+  void sendCancellationEmailForBooking(id, orgId).catch(() => {})
 
   return { ok: true, data: undefined }
 }
@@ -262,7 +263,10 @@ export async function cancelBooking(id: string): Promise<ActionResult<void>> {
 // Shared helper for cancellation paths. Looks up the booking + event type
 // + calendar profile + host name, then queues the cancellation email.
 // Never throws | caller wraps with .catch already.
-async function sendCancellationEmailForBooking(bookingId: string): Promise<void> {
+//
+// orgId is optional and passed in by the caller (never re-fetched here) —
+// both callers already have it in scope from a query they were doing anyway.
+async function sendCancellationEmailForBooking(bookingId: string, orgId?: string): Promise<void> {
   try {
     const svc = createServiceRoleClient()
 
@@ -300,6 +304,7 @@ async function sendCancellationEmailForBooking(bookingId: string): Promise<void>
       startAt: b.start_at,
       timezone: b.booker_timezone,
       rebookUrl,
+      orgId,
     })
   } catch (err) {
     console.warn(
@@ -719,6 +724,11 @@ export async function createBooking(
       .eq('id', booking.id)
       .maybeSingle()
 
+    // This is the public, unauthenticated booking flow — there is no
+    // dashboard session, so get_current_org_id() would not resolve here.
+    // et.org_id (the event type's owning org) is already in scope from
+    // resolveAndValidateSlot() above — no extra round trip needed, and it's
+    // the correct org for this booking regardless of session.
     await sendBookingConfirmation({
       bookerEmail: parsed.data.booker_email,
       bookerName: parsed.data.booker_name,
@@ -732,6 +742,7 @@ export async function createBooking(
       meetingUrl: freshBooking?.meeting_url ?? undefined,
       meetingPhone: freshBooking?.meeting_phone ?? undefined,
       locationAddress: et.location_value ?? undefined,
+      orgId: et.org_id,
     })
   })().catch(() => {})
 
@@ -956,6 +967,9 @@ export async function createBookingInternal(
         .select('meeting_url, meeting_phone, location_data')
         .eq('id', booking.id)
         .maybeSingle()
+      // Dashboard operator flow. et.org_id was already validated above
+      // against the active org (get_current_org_id()) — use it directly
+      // rather than re-resolving, per the file's existing pattern.
       await sendBookingConfirmation({
         bookerEmail: email,
         bookerName: parsed.data.booker_name,
@@ -969,6 +983,7 @@ export async function createBookingInternal(
         meetingUrl: freshBooking?.meeting_url ?? undefined,
         meetingPhone: freshBooking?.meeting_phone ?? undefined,
         locationAddress: et.location_value ?? undefined,
+        orgId: et.org_id,
       })
     })().catch(() => {})
   }
@@ -1010,7 +1025,11 @@ export async function cancelBookingByToken(
   const result = await transitionCancelBooking({ supabase, depth: 0 }, bookingId, data.org_id)
   if (!result.ok) return { ok: false, error: 'not_found_or_already_cancelled' }
 
-  void sendCancellationEmailForBooking(bookingId).catch(() => {})
+  // data.org_id came from the token-verification query above — no extra
+  // round trip. This path is unauthenticated (public booker via cancel
+  // link), so get_current_org_id() would not resolve anything here; the
+  // booking's own org_id is the correct value regardless.
+  void sendCancellationEmailForBooking(bookingId, data.org_id).catch(() => {})
 
   return { ok: true, data: undefined }
 }

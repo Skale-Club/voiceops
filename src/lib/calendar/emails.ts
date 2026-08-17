@@ -3,37 +3,39 @@
 //
 // Contract:
 //   - Fire-and-forget. Never throws. Callers do not need try/catch.
-//   - If RESEND_API_KEY is missing, the helpers log a warning and no-op.
-//     Booking flow continues unchanged.
-//   - Resend is the provider (installed in this phase). If you later swap
-//     providers, keep this contract.
+//   - Tenant-aware: when `orgId` is passed, the email is sent through
+//     sendTenantEmail() (src/lib/email/resend.ts) using the org's own
+//     connected Resend integration — same multi-tenant model as every other
+//     outbound email in the app. Sent with kind: 'transactional' — booking
+//     confirmations/cancellations are not marketing, must never be
+//     suppressed by the org's unsubscribe list, and never get the marketing
+//     compliance footer. source: 'calendar' tags the email_sends row.
+//   - Falls back to sendPlatformEmail() (src/lib/email/resend.ts), which
+//     reads the platform's own connected Resend integration from
+//     platform_email_settings, when `orgId` is omitted, or when the tenant
+//     send fails because the org has no connected email integration.
+//   - If neither path is configured (no orgId + no platform integration, or
+//     a tenant send failure with no platform integration to fall back to),
+//     sendPlatformEmail logs a warning and no-ops. Booking flow continues
+//     unchanged either way — a booking must never fail because an email
+//     could not be sent.
 //
 // Templates are inline HTML to avoid a template engine dependency. Dark
 // theme matches the booking page (#08090A bg, #FAFAFA text, indigo accent).
 
 import { format } from 'date-fns'
 import { toZonedTime } from 'date-fns-tz'
-import { Resend } from 'resend'
 import { meetingLocationLabel, resolveMeetingLocation } from '@/lib/calendar/location-resolver'
 import type { LocationKind } from '@/lib/calendar/location-resolver'
+import { sendTenantEmail, sendPlatformEmail, type EmailAttachment } from '@/lib/email/resend'
 
-const RESEND_FROM = process.env.RESEND_FROM ?? 'Xphere Scheduling <bookings@xphere.app>'
-
-let _client: Resend | null | undefined = undefined
-
-// Lazily resolve the Resend client. Returns null when RESEND_API_KEY is
-// missing | callers should treat that as a soft no-op (logged warning).
-function getResend(): Resend | null {
-  if (_client !== undefined) return _client
-  const key = process.env.RESEND_API_KEY
-  if (!key) {
-    console.warn('[calendar/emails] RESEND_API_KEY not set; email notifications disabled')
-    _client = null
-    return null
-  }
-  _client = new Resend(key)
-  return _client
-}
+// Organizer address for the .ics ORGANIZER line when neither `params.hostEmail`
+// nor a tenant/platform "from" address is available at generateIcs() call time
+// (it runs before the send call, so it can't know which path — or which org's
+// from-address — will end up handling the send). Not a real mailbox; RFC 5545
+// only requires ORGANIZER to be a syntactically valid mailto: URI, and
+// calendar clients display CN (organizerName) rather than this address.
+const ICS_ORGANIZER_FALLBACK = 'bookings@xphere.app'
 
 function formatStart(startAt: Date | string, timezone: string): string {
   const start = typeof startAt === 'string' ? new Date(startAt) : startAt
@@ -151,15 +153,16 @@ export interface BookingConfirmationParams {
   meetingUrl?: string
   meetingPhone?: string
   locationAddress?: string
+  // Org that owns this booking. When present, sent via sendTenantEmail()
+  // using the org's connected Resend integration. Omit when no org id is
+  // resolvable at the call site (falls back to the platform Resend client).
+  orgId?: string
 }
 
 export async function sendBookingConfirmation(
   params: BookingConfirmationParams,
 ): Promise<void> {
   try {
-    const client = getResend()
-    if (!client) return
-
     const subject = `Booking confirmed: ${params.eventTitle} with ${params.hostName}`
     const when = formatStart(params.startAt, params.timezone)
 
@@ -276,22 +279,42 @@ export async function sendBookingConfirmation(
       description: `Booked via Xphere Scheduling. Cancel: ${params.cancelUrl}`,
       location: icsLocation,
       url: icsUrl,
-      organizerEmail: params.hostEmail ?? RESEND_FROM.replace(/.*<(.+)>.*/, '$1'),
+      organizerEmail: params.hostEmail ?? ICS_ORGANIZER_FALLBACK,
       organizerName: params.hostName,
       attendeeEmail: params.bookerEmail,
     })
 
-    await client.emails.send({
-      from: RESEND_FROM,
-      to: [params.bookerEmail],
-      subject,
-      html,
-      attachments: [
-        {
-          filename: 'invite.ics',
-          content: Buffer.from(icsContent, 'utf-8').toString('base64'),
-        },
-      ],
+    const icsAttachment: EmailAttachment = {
+      filename: 'invite.ics',
+      content: Buffer.from(icsContent, 'utf-8').toString('base64'),
+    }
+
+    // Tenant path: send through the org's own connected Resend integration.
+    // Transactional — never suppressed by the marketing unsubscribe list,
+    // never gets the compliance footer.
+    if (params.orgId) {
+      const result = await sendTenantEmail(
+        params.orgId,
+        params.bookerEmail,
+        subject,
+        html,
+        undefined,
+        { kind: 'transactional', source: 'calendar', attachments: [icsAttachment] },
+      )
+      if (!result.error) return
+      console.warn(
+        `[calendar/emails] tenant send failed for org ${params.orgId}, falling back to platform Resend:`,
+        result.error,
+      )
+    }
+
+    // Fallback: platform-level Resend integration (platform_email_settings).
+    // sendPlatformEmail() never throws and logs its own email_sends row on
+    // every outcome, including a no-op when the platform has no connected
+    // integration — nothing further to do here on failure.
+    await sendPlatformEmail(params.bookerEmail, subject, html, undefined, {
+      source: 'calendar',
+      attachments: [icsAttachment],
     })
   } catch (err) {
     console.warn(
@@ -313,15 +336,16 @@ export interface BookingCancellationParams {
   startAt: Date | string
   timezone: string
   rebookUrl: string
+  // Org that owns this booking. When present, sent via sendTenantEmail()
+  // using the org's connected Resend integration. Omit when no org id is
+  // resolvable at the call site (falls back to the platform Resend client).
+  orgId?: string
 }
 
 export async function sendBookingCancellation(
   params: BookingCancellationParams,
 ): Promise<void> {
   try {
-    const client = getResend()
-    if (!client) return
-
     const subject = `Booking cancelled: ${params.eventTitle} with ${params.hostName}`
     const when = formatStart(params.startAt, params.timezone)
 
@@ -346,11 +370,31 @@ export async function sendBookingCancellation(
   </div>
 </body></html>`
 
-    await client.emails.send({
-      from: RESEND_FROM,
-      to: [params.bookerEmail],
-      subject,
-      html,
+    // Tenant path: send through the org's own connected Resend integration.
+    // Transactional — never suppressed by the marketing unsubscribe list,
+    // never gets the compliance footer. No attachment on cancellations.
+    if (params.orgId) {
+      const result = await sendTenantEmail(
+        params.orgId,
+        params.bookerEmail,
+        subject,
+        html,
+        undefined,
+        { kind: 'transactional', source: 'calendar' },
+      )
+      if (!result.error) return
+      console.warn(
+        `[calendar/emails] tenant send failed for org ${params.orgId}, falling back to platform Resend:`,
+        result.error,
+      )
+    }
+
+    // Fallback: platform-level Resend integration (platform_email_settings).
+    // No attachment on cancellations. sendPlatformEmail() never throws and
+    // logs its own email_sends row on every outcome, including a no-op when
+    // the platform has no connected integration.
+    await sendPlatformEmail(params.bookerEmail, subject, html, undefined, {
+      source: 'calendar',
     })
   } catch (err) {
     console.warn(
