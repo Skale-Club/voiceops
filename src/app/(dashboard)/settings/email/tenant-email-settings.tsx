@@ -17,8 +17,9 @@ import {
 } from './actions'
 import type { TenantEmailIntegrationRow } from '@/types/database'
 
-type IntegrationSummary = Omit<TenantEmailIntegrationRow, 'api_key_encrypted'> & {
+type IntegrationSummary = Omit<TenantEmailIntegrationRow, 'api_key_encrypted' | 'webhook_secret_encrypted'> & {
   key_hint: string | null
+  webhook_secret_hint: string | null
 }
 
 interface Props {
@@ -27,6 +28,7 @@ interface Props {
 
 export function TenantEmailSettings({ initial }: Props) {
   const [apiKey, setApiKey] = useState('')
+  const [webhookSecret, setWebhookSecret] = useState('')
   const [fromName, setFromName] = useState(initial?.default_from_name ?? '')
   const [fromEmail, setFromEmail] = useState(initial?.default_from_email ?? '')
   const [replyTo, setReplyTo] = useState(initial?.default_reply_to ?? '')
@@ -42,6 +44,7 @@ export function TenantEmailSettings({ initial }: Props) {
     startSave(async () => {
       const res = await saveTenantEmailIntegration({
         apiKey: apiKey || undefined,
+        webhookSecret: webhookSecret || undefined,
         defaultFromName: fromName,
         defaultFromEmail: fromEmail,
         defaultReplyTo: replyTo,
@@ -51,6 +54,7 @@ export function TenantEmailSettings({ initial }: Props) {
       } else {
         toast.success('Email settings saved')
         setApiKey('')
+        setWebhookSecret('')
       }
     })
   }
@@ -121,6 +125,24 @@ export function TenantEmailSettings({ initial }: Props) {
                 Leave blank to keep the existing key ({initial.key_hint}).
               </p>
             )}
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="resend-webhook-secret">Webhook Signing Secret</Label>
+            <Input
+              id="resend-webhook-secret"
+              type="password"
+              value={webhookSecret}
+              onChange={(e) => setWebhookSecret(e.target.value)}
+              placeholder={initial?.webhook_secret_hint ? `Current: ${initial.webhook_secret_hint}` : 'whsec_…'}
+              autoComplete="off"
+            />
+            <p className="text-xs text-muted-foreground">
+              {initial?.webhook_secret_hint
+                ? `Leave blank to keep the existing secret (${initial.webhook_secret_hint}). `
+                : ''}
+              Copy this from the webhook you create in your Resend dashboard for the endpoints below.
+            </p>
           </div>
 
           <div className="grid gap-4 sm:grid-cols-2">

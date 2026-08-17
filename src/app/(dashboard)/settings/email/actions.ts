@@ -5,12 +5,21 @@ import { getUser, createClient } from '@/lib/supabase/server'
 import { createServiceRoleClient } from '@/lib/supabase/admin'
 import { encrypt, decrypt, maskApiKey } from '@/lib/crypto'
 import { testResendApiKey, sendTenantEmail } from '@/lib/email/resend'
+import {
+  invalidateWebhookSecretsCache,
+  isValidResendWebhookSecretFormat,
+} from '@/lib/email/webhook-secrets'
 import type { TenantEmailIntegrationRow } from '@/types/database'
 
 // ─── Getters ──────────────────────────────────────────────────────────────
 
 export async function getTenantEmailIntegration(): Promise<{
-  integration: (Omit<TenantEmailIntegrationRow, 'api_key_encrypted'> & { key_hint: string | null }) | null
+  integration:
+    | (Omit<TenantEmailIntegrationRow, 'api_key_encrypted' | 'webhook_secret_encrypted'> & {
+        key_hint: string | null
+        webhook_secret_hint: string | null
+      })
+    | null
   error?: string
 }> {
   const user = await getUser()
@@ -22,17 +31,37 @@ export async function getTenantEmailIntegration(): Promise<{
 
   const { data } = await supabase
     .from('tenant_email_integrations')
-    .select('id, org_id, key_hint, default_from_name, default_from_email, default_reply_to, provider, status, last_tested_at, last_error, created_at, updated_at')
+    .select(
+      'id, org_id, key_hint, webhook_secret_encrypted, default_from_name, default_from_email, default_reply_to, provider, status, last_tested_at, last_error, created_at, updated_at'
+    )
     .eq('org_id', orgId as string)
     .single()
 
-  return { integration: data ?? null }
+  if (!data) return { integration: null }
+
+  const row = data as unknown as TenantEmailIntegrationRow
+
+  // No dedicated hint column for the webhook secret — compute it on read the
+  // same way the platform settings getter does for its API key.
+  let webhookSecretHint: string | null = null
+  if (row.webhook_secret_encrypted) {
+    try {
+      webhookSecretHint = maskApiKey(await decrypt(row.webhook_secret_encrypted))
+    } catch {
+      webhookSecretHint = '••••••••????'
+    }
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const { webhook_secret_encrypted: _w, ...rest } = row
+  return { integration: { ...rest, webhook_secret_hint: webhookSecretHint } }
 }
 
 // ─── Save / Upsert ────────────────────────────────────────────────────────
 
 export async function saveTenantEmailIntegration(input: {
   apiKey?: string
+  webhookSecret?: string
   defaultFromName: string
   defaultFromEmail: string
   defaultReplyTo: string
@@ -52,6 +81,18 @@ export async function saveTenantEmailIntegration(input: {
   if (input.apiKey?.trim()) {
     apiKeyEncrypted = await encrypt(input.apiKey.trim())
     keyHint = maskApiKey(input.apiKey.trim())
+  }
+
+  // Same convention as the API key: blank input leaves the stored secret
+  // untouched (never wiped by editing the other fields), and the plaintext
+  // is never returned to the client.
+  let webhookSecretEncrypted: string | undefined
+  if (input.webhookSecret?.trim()) {
+    const webhookSecret = input.webhookSecret.trim()
+    if (!isValidResendWebhookSecretFormat(webhookSecret)) {
+      return { error: 'Invalid Resend webhook signing secret. It must start with whsec_.' }
+    }
+    webhookSecretEncrypted = await encrypt(webhookSecret)
   }
 
   const { data: existing } = await supabase
@@ -75,6 +116,9 @@ export async function saveTenantEmailIntegration(input: {
       updatePayload.key_hint = keyHint
       updatePayload.status = 'disconnected' // reset status when key changes
     }
+    if (webhookSecretEncrypted) {
+      updatePayload.webhook_secret_encrypted = webhookSecretEncrypted
+    }
 
     const existingTyped = existing as { id: string }
     const { error } = await svc
@@ -88,6 +132,7 @@ export async function saveTenantEmailIntegration(input: {
       org_id: orgId as string,
       api_key_encrypted: apiKeyEncrypted ?? null,
       key_hint: keyHint ?? null,
+      webhook_secret_encrypted: webhookSecretEncrypted ?? null,
       default_from_name: input.defaultFromName || null,
       default_from_email: input.defaultFromEmail || null,
       default_reply_to: input.defaultReplyTo || null,
@@ -97,6 +142,10 @@ export async function saveTenantEmailIntegration(input: {
 
     if (error) return { error: error.message }
   }
+
+  // The webhook validator memoizes the secret list (including an empty one),
+  // so a freshly saved secret would otherwise sit unused until the TTL expired.
+  if (webhookSecretEncrypted) invalidateWebhookSecretsCache()
 
   revalidatePath('/settings/email')
   return {}

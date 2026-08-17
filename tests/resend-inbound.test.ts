@@ -5,8 +5,13 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 vi.mock('@/lib/supabase/admin', () => ({ createServiceRoleClient: vi.fn() }))
+vi.mock('@/lib/email/webhook-secrets', () => ({
+  validateResendWebhookSignature: vi.fn(async () => ({ platform: true, tenantOrgIds: [] })),
+  canResendWebhookSignerAccessOrg: vi.fn(() => true),
+}))
 
 import { createServiceRoleClient } from '@/lib/supabase/admin'
+import { canResendWebhookSignerAccessOrg } from '@/lib/email/webhook-secrets'
 
 interface MockOpts {
   route?: { org_id: string } | null
@@ -46,6 +51,7 @@ function buildMockSupabase(opts: MockOpts = {}) {
         select: vi.fn().mockReturnThis(),
         eq: vi.fn().mockReturnThis(),
         single: vi.fn().mockResolvedValue({ data: opts.existingContact ?? null, error: null }),
+        maybeSingle: vi.fn().mockResolvedValue({ data: null, error: null }),
         insert: insertContactSpy,
       }
     }
@@ -92,7 +98,10 @@ const EMAIL = {
 }
 
 describe('Resend inbound email webhook', () => {
-  beforeEach(() => vi.clearAllMocks())
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.mocked(canResendWebhookSignerAccessOrg).mockReturnValue(true)
+  })
 
   it('creates contact + conversation + message for a fresh sender', async () => {
     const db = buildMockSupabase({ existingContact: null, existingConversation: null })
@@ -151,6 +160,21 @@ describe('Resend inbound email webhook', () => {
     const { POST } = await import('@/app/api/resend/inbound/route')
     const res = await POST(makeRequest(EMAIL))
     expect(res.status).toBe(200)
+    expect(db.insertConversationSpy).not.toHaveBeenCalled()
+    expect(db.insertMessageSpy).not.toHaveBeenCalled()
+  })
+
+  it('rejects a valid tenant signature that is not authorized for the resolved route org', async () => {
+    const db = buildMockSupabase({ route: { org_id: 'org-2' } })
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    vi.mocked(createServiceRoleClient).mockReturnValue(db as any)
+    vi.mocked(canResendWebhookSignerAccessOrg).mockReturnValue(false)
+
+    const { POST } = await import('@/app/api/resend/inbound/route')
+    const res = await POST(makeRequest(EMAIL))
+
+    expect(res.status).toBe(200)
+    expect(db.insertContactSpy).not.toHaveBeenCalled()
     expect(db.insertConversationSpy).not.toHaveBeenCalled()
     expect(db.insertMessageSpy).not.toHaveBeenCalled()
   })

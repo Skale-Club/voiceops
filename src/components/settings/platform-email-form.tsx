@@ -17,7 +17,10 @@ import {
 } from '@/app/(admin)/admin/settings/email-actions'
 import type { PlatformEmailSettingsRow } from '@/types/database'
 
-type SettingsSummary = Omit<PlatformEmailSettingsRow, 'api_key_encrypted'> & { key_hint?: string }
+type SettingsSummary = Omit<PlatformEmailSettingsRow, 'api_key_encrypted' | 'webhook_secret_encrypted'> & {
+  key_hint?: string
+  webhook_secret_hint?: string
+}
 
 interface Props {
   initial: SettingsSummary | null
@@ -26,6 +29,8 @@ interface Props {
 export function PlatformEmailForm({ initial }: Props) {
   const [apiKey, setApiKey] = useState('')
   const [editingKey, setEditingKey] = useState(!initial?.key_hint)
+  const [webhookSecret, setWebhookSecret] = useState('')
+  const [editingWebhookSecret, setEditingWebhookSecret] = useState(!initial?.webhook_secret_hint)
   const [fromName, setFromName] = useState(initial?.default_from_name ?? '')
   const [fromEmail, setFromEmail] = useState(initial?.default_from_email ?? '')
   const [replyTo, setReplyTo] = useState(initial?.default_reply_to ?? '')
@@ -40,6 +45,7 @@ export function PlatformEmailForm({ initial }: Props) {
     startSave(async () => {
       const res = await savePlatformEmailSettings({
         apiKey: apiKey || undefined,
+        webhookSecret: webhookSecret || undefined,
         defaultFromName: fromName,
         defaultFromEmail: fromEmail,
         defaultReplyTo: replyTo,
@@ -51,6 +57,8 @@ export function PlatformEmailForm({ initial }: Props) {
         toast.success('Platform email settings saved')
         setApiKey('')
         setEditingKey(false)
+        setWebhookSecret('')
+        setEditingWebhookSecret(false)
       }
     })
   }
@@ -147,6 +155,53 @@ export function PlatformEmailForm({ initial }: Props) {
                     size="sm"
                     className="shrink-0 text-muted-foreground"
                     onClick={() => { setEditingKey(false); setApiKey('') }}
+                  >
+                    Cancel
+                  </Button>
+                )}
+              </div>
+            )}
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="platform-resend-webhook-secret">Webhook Signing Secret</Label>
+            {!editingWebhookSecret && initial?.webhook_secret_hint ? (
+              <div className="flex gap-2">
+                <Input
+                  id="platform-resend-webhook-secret"
+                  type="text"
+                  value={initial.webhook_secret_hint}
+                  readOnly
+                  className="font-mono text-sm bg-muted/40 text-muted-foreground cursor-default select-none"
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="shrink-0"
+                  onClick={() => { setEditingWebhookSecret(true); setWebhookSecret('') }}
+                >
+                  Change
+                </Button>
+              </div>
+            ) : (
+              <div className="flex gap-2">
+                <Input
+                  id="platform-resend-webhook-secret"
+                  type="password"
+                  value={webhookSecret}
+                  onChange={(e) => setWebhookSecret(e.target.value)}
+                  placeholder="whsec_…"
+                  autoComplete="off"
+                  className="font-mono text-sm"
+                />
+                {initial?.webhook_secret_hint && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="shrink-0 text-muted-foreground"
+                    onClick={() => { setEditingWebhookSecret(false); setWebhookSecret('') }}
                   >
                     Cancel
                   </Button>

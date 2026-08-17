@@ -66,6 +66,7 @@ export type TenantEmailIntegrationStatus = 'connected' | 'disconnected' | 'error
 export interface PlatformEmailSettingsRow {
   id: string
   api_key_encrypted: string | null
+  webhook_secret_encrypted: string | null
   default_from_name: string | null
   default_from_email: string | null
   default_reply_to: string | null
@@ -91,6 +92,7 @@ export interface TenantEmailIntegrationRow {
   org_id: string
   api_key_encrypted: string | null
   key_hint: string | null
+  webhook_secret_encrypted: string | null
   default_from_name: string | null
   default_from_email: string | null
   default_reply_to: string | null
@@ -5015,6 +5017,79 @@ export interface Database {
           }
         ]
       }
+      email_sends: {
+        Row: {
+          id: string
+          org_id: string | null
+          provider: string
+          provider_message_id: string | null
+          to_email: string
+          from_email: string | null
+          subject: string | null
+          kind: string | null
+          source: string | null
+          template_id: string | null
+          status: string
+          error: string | null
+          delivered_at: string | null
+          opened_at: string | null
+          clicked_at: string | null
+          bounced_at: string | null
+          complained_at: string | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          org_id?: string | null
+          provider?: string
+          provider_message_id?: string | null
+          to_email: string
+          from_email?: string | null
+          subject?: string | null
+          kind?: string | null
+          source?: string | null
+          template_id?: string | null
+          status?: string
+          error?: string | null
+          delivered_at?: string | null
+          opened_at?: string | null
+          clicked_at?: string | null
+          bounced_at?: string | null
+          complained_at?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          org_id?: string | null
+          provider?: string
+          provider_message_id?: string | null
+          to_email?: string
+          from_email?: string | null
+          subject?: string | null
+          kind?: string | null
+          source?: string | null
+          template_id?: string | null
+          status?: string
+          error?: string | null
+          delivered_at?: string | null
+          opened_at?: string | null
+          clicked_at?: string | null
+          bounced_at?: string | null
+          complained_at?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: 'email_sends_org_id_fkey'
+            columns: ['org_id']
+            isOneToOne: false
+            referencedRelation: 'organizations'
+            referencedColumns: ['id']
+          }
+        ]
+      }
       event_dispatches: {
         Row: {
           id: string
@@ -5345,6 +5420,7 @@ export interface Database {
         Row: {
           id: string
           api_key_encrypted: string | null
+          webhook_secret_encrypted: string | null
           default_from_name: string | null
           default_from_email: string | null
           default_reply_to: string | null
@@ -5357,6 +5433,7 @@ export interface Database {
         Insert: {
           id?: string
           api_key_encrypted?: string | null
+          webhook_secret_encrypted?: string | null
           default_from_name?: string | null
           default_from_email?: string | null
           default_reply_to?: string | null
@@ -5368,6 +5445,7 @@ export interface Database {
         }
         Update: {
           api_key_encrypted?: string | null
+          webhook_secret_encrypted?: string | null
           default_from_name?: string | null
           default_from_email?: string | null
           default_reply_to?: string | null
@@ -5409,6 +5487,7 @@ export interface Database {
           org_id: string
           api_key_encrypted: string | null
           key_hint: string | null
+          webhook_secret_encrypted: string | null
           default_from_name: string | null
           default_from_email: string | null
           default_reply_to: string | null
@@ -5424,6 +5503,7 @@ export interface Database {
           org_id: string
           api_key_encrypted?: string | null
           key_hint?: string | null
+          webhook_secret_encrypted?: string | null
           default_from_name?: string | null
           default_from_email?: string | null
           default_reply_to?: string | null
@@ -5437,6 +5517,7 @@ export interface Database {
         Update: {
           api_key_encrypted?: string | null
           key_hint?: string | null
+          webhook_secret_encrypted?: string | null
           default_from_name?: string | null
           default_from_email?: string | null
           default_reply_to?: string | null

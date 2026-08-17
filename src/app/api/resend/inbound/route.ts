@@ -9,55 +9,21 @@ import crypto from 'node:crypto'
 import { createServiceRoleClient } from '@/lib/supabase/admin'
 import { normalizeInbound } from '@/lib/messaging/normalize-inbound'
 import { captureApiError } from '@/lib/api-error'
+import {
+  canResendWebhookSignerAccessOrg,
+  validateResendWebhookSignature,
+} from '@/lib/email/webhook-secrets'
 
-// Resend uses Svix for webhook delivery. We validate via the shared secret approach
-// using RESEND_WEBHOOK_SECRET (set in environment for inbound routes).
-function validateSignature(
-  rawBody: string,
-  headers: Headers
-): boolean {
-  const secret = process.env.RESEND_WEBHOOK_SECRET
-  if (!secret) {
-    // If no secret configured, allow through in development
-    if (process.env.NODE_ENV !== 'production') return true
-    console.warn('[resend/inbound] RESEND_WEBHOOK_SECRET not set in production')
-    return false
-  }
-
-  // Svix signature validation
-  const svixId = headers.get('svix-id')
-  const svixTimestamp = headers.get('svix-timestamp')
-  const svixSignature = headers.get('svix-signature')
-
-  if (!svixId || !svixTimestamp || !svixSignature) return false
-
-  // Validate timestamp to prevent replay attacks (5 minute window)
-  const tsSeconds = parseInt(svixTimestamp, 10)
-  if (isNaN(tsSeconds)) return false
-  const nowSeconds = Math.floor(Date.now() / 1000)
-  if (Math.abs(nowSeconds - tsSeconds) > 300) return false
-
-  // Compute HMAC-SHA256
-  const signedContent = `${svixId}.${svixTimestamp}.${rawBody}`
-  const secretBytes = Buffer.from(secret.replace(/^whsec_/, ''), 'base64')
-  const expectedSig = crypto
-    .createHmac('sha256', secretBytes)
-    .update(signedContent)
-    .digest('base64')
-
-  // svix-signature header may contain multiple signatures like "v1,<sig>"
-  const signatures = svixSignature.split(' ')
-  return signatures.some((s) => {
-    const [, sig] = s.split(',')
-    return sig === expectedSig
-  })
-}
+// Resend uses Svix for webhook delivery. Signature validation is shared with
+// /api/resend/events via src/lib/email/webhook-secrets.ts, which tries every
+// configured signing secret (platform + all tenants — see migration 1278).
 
 export async function POST(request: Request) {
   try {
     const rawBody = await request.text()
 
-    if (!validateSignature(rawBody, request.headers)) {
+    const signer = await validateResendWebhookSignature(rawBody, request.headers)
+    if (!signer) {
       console.warn('[resend/inbound] Invalid webhook signature')
       // Still return 200 to avoid Resend retrying indefinitely for bad-sig events
       return Response.json({ ok: true })
@@ -100,6 +66,13 @@ export async function POST(request: Request) {
     }
 
     const orgId = route.org_id
+    if (!canResendWebhookSignerAccessOrg(signer, orgId)) {
+      // A valid tenant webhook secret only authorizes that tenant's route.
+      // Keep the webhook always-200 contract while refusing the cross-tenant
+      // payload.
+      console.warn('[resend/inbound] Valid signature is not authorized for resolved route org')
+      return Response.json({ ok: true })
+    }
 
     // 2. Find or create contact by `from` email
     const fromEmail = from.replace(/^.*<(.+)>$/, '$1').toLowerCase().trim()
