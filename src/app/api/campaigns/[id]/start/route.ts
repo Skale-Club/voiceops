@@ -9,6 +9,8 @@ import { createClient, getUser } from '@/lib/supabase/server'
 import { isDemoSession } from '@/lib/demo/guard'
 import { startCampaignBatch } from '@/lib/campaigns/engine'
 import { startWhatsAppCampaign } from '@/lib/campaigns/whatsapp-dispatcher'
+import { startEmailCampaign } from '@/lib/campaigns/email-dispatcher'
+import { enrollCampaignRecipients } from '@/lib/campaigns/enroll-recipients'
 import { getProviderKey } from '@/lib/integrations/get-provider-key'
 import type { Database } from '@/types/database'
 import { captureApiError } from '@/lib/api-error'
@@ -64,17 +66,162 @@ export async function POST(
         { status: 409 }
       )
     }
-    // Kick off in the background so the response returns immediately;
-    // status updates handled by the dispatcher.
+    const enrollResult = await enrollCampaignRecipients(campaignId)
+    if (!enrollResult.ok) {
+      return Response.json(
+        { error: `Could not enroll recipients: ${enrollResult.error ?? 'unknown error'}` },
+        { status: 400 }
+      )
+    }
+    if (enrollResult.enrolled === 0) {
+      const { count: pendingCount } = await serviceClient
+        .from('campaign_recipients')
+        .select('id', { count: 'exact', head: true })
+        .eq('campaign_id', campaignId)
+        .eq('status', 'pending')
+      if ((pendingCount ?? 0) === 0) {
+        return Response.json(
+          { error: 'No recipients match this campaign’s audience — nothing to send. Check the audience filter and try again.' },
+          { status: 400 }
+        )
+      }
+    }
+
+    // Claim the campaign atomically before registering background work. This
+    // closes the double-click race where two requests could both select the
+    // same pending rows and send duplicate messages.
+    const { data: claimed } = await serviceClient
+      .from('campaigns')
+      .update({ status: 'running', started_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+      .eq('id', campaignId)
+      .eq('organization_id', member.organization_id)
+      .in('status', ['draft', 'scheduled', 'paused'])
+      .select('id')
+      .maybeSingle()
+    if (!claimed) {
+      return Response.json(
+        { error: 'Campaign cannot be started (already running, completed, or stopped)' },
+        { status: 409 }
+      )
+    }
+
+    // Kick off in the background so the response returns immediately.
     after(async () => {
       try {
-        await startWhatsAppCampaign(campaignId)
+        const result = await startWhatsAppCampaign(campaignId)
+        if (!result.ok) {
+          console.error('[campaigns/start] whatsapp dispatcher rejected campaign:', result.error)
+          await serviceClient
+            .from('campaigns')
+            .update({ status: 'paused', updated_at: new Date().toISOString() })
+            .eq('id', campaignId)
+            .eq('status', 'running')
+        }
       } catch (err) {
         console.error('[campaigns/start] whatsapp dispatcher error:', err)
         captureApiError(err)
+        await serviceClient
+          .from('campaigns')
+          .update({ status: 'paused', updated_at: new Date().toISOString() })
+          .eq('id', campaignId)
+          .eq('status', 'running')
       }
     })
-    return Response.json({ success: true, channel: 'whatsapp' })
+    return Response.json({ success: true, channel: 'whatsapp', enrolled: enrollResult.enrolled })
+  }
+
+  if (campaignRow.channel === 'email') {
+    if (!['draft', 'scheduled', 'paused'].includes(campaignRow.status)) {
+      return Response.json(
+        { error: 'Campaign cannot be started (already running, completed, or stopped)' },
+        { status: 409 }
+      )
+    }
+
+    // Materialize the audience_filter into campaign_recipients BEFORE
+    // dispatching — nothing else in the app writes to that table (see
+    // src/lib/campaigns/enroll-recipients.ts). Idempotent, so a retried
+    // launch never double-enrolls.
+    const enrollResult = await enrollCampaignRecipients(campaignId)
+    if (!enrollResult.ok) {
+      return Response.json(
+        { error: `Could not enroll recipients: ${enrollResult.error ?? 'unknown error'}` },
+        { status: 400 }
+      )
+    }
+    if (enrollResult.enrolled === 0) {
+      // Zero-recipient check: a campaign with pre-existing pending rows from
+      // an earlier partial run should still be allowed to resume, so only
+      // block the launch when there are truly no pending recipients at all
+      // (fresh audience match found nobody AND nothing was left over).
+      const { count: pendingCount } = await serviceClient
+        .from('campaign_recipients')
+        .select('id', { count: 'exact', head: true })
+        .eq('campaign_id', campaignId)
+        .eq('status', 'pending')
+      if ((pendingCount ?? 0) === 0) {
+        return Response.json(
+          { error: 'No recipients match this campaign’s audience — nothing to send. Check the audience filter and try again.' },
+          { status: 400 }
+        )
+      }
+    }
+
+    const { data: claimed } = await serviceClient
+      .from('campaigns')
+      .update({ status: 'running', started_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+      .eq('id', campaignId)
+      .eq('organization_id', member.organization_id)
+      .in('status', ['draft', 'scheduled', 'paused'])
+      .select('id')
+      .maybeSingle()
+    if (!claimed) {
+      return Response.json(
+        { error: 'Campaign cannot be started (already running, completed, or stopped)' },
+        { status: 409 }
+      )
+    }
+
+    // Kick off in the background so the response returns immediately.
+    after(async () => {
+      try {
+        const result = await startEmailCampaign(campaignId)
+        if (!result.ok) {
+          console.error('[campaigns/start] email dispatcher rejected campaign:', result.error)
+          await serviceClient
+            .from('campaigns')
+            .update({ status: 'paused', updated_at: new Date().toISOString() })
+            .eq('id', campaignId)
+            .eq('status', 'running')
+        }
+      } catch (err) {
+        console.error('[campaigns/start] email dispatcher error:', err)
+        captureApiError(err)
+        await serviceClient
+          .from('campaigns')
+          .update({ status: 'paused', updated_at: new Date().toISOString() })
+          .eq('id', campaignId)
+          .eq('status', 'running')
+      }
+    })
+    return Response.json({ success: true, channel: 'email', enrolled: enrollResult.enrolled })
+  }
+
+  if (campaignRow.channel === 'sms') {
+    // No dispatcher exists yet for this channel. Fail loudly and leave the
+    // campaign status untouched — never let the UI imply something was sent
+    // when nothing was queued.
+    return Response.json(
+      { error: 'SMS campaigns cannot be launched yet — this channel has no dispatcher configured.' },
+      { status: 400 }
+    )
+  }
+
+  if (campaignRow.channel !== 'calls') {
+    return Response.json(
+      { error: `Unsupported campaign channel "${campaignRow.channel}" — cannot launch.` },
+      { status: 400 }
+    )
   }
 
   // Voice campaigns: existing path

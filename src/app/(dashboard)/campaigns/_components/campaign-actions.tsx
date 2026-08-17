@@ -12,7 +12,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { Button } from '@/components/ui/button'
-import { launchCampaign, pauseCampaign, cancelCampaign } from '../actions'
+import { pauseCampaign, cancelCampaign } from '../actions'
 import type { CampaignChannel } from '@/types/database'
 
 interface CampaignActionsProps {
@@ -25,28 +25,23 @@ export function CampaignActions({ campaignId, campaignStatus, campaignChannel }:
   const router = useRouter()
 
   async function handleLaunch() {
-    if (campaignChannel === 'calls') {
-      // Delegate to existing API route for voice campaigns (Vapi key required)
-      try {
-        const res = await fetch(`/api/campaigns/${campaignId}/start`, { method: 'POST' })
-        const json = await res.json()
-        if (!res.ok) {
-          toast.error(json.error ?? 'Failed to start campaign')
-          return
-        }
-        toast.success(`Campaign started — ${json.fired ?? 0} calls fired`)
-        router.refresh()
-      } catch {
-        toast.error('Failed to start campaign')
-      }
-      return
-    }
+    // Single launch entry point for every channel — /start branches per
+    // channel server-side and fails loudly for channels with no dispatcher.
     try {
-      await launchCampaign(campaignId)
-      toast.success('Campaign launched')
+      const res = await fetch(`/api/campaigns/${campaignId}/start`, { method: 'POST' })
+      const json = await res.json()
+      if (!res.ok) {
+        toast.error(json.error ?? 'Failed to start campaign')
+        return
+      }
+      if (campaignChannel === 'calls') {
+        toast.success(`Campaign started — ${json.fired ?? 0} calls fired`)
+      } else {
+        toast.success('Campaign launched')
+      }
       router.refresh()
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to launch campaign')
+    } catch {
+      toast.error('Failed to start campaign')
     }
   }
 

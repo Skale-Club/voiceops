@@ -3,7 +3,7 @@
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
-import { launchCampaign, pauseCampaign, cancelCampaign } from '../actions'
+import { pauseCampaign, cancelCampaign } from '../actions'
 import type { CampaignChannel, CampaignStatus } from '@/types/database'
 
 interface Props {
@@ -20,27 +20,23 @@ export function CampaignDetailActions({ campaignId, campaignStatus, campaignChan
   const canCancel = !['stopped', 'completed'].includes(campaignStatus)
 
   async function handleLaunch() {
-    if (campaignChannel === 'calls') {
-      try {
-        const res = await fetch(`/api/campaigns/${campaignId}/start`, { method: 'POST' })
-        const json = await res.json()
-        if (!res.ok) {
-          toast.error(json.error ?? 'Failed to start campaign')
-          return
-        }
-        toast.success(`Campaign started — ${json.fired ?? 0} calls fired`)
-        router.refresh()
-      } catch {
-        toast.error('Failed to start campaign')
-      }
-      return
-    }
+    // Single launch entry point for every channel — /start branches per
+    // channel server-side and fails loudly for channels with no dispatcher.
     try {
-      await launchCampaign(campaignId)
-      toast.success('Campaign launched')
+      const res = await fetch(`/api/campaigns/${campaignId}/start`, { method: 'POST' })
+      const json = await res.json()
+      if (!res.ok) {
+        toast.error(json.error ?? 'Failed to start campaign')
+        return
+      }
+      if (campaignChannel === 'calls') {
+        toast.success(`Campaign started — ${json.fired ?? 0} calls fired`)
+      } else {
+        toast.success('Campaign launched')
+      }
       router.refresh()
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to launch')
+    } catch {
+      toast.error('Failed to start campaign')
     }
   }
 

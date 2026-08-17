@@ -169,40 +169,14 @@ export async function listCampaignEmailTemplates(): Promise<
   return (data ?? []).map((t) => ({ id: t.id as string, name: t.name as string }))
 }
 
-// ─── launchCampaign ───────────────────────────────────────────────────────────
-
-export async function launchCampaign(id: string): Promise<void> {
-  const user = await getUser()
-  if (!user) throw new Error('Unauthorized')
-  const supabase = await createClient()
-
-  const { data: campaign } = await supabase
-    .from('campaigns')
-    .select('id, channel, status')
-    .eq('id', id)
-    .single()
-
-  if (!campaign) throw new Error('Campaign not found')
-  if (!['draft', 'paused', 'scheduled'].includes(campaign.status)) {
-    throw new Error(`Cannot launch a campaign with status "${campaign.status}"`)
-  }
-
-  const newStatus = campaign.channel === 'calls' ? 'in_progress' as const : 'running' as const
-
-  const { error } = await supabase
-    .from('campaigns')
-    .update({
-      status: newStatus,
-      started_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    })
-    .eq('id', id)
-    .in('status', ['draft', 'paused', 'scheduled'])
-
-  if (error) throw new Error(error.message)
-  revalidatePath('/campaigns')
-  revalidatePath(`/campaigns/${id}`)
-}
+// ─── launchCampaign — REMOVED ─────────────────────────────────────────────────
+//
+// This action only flipped `status` to running/in_progress without dispatching
+// anything, so launching a WhatsApp/email/SMS campaign reported success while
+// nothing was ever queued. Every launch now goes through
+// POST /api/campaigns/[id]/start, which branches per channel and calls the real
+// dispatcher (or fails loudly for channels that have none). Do not reintroduce
+// a status-only launch path.
 
 // ─── pauseCampaign ────────────────────────────────────────────────────────────
 
