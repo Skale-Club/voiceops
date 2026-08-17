@@ -126,6 +126,30 @@ async function insertDndTimelineEvent(
   }
 }
 
+/**
+ * DND gate for email sends, shared by send_tenant_email and
+ * send_email_template so both enforce the same per-contact block that
+ * send_email already applies (mirrors that case's inline check exactly).
+ * Note this is a DIFFERENT mechanism from the marketing suppression list in
+ * sendTenantEmail: that one is a recipient's opt-out of marketing, this one
+ * is the contact's per-channel do-not-disturb flag.
+ * Returns the JSON refusal string to return verbatim when blocked, or null
+ * to mean "proceed" -- no contact id or no supabase client is NOT a block,
+ * it just means there's nothing to check DND against.
+ */
+async function checkEmailDndBlock(
+  ctx: ActionContext | undefined,
+  params: Record<string, unknown>,
+): Promise<string | null> {
+  if (!ctx?.supabase) return null
+  const contactId = ctx.contactId ?? (typeof params.contact_id === 'string' ? params.contact_id : undefined)
+  if (!contactId) return null
+  const dnd = await checkDnd(contactId, 'email', ctx.supabase)
+  if (!dnd.blocked) return null
+  void insertDndTimelineEvent(ctx, 'email')
+  return JSON.stringify({ ok: false, reason: dnd.reason, channel: 'email' })
+}
+
 export async function executeAction(
   actionType: ActionType,
   params: Record<string, unknown>,
@@ -270,6 +294,9 @@ async function _executeActionInner(
     if (!ctx?.organizationId || !ctx?.supabase) {
       throw new Error('send_email_template requires ctx.organizationId and ctx.supabase')
     }
+    // DND check: abort if contact has email blocked (same gate as send_email)
+    const dndBlock = await checkEmailDndBlock(ctx, params)
+    if (dndBlock) return dndBlock
     return executeSendEmailTemplate(params, ctx.organizationId, ctx.supabase)
   }
 
@@ -459,6 +486,9 @@ async function _executeActionInner(
       if (!ctx?.organizationId) {
         throw new Error('send_tenant_email requires ctx.organizationId')
       }
+      // DND check: abort if contact has email blocked (same gate as send_email)
+      const dndBlock = await checkEmailDndBlock(ctx, params)
+      if (dndBlock) return dndBlock
       return executeSendTenantEmail(params, ctx.organizationId)
     }
     case 'send_platform_email': {
