@@ -4,10 +4,24 @@
 //   1. Agent cost near the daily cap (>= 80%)
 //   2. Google Reviews scrape failures (error / quota_exceeded)
 //   3. High agent error rate in the last hour
+//   4. Stale cron heartbeats (a scheduled job stopped ticking, e.g. the VPS
+//      cron container died silently). `cron_heartbeats` is fed by jobs from
+//      several apps that share this ops hub (xphere, xkedule, skaleclub,
+//      xtimator, ...), not just xphere, so this signal is delivered to an
+//      ops-wide Telegram destination (TELEGRAM_BOT_TOKEN_OPS /
+//      TELEGRAM_ALERT_CHAT_ID_OPS) when configured, falling back to this
+//      app's own bot/chat otherwise - see src/lib/obs/alerts.ts.
 //
 // Caller sends CRON_SECRET as `Authorization: Bearer`. No-ops cleanly when
-// the Telegram bot token/chat id are unset, so it is safe to schedule before the
+// no Telegram destination is configured, so it is safe to schedule before the
 // webhook secret is configured.
+//
+// IMPORTANT: as of 2026-08-20, no TELEGRAM_* env vars are set in production
+// (confirmed against the live Coolify runtime env) - this route currently
+// short-circuits to `{ ok: true, skipped: ... }` on every hourly run without
+// evaluating any signal. The workflow going green hourly does NOT mean these
+// checks have ever actually run; don't assume otherwise without re-verifying
+// the deployed env once the Telegram vars are added.
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -21,9 +35,10 @@ import {
   costBreached,
   costSeverity,
   errorRateBreached,
+  opsTelegramConfigured,
   recordAlert,
+  resolveOpsTelegramDestination,
   sendTelegramAlert,
-  telegramConfigured,
 } from '@/lib/obs/alerts'
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL
@@ -43,8 +58,16 @@ export async function GET(request: Request): Promise<Response> {
   }
 
   const log = createLogger({ route: 'api/cron/obs-alerts' })
-  if (!telegramConfigured()) {
-    return Response.json({ ok: true, skipped: 'TELEGRAM_BOT_TOKEN / TELEGRAM_ALERT_CHAT_ID not set' })
+  // opsTelegramConfigured() already falls back to the app pair, so it alone
+  // tells us whether *any* destination (app-scoped or ops-scoped) exists.
+  // Signals 1-3 additionally need telegramConfigured() (the app pair) to
+  // actually deliver - see sendTelegramAlert() call sites below.
+  if (!opsTelegramConfigured()) {
+    return Response.json({
+      ok: true,
+      skipped:
+        'No Telegram destination configured (TELEGRAM_BOT_TOKEN/TELEGRAM_ALERT_CHAT_ID or TELEGRAM_BOT_TOKEN_OPS/TELEGRAM_ALERT_CHAT_ID_OPS)',
+    })
   }
 
   const supabase = createClient<Database>(SUPABASE_URL, SERVICE_KEY, { auth: { persistSession: false } })
@@ -135,14 +158,89 @@ export async function GET(request: Request): Promise<Response> {
     })
   }
 
+  // 4. Cron heartbeat staleness (external cron runner on the Hetzner VPS) ────
+  // `cron_heartbeats` is written by src/app/api/cron/heartbeat/route.ts (owned
+  // by a concurrent change) and isn't in the generated Database types yet, so
+  // this goes through the untyped `dedupe` client, same as obs_alert_log.
+  interface CronHeartbeatRow {
+    job_name: string
+    last_run_at: string
+    last_ok_at: string | null
+    last_status: number | null
+    last_duration_ms: number | null
+    last_error: string | null
+    expected_interval_seconds: number
+    consecutive_failures: number
+    updated_at: string
+  }
+
+  const { data: heartbeats } = await dedupe
+    .from('cron_heartbeats')
+    .select(
+      'job_name, last_run_at, last_ok_at, last_status, last_duration_ms, last_error, expected_interval_seconds, consecutive_failures, updated_at',
+    )
+
+  for (const h of (heartbeats ?? []) as CronHeartbeatRow[]) {
+    const intervalSeconds = h.expected_interval_seconds ?? 300
+    // A job is stale once it's gone 3x its expected interval without a
+    // successful run - the multiplier absorbs normal scheduling jitter (a
+    // tick that's a little late isn't an outage). Never alert under ~10
+    // minutes so high-frequency jobs don't fire on a single slow tick.
+    const staleThresholdSeconds = Math.max(intervalSeconds * 3, 600)
+    const criticalThresholdSeconds = intervalSeconds * 6
+
+    const lastOkMs = h.last_ok_at ? new Date(h.last_ok_at).getTime() : null
+    const staleForSeconds = lastOkMs != null ? (now - lastOkMs) / 1000 : Infinity
+    if (staleForSeconds < staleThresholdSeconds) continue
+
+    const minutesSinceOk = lastOkMs != null ? Math.round((now - lastOkMs) / 60_000) : null
+    // Bucketed to 3h (not the 1h `hourBucket` used elsewhere) so the key
+    // itself stays stable across the 180-minute re-alert window below - if it
+    // changed every hour like `hourBucket`, alreadyAlerted() would never see
+    // a repeat and this would page every hour instead of every 3h.
+    const staleBucket = Math.floor(now / (180 * 60_000))
+    candidates.push({
+      key: `cronstale:${h.job_name}:${staleBucket}`,
+      // job_name carries the reporting job's own app/project prefix (this
+      // table is fed by several apps sharing this ops hub) - put it in the
+      // title, not just `fields`, so it's obvious at a glance in Telegram
+      // which app is actually broken.
+      title: `Cron heartbeat stale: ${h.job_name}`,
+      severity:
+        staleForSeconds > criticalThresholdSeconds || h.consecutive_failures >= 5 ? 'critical' : 'warning',
+      fields: {
+        job: h.job_name,
+        since_last_ok: minutesSinceOk != null ? `${minutesSinceOk}m ago` : 'never',
+        last_status: h.last_status ?? 'unknown',
+        consecutive_failures: h.consecutive_failures,
+        last_error: (h.last_error ?? '').slice(0, 140) || '-',
+      },
+    })
+  }
+
   // Dedupe + deliver ─────────────────────────────────────────────────────────
   // Window: cost re-alerts at most every 6h; scrape per failure once/24h;
-  // error rate once per hour bucket.
+  // error rate once per hour bucket; cron staleness every 3h (long enough
+  // not to spam hourly, short enough to keep reminding on-call).
+  //
+  // `cronstale:` alerts go to the ops-wide Telegram destination (falls back
+  // to this app's own bot/chat when TELEGRAM_*_OPS is unset) since the job
+  // that went stale may belong to any app on this ops hub, not just xphere.
+  // Signals 1-3 keep using sendTelegramAlert(alert) with no destination
+  // override, i.e. exactly their prior behaviour.
+  const opsDestination = resolveOpsTelegramDestination() ?? undefined
   let sent = 0
   for (const alert of candidates) {
-    const windowMinutes = alert.key.startsWith('cost:') ? 360 : alert.key.startsWith('scrape:') ? 1440 : 60
+    const windowMinutes = alert.key.startsWith('cost:')
+      ? 360
+      : alert.key.startsWith('scrape:')
+        ? 1440
+        : alert.key.startsWith('cronstale:')
+          ? 180
+          : 60
     if (await alreadyAlerted(dedupe, alert.key, windowMinutes)) continue
-    if (await sendTelegramAlert(alert)) {
+    const destination = alert.key.startsWith('cronstale:') ? opsDestination : undefined
+    if (await sendTelegramAlert(alert, destination)) {
       await recordAlert(dedupe, alert.key)
       sent++
     }

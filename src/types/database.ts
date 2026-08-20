@@ -8385,9 +8385,65 @@ export interface Database {
           },
         ]
       }
+      cron_heartbeats: {
+        Row: {
+          job_name: string
+          last_run_at: string
+          last_ok_at: string | null
+          last_status: number | null
+          last_duration_ms: number | null
+          last_error: string | null
+          expected_interval_seconds: number
+          consecutive_failures: number
+          updated_at: string
+        }
+        Insert: {
+          job_name: string
+          last_run_at?: string
+          last_ok_at?: string | null
+          last_status?: number | null
+          last_duration_ms?: number | null
+          last_error?: string | null
+          expected_interval_seconds?: number
+          consecutive_failures?: number
+          updated_at?: string
+        }
+        Update: {
+          job_name?: string
+          last_run_at?: string
+          last_ok_at?: string | null
+          last_status?: number | null
+          last_duration_ms?: number | null
+          last_error?: string | null
+          expected_interval_seconds?: number
+          consecutive_failures?: number
+          updated_at?: string
+        }
+        Relationships: []
+      }
     }
     Views: Record<string, never>
     Functions: {
+      record_cron_heartbeat: {
+        Args: {
+          p_job_name: string
+          p_status: number
+          p_duration_ms: number
+          p_expected_interval_seconds?: number | null
+          p_error?: string | null
+        }
+        Returns: {
+          job_name: string
+          last_run_at: string
+          last_ok_at: string | null
+          last_status: number | null
+          last_duration_ms: number | null
+          last_error: string | null
+          expected_interval_seconds: number
+          consecutive_failures: number
+          updated_at: string
+        }
+      }
       debit_copilot_credits: {
         Args: { p_org_id: string; p_amount_usd: number; p_run_id?: string | null; p_reason?: string | null }
         Returns: Json

@@ -1,8 +1,21 @@
 name: Observability Alerts
 
-# O3: hourly check of cost/scrape/error-rate signals -> deduped Slack alerts.
-# The endpoint no-ops when SLACK_ALERTS_WEBHOOK_URL is unset, so this is safe
-# to enable before the webhook secret is configured.
+# O3: this workflow runs hourly from GitHub's runners (i.e. from outside the
+# Hetzner VPS) and plays a dual role:
+#
+#   1. Trigger the in-app alert sweep. Hits /api/cron/obs-alerts, which checks
+#      cost/scrape/error-rate/cron-heartbeat signals in Supabase and sends its
+#      own deduped Telegram alerts. That endpoint no-ops when
+#      TELEGRAM_BOT_TOKEN / TELEGRAM_ALERT_CHAT_ID are unset, so it's safe to
+#      enable before those secrets are configured.
+#
+#   2. Act as the outside-the-box liveness check for the whole VPS. If the
+#      endpoint can't be reached at all (VPS down, Coolify down, DNS broken,
+#      etc.) or keeps returning a non-2xx after retries, no in-app alert can
+#      ever fire - the app itself is unreachable. This workflow is the only
+#      thing that can notice that, so on failure it posts its own Telegram
+#      alert directly from the GitHub runner (not via the app) and fails the
+#      job so the failure is also visible in the Actions tab.
 
 on:
   schedule:
@@ -19,6 +32,9 @@ jobs:
     timeout-minutes: 5
     steps:
       - name: Fire obs-alerts endpoint
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_ALERT_CHAT_ID: ${{ secrets.TELEGRAM_ALERT_CHAT_ID }}
         run: |
           # --retry rides out transient proxy errors (503 "no available server")
           # that occur while Coolify is mid-redeploy; the endpoint itself is healthy.
@@ -31,7 +47,35 @@ jobs:
           echo "Body: $(cat /tmp/body)"
           if [ "$STATUS" -ge 200 ] && [ "$STATUS" -lt 300 ]; then
             echo "OK"
-          else
-            echo "obs-alerts failed with status $STATUS" >&2
-            exit 1
+            exit 0
           fi
+
+          echo "obs-alerts failed with status $STATUS" >&2
+
+          # This is the outside-the-box liveness check failing: the endpoint
+          # was unreachable (or unhealthy) even after retries, meaning xphere
+          # is unreachable from outside the VPS. That's a distinct and more
+          # serious signal than any alert the app itself can send - if the
+          # app can't be reached, it can't alert on its own behalf either.
+          if [ -z "$TELEGRAM_BOT_TOKEN" ] || [ -z "$TELEGRAM_ALERT_CHAT_ID" ]; then
+            echo "TELEGRAM_BOT_TOKEN / TELEGRAM_ALERT_CHAT_ID not set - skipping external liveness alert" >&2
+          else
+            RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            # printf (not a literal multi-line string) keeps every line of
+            # this command indented inside the YAML block scalar above, and
+            # embeds real newlines in TEXT for Telegram to render as bullets.
+            TEXT=$(printf '%s\n%s\n%s\n%s\n%s\n%s' \
+              "🔴 *xphere is unreachable from outside the VPS*" \
+              "• signal: hourly GitHub Actions liveness check failed after retries" \
+              "• endpoint: /api/cron/obs-alerts" \
+              "• last status: $STATUS" \
+              "• meaning: the VPS/Coolify/app may be down - in-app alerts cannot fire if the app itself can't be reached" \
+              "• run: $RUN_URL")
+            curl -s -o /dev/null -X POST \
+              "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+              -H "Content-Type: application/json" \
+              -d "$(jq -n --arg chat_id "$TELEGRAM_ALERT_CHAT_ID" --arg text "$TEXT" \
+                '{chat_id: $chat_id, text: $text, parse_mode: "Markdown", disable_web_page_preview: true}')"
+          fi
+
+          exit 1
