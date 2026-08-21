@@ -21,8 +21,16 @@ name: Campaign Tick
 # Actions' actual scheduling latency for this repo first.
 
 on:
-  schedule:
-    - cron: '*/5 * * * *'
+  # Schedule trigger removed 2026-08-21: this tick now runs from the
+  # skale-cron service on the Coolify VPS, which has been firing it reliably
+  # for hours with heartbeats reporting in and alerting verified end-to-end
+  # (a real alert email was delivered when a job went silent). GitHub Actions
+  # billed a full minute of runner time per invocation for a curl that only
+  # takes 7-47s, and its shared runners were throttling this */5 * * * *
+  # schedule into 28-37 minute gaps in practice — nowhere near the 5-minute
+  # cadence the pacing math above assumes. The VPS crontab does not have
+  # that throttling problem. workflow_dispatch stays as the manual/emergency
+  # trigger for if the VPS is ever down.
   workflow_dispatch: {}
 
 concurrency:

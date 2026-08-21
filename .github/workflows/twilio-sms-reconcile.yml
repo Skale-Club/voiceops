@@ -5,8 +5,17 @@ name: Twilio SMS Reconcile
 # not land in conversation_messages because of a transient webhook/app failure.
 
 on:
-  schedule:
-    - cron: '*/5 * * * *'
+  # Schedule trigger removed 2026-08-21: this reconcile now runs from the
+  # skale-cron service on the Coolify VPS, which has been firing it reliably
+  # for hours with heartbeats reporting in and alerting verified end-to-end
+  # (a real alert email was delivered when a job went silent). GitHub Actions
+  # billed a full minute of runner time per invocation for a curl that only
+  # takes 7-47s, and its shared runners were throttling this */5 * * * *
+  # schedule into 28-37 minute gaps in practice — the VPS crontab does not
+  # have that throttling problem. The 180-minute lookbackMinutes below stays
+  # as-is regardless: it's sized to survive multiple missed/delayed runs,
+  # not tied to the old GitHub cadence. workflow_dispatch stays as the
+  # manual/emergency trigger for if the VPS is ever down.
   workflow_dispatch: {}
 
 concurrency:

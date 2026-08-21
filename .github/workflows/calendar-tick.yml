@@ -10,16 +10,17 @@ name: Calendar Tick
 # duplicate firings are dropped at the DB level.
 
 on:
-  schedule:
-    # GitHub Actions cron minimum is 1 minute, but scheduled runs can be
-    # delayed by minutes under load. The endpoint's idempotency table
-    # absorbs duplicate firings, so we use */5 for reliability — a 5-min
-    # window still covers the smallest meeting.starts_in offset (-5m)
-    # because the window logic in route.ts looks at [now, now + 1min).
-    #
-    # If you need tighter granularity, drop to '* * * * *' but expect
-    # drift; or upgrade Vercel Pro and restore vercel.json.
-    - cron: '*/5 * * * *'
+  # Schedule trigger removed 2026-08-21: this tick now runs from the
+  # skale-cron service on the Coolify VPS, which has been firing it reliably
+  # for hours with heartbeats reporting in and alerting verified end-to-end
+  # (a real alert email was delivered when a job went silent). GitHub Actions
+  # billed a full minute of runner time per invocation for a curl that only
+  # takes 7-47s, and its shared runners were throttling this */5 * * * *
+  # schedule into 28-37 minute gaps in practice — well past the 5-minute
+  # window this endpoint's idempotency table (see route.ts) was sized to
+  # tolerate for the -5m meeting.starts_in offset. The VPS crontab does not
+  # have that throttling problem. workflow_dispatch stays as the
+  # manual/emergency trigger for if the VPS is ever down.
   workflow_dispatch:        # manual trigger
 
 concurrency:

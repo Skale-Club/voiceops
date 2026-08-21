@@ -9,8 +9,19 @@ name: Scrape Google Reviews (SerpAPI)
 #   OPERATOR_AUTOMATION_SECRET     matches OPERATOR_AUTOMATION_SECRET env var on Coolify
 
 on:
-  schedule:
-    - cron: '0 6 * * *'   # 06:00 UTC daily
+  # Schedule trigger removed 2026-08-21: this scrape now runs from the
+  # skale-cron service on the Coolify VPS, which has been firing it reliably
+  # for hours with heartbeats reporting in and alerting verified end-to-end
+  # (a real alert email was delivered when a job went silent). This job was
+  # only daily (0 6 * * *), but it was migrated together with a batch of
+  # sibling GitHub Actions ticks whose */5 * * * * schedules GitHub was
+  # throttling into 28-37 minute gaps in practice; every job in that batch,
+  # daily or not, also paid a full billed runner-minute per invocation for a
+  # curl that only takes 7-47s (95s for this one, per the Cloudflare 524
+  # note below). The VPS crontab has neither problem. The Cloudflare 524
+  # workaround (pin to origin.xphere.app, skip the edge) still applies
+  # unchanged. workflow_dispatch stays as the manual/emergency trigger,
+  # including the force and profile_id inputs, for if the VPS is ever down.
   workflow_dispatch:
     inputs:
       force:

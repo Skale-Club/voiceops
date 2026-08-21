@@ -4,8 +4,16 @@ name: Website Analyzer Cron
 # Fires every 10 minutes so newly-ingested prospects get analyzed promptly.
 
 on:
-  schedule:
-    - cron: '*/10 * * * *'  # every 10 minutes
+  # Schedule trigger removed 2026-08-21: this cron now runs from the
+  # skale-cron service on the Coolify VPS, which has been firing it reliably
+  # for hours with heartbeats reporting in and alerting verified end-to-end
+  # (a real alert email was delivered when a job went silent). GitHub Actions
+  # billed a full minute of runner time per invocation for a curl that only
+  # takes 7-47s, and its shared runners were throttling schedules like this
+  # one into 28-37 minute gaps in practice instead of the configured
+  # interval — the VPS crontab does not have that throttling problem.
+  # workflow_dispatch stays as the manual/emergency trigger for if the VPS
+  # is ever down.
   workflow_dispatch:          # manual trigger
 
 concurrency:
