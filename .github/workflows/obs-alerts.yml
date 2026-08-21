@@ -75,16 +75,17 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          GH_REPO: ${{ github.repository }}
           STATUS: ${{ steps.probe.outputs.status }}
         run: |
           set -euo pipefail
           gh label create outage --color B60205 \
             --description "xphere unreachable from outside the VPS" 2>/dev/null || true
-          existing=$(gh issue list --label outage --state open --limit 1 --json number --jq '.[0].number // empty')
+          existing=$(gh issue list --repo "$GH_REPO" --label outage --state open --limit 1 --json number --jq '.[0].number // empty')
           if [ -n "$existing" ]; then
-            gh issue comment "$existing" --body "Still unreachable - last status \`${STATUS:-unknown}\` - $RUN_URL"
+            gh issue comment "$existing" --repo "$GH_REPO" --body "Still unreachable - last status \`${STATUS:-unknown}\` - $RUN_URL"
           else
-            gh issue create --label outage \
+            gh issue create --repo "$GH_REPO" --label outage \
               --title "xphere is unreachable from outside the VPS" \
               --body "$(printf '%s\n' \
                 "**xphere is unreachable from outside the VPS.**" \
@@ -108,6 +109,7 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_ALERT_CHAT_ID: ${{ secrets.TELEGRAM_ALERT_CHAT_ID }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          GH_REPO: ${{ github.repository }}
           STATUS: ${{ steps.probe.outputs.status }}
         run: |
           if [ -z "$TELEGRAM_BOT_TOKEN" ] || [ -z "$TELEGRAM_ALERT_CHAT_ID" ]; then
@@ -137,9 +139,10 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          GH_REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
-          existing=$(gh issue list --label outage --state open --limit 1 --json number --jq '.[0].number // empty')
+          existing=$(gh issue list --repo "$GH_REPO" --label outage --state open --limit 1 --json number --jq '.[0].number // empty')
           if [ -n "$existing" ]; then
-            gh issue close "$existing" --comment "Reachable again - $RUN_URL"
+            gh issue close "$existing" --repo "$GH_REPO" --comment "Reachable again - $RUN_URL"
           fi
