@@ -72,7 +72,7 @@ O sistema de Ads é composto por sete subsistemas:
 
 **Migrations — já aplicadas em produção** (projeto `mwklvkmggmsintqcqfvu`): 1285 (saúde de conexão + plataformas), 1286 (`ads_insights_daily`), 1287 (modelo de atribuição), 1288 (ator da execução), 1289 (grants das funções).
 
-> ⚠️ **Drift detectado no banco.** As versões 1283 e 1284 já estavam aplicadas em produção com outros nomes — `medusa_context_atomic_writes` e `commerce_context_v2_binding` — e **não existem em nenhum branch do repositório**. Foram aplicadas direto no banco por outra sessão. Por isso as migrations de Ads foram renumeradas para 1285–1289. Um `supabase db push` a partir de um checkout limpo não reproduz produção enquanto esses dois arquivos não forem versionados; vale recuperá-los do histórico do Supabase.
+> **Drift do banco — resolvido.** As versões 1283 e 1284 estavam aplicadas em produção com outros nomes (`medusa_context_atomic_writes`, `commerce_context_v2_binding`) e sem arquivo no repositório — aplicadas direto no banco por outra sessão. O SQL foi recuperado de `supabase_migrations.schema_migrations` e versionado; a fidelidade foi conferida por hash MD5 do SQL normalizado contra o banco (`7bb7c8f6…` e `6be97017…`, idênticos). Por causa da colisão, as migrations de Ads ocupam 1285–1289. Um `supabase db push` a partir de um checkout limpo agora reproduz produção.
 
 **Cache** — usa o `REDIS_URL` existente. Sem Redis, tudo continua funcionando (cai direto na API); só se perde o benefício.
 
