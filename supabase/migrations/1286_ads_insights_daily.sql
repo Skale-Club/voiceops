@@ -62,10 +62,16 @@ ALTER TABLE public.ads_insights_daily ENABLE ROW LEVEL SECURITY;
 -- Reads are org-scoped like every other ads table. Writes come from the cron
 -- via the service-role client, which bypasses RLS, so no write policy for
 -- authenticated users is needed (and none is wanted — this is derived data).
+--
+-- CREATE POLICY and CREATE TRIGGER have no IF NOT EXISTS form, so they are
+-- dropped first: everything else in this file is idempotent and re-running the
+-- whole migration should not fail on these two.
+DROP POLICY IF EXISTS "ads_insights_daily_select" ON public.ads_insights_daily;
 CREATE POLICY "ads_insights_daily_select" ON public.ads_insights_daily
   FOR SELECT TO authenticated
   USING (org_id = public.get_current_org_id());
 
+DROP TRIGGER IF EXISTS ads_insights_daily_updated_at ON public.ads_insights_daily;
 CREATE TRIGGER ads_insights_daily_updated_at
   BEFORE UPDATE ON public.ads_insights_daily
   FOR EACH ROW EXECUTE FUNCTION trigger_update_updated_at();
