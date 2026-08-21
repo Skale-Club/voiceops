@@ -1,6 +1,7 @@
 // src/lib/obs/alerts.ts
-// O3: observability alerting. Sends messages + errors to Telegram and dedupes
-// repeat notifications via the obs_alert_log table. Used by the obs-alerts cron.
+// O3: observability alerting. Sends messages + errors to Telegram and/or email,
+// and dedupes repeat notifications via the obs_alert_log table. Used by the
+// obs-alerts cron.
 //
 // Config:
 //   TELEGRAM_BOT_TOKEN         - Bot token from @BotFather, for this app's own alerts.
@@ -8,12 +9,26 @@
 //   TELEGRAM_BOT_TOKEN_OPS     - Optional. Bot token for an ops-wide destination shared
 //                                across apps (xphere, xkedule, skaleclub, xtimator, ...).
 //   TELEGRAM_ALERT_CHAT_ID_OPS - Optional. Chat id to pair with TELEGRAM_BOT_TOKEN_OPS.
+//   PLATFORM_ADMIN_EMAIL       - Recipient for the email alert channel. Sent via
+//                                sendPlatformEmail() (platform_email_settings / Resend).
 // When TELEGRAM_BOT_TOKEN / TELEGRAM_ALERT_CHAT_ID are unset, this app's own alerts
 // (sendTelegramAlert() with no destination override) are a no-op (telegramConfigured()
 // === false). resolveOpsTelegramDestination() prefers the OPS pair when set and falls
 // back to the app's own pair, for signals that span multiple apps on this ops hub.
+//
+// Email is the floor, not the ceiling: Telegram is faster and better suited to
+// on-call (push notification, group chat, mobile), but it requires a human to
+// sit in the Telegram app and create a bot + chat before it can carry a single
+// message - a channel that requires a human to exist is not a channel you can
+// rely on having. Email needs zero setup beyond an already-configured Resend
+// integration and an admin address, both of which this platform has by
+// default, so deliverAlert() always falls through to it. Callers that just
+// want "get this alert out, best effort" should use deliverAlert() rather than
+// picking a single channel by hand.
 
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { createLogger } from '@/lib/obs/logger'
+import { sendPlatformEmail } from '@/lib/email/resend'
 
 export type AlertSeverity = 'warning' | 'critical'
 
@@ -112,6 +127,133 @@ export async function sendTelegramAlert(alert: Alert, destination?: TelegramDest
   } catch {
     return false
   }
+}
+
+// ─── Email delivery ─────────────────────────────────────────────────────────
+
+/** True when the email alert channel has somewhere to send to. */
+export function alertEmailConfigured(): boolean {
+  return Boolean(process.env.PLATFORM_ADMIN_EMAIL)
+}
+
+function severityLabel(severity: AlertSeverity): string {
+  return severity === 'critical' ? 'CRITICAL' : 'WARNING'
+}
+
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+}
+
+/** Renders an Alert as a small, scannable HTML email plus a plain-text alternative. */
+function renderAlertEmail(alert: Alert): { html: string; text: string } {
+  const fields = Object.entries(alert.fields ?? {})
+  const color = alert.severity === 'critical' ? '#dc2626' : '#d97706'
+
+  const htmlRows = fields
+    .map(
+      ([k, v]) => `
+        <tr>
+          <td style="padding:4px 12px 4px 0;color:#6b7280;font-family:Arial,Helvetica,sans-serif;font-size:13px;white-space:nowrap;vertical-align:top;">${escapeHtml(k)}</td>
+          <td style="padding:4px 0;color:#111827;font-family:Arial,Helvetica,sans-serif;font-size:13px;">${escapeHtml(String(v))}</td>
+        </tr>`,
+    )
+    .join('')
+
+  const html = `
+    <div style="font-family:Arial,Helvetica,sans-serif;max-width:520px;margin:0 auto;">
+      <span style="display:inline-block;padding:2px 8px;border-radius:4px;background:${color};color:#ffffff;font-size:12px;font-weight:600;letter-spacing:0.03em;">${severityLabel(alert.severity)}</span>
+      <h2 style="margin:12px 0 16px;color:#111827;font-size:18px;line-height:1.3;">${escapeHtml(alert.title)}</h2>
+      ${fields.length ? `<table style="border-collapse:collapse;">${htmlRows}</table>` : ''}
+      <p style="margin-top:20px;color:#9ca3af;font-family:Arial,Helvetica,sans-serif;font-size:11px;">alert key: ${escapeHtml(alert.key)}</p>
+    </div>`
+
+  const text = [
+    `[${severityLabel(alert.severity)}] ${alert.title}`,
+    '',
+    ...fields.map(([k, v]) => `${k}: ${v}`),
+    '',
+    `alert key: ${alert.key}`,
+  ].join('\n')
+
+  return { html, text }
+}
+
+/**
+ * Sends an alert by email to PLATFORM_ADMIN_EMAIL via sendPlatformEmail().
+ * Never throws - a failing alert channel must not break the caller. Returns
+ * true only when the send actually succeeded.
+ */
+export async function sendAlertEmail(alert: Alert): Promise<boolean> {
+  const to = process.env.PLATFORM_ADMIN_EMAIL
+  if (!to) return false
+  try {
+    const subject = `[${severityLabel(alert.severity)}] ${alert.title}`
+    const { html, text } = renderAlertEmail(alert)
+    const { error } = await sendPlatformEmail(to, subject, html, text, { source: 'obs-alerts' })
+    return !error
+  } catch {
+    return false
+  }
+}
+
+// ─── Unified delivery ───────────────────────────────────────────────────────
+
+/** True when at least one alert channel (Telegram or email) has somewhere to send to. */
+export function anyAlertChannelConfigured(): boolean {
+  return opsTelegramConfigured() || alertEmailConfigured()
+}
+
+/**
+ * Single entry point callers should use to deliver an alert. Tries Telegram
+ * first when configured (passing `opts.telegramDestination` through, e.g.
+ * from resolveOpsTelegramDestination()), then email - email is the
+ * always-available floor described at the top of this file, so it's always
+ * attempted regardless of whether Telegram succeeded. Returns true if any
+ * channel delivered. Never throws.
+ */
+export async function deliverAlert(
+  alert: Alert,
+  opts?: { telegramDestination?: TelegramDestination },
+): Promise<boolean> {
+  const log = createLogger({ route: 'obs-alerts', alertKey: alert.key })
+  let delivered = false
+
+  const telegramAttempted = Boolean(opts?.telegramDestination) || telegramConfigured()
+  if (telegramAttempted) {
+    const ok = await sendTelegramAlert(alert, opts?.telegramDestination)
+    if (ok) {
+      delivered = true
+      log.info('alert_channel_delivered', { channel: 'telegram' })
+    } else {
+      log.warn('alert_channel_failed', { channel: 'telegram' })
+    }
+  }
+
+  // Email is the fallback, not a second copy. Once a Telegram bot exists,
+  // delivering through both would mean every alert pages twice — noise that
+  // trains people to ignore the channel, which is how alerting dies. Email is
+  // the floor because it needs no setup, so it runs only when the faster
+  // channel is absent or failed.
+  const emailAttempted = !delivered && alertEmailConfigured()
+  if (emailAttempted) {
+    const ok = await sendAlertEmail(alert)
+    if (ok) {
+      delivered = true
+      log.info('alert_channel_delivered', { channel: 'email' })
+    } else {
+      log.warn('alert_channel_failed', { channel: 'email' })
+    }
+  }
+
+  if (!delivered) {
+    log.warn('alert_delivery_failed', { telegramAttempted, emailAttempted })
+  }
+
+  return delivered
 }
 
 // ─── Dedupe (obs_alert_log) ───────────────────────────────────────────────────

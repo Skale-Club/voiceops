@@ -1,6 +1,6 @@
 // O3: observability alerting cron.
 // Invoked by .github/workflows/obs-alerts.yml (hourly). Checks existing signals
-// cross-org and posts deduped Telegram alerts:
+// cross-org and posts deduped alerts:
 //   1. Agent cost near the daily cap (>= 80%)
 //   2. Google Reviews scrape failures (error / quota_exceeded)
 //   3. High agent error rate in the last hour
@@ -12,16 +12,21 @@
 //      TELEGRAM_ALERT_CHAT_ID_OPS) when configured, falling back to this
 //      app's own bot/chat otherwise - see src/lib/obs/alerts.ts.
 //
-// Caller sends CRON_SECRET as `Authorization: Bearer`. No-ops cleanly when
-// no Telegram destination is configured, so it is safe to schedule before the
-// webhook secret is configured.
+// Delivery: each candidate alert is dispatched via deliverAlert() (src/lib/obs/alerts.ts),
+// which tries Telegram first when a destination is configured, then always
+// falls through to email (PLATFORM_ADMIN_EMAIL via sendPlatformEmail) - email
+// is the always-available floor, since it needs no human setup, unlike a
+// Telegram bot/chat. The route only skips entirely when *no* channel at all
+// is configured (anyAlertChannelConfigured() below), so as of 2026-08-21,
+// with PLATFORM_ADMIN_EMAIL set and platform email working, this cron
+// actively evaluates every signal and alerts by email even though no
+// TELEGRAM_* vars exist in production. The JSON response reports which
+// channels were armed for this run (`channels`) so that's verifiable from a
+// plain curl.
 //
-// IMPORTANT: as of 2026-08-20, no TELEGRAM_* env vars are set in production
-// (confirmed against the live Coolify runtime env) - this route currently
-// short-circuits to `{ ok: true, skipped: ... }` on every hourly run without
-// evaluating any signal. The workflow going green hourly does NOT mean these
-// checks have ever actually run; don't assume otherwise without re-verifying
-// the deployed env once the Telegram vars are added.
+// Caller sends CRON_SECRET as `Authorization: Bearer`. No-ops cleanly when no
+// alert channel is configured at all, so it is safe to schedule before either
+// channel's secrets are configured.
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -31,14 +36,16 @@ import type { Database } from '@/types/database'
 import { createLogger } from '@/lib/obs/logger'
 import {
   type Alert,
+  alertEmailConfigured,
   alreadyAlerted,
+  anyAlertChannelConfigured,
   costBreached,
   costSeverity,
+  deliverAlert,
   errorRateBreached,
   opsTelegramConfigured,
   recordAlert,
   resolveOpsTelegramDestination,
-  sendTelegramAlert,
 } from '@/lib/obs/alerts'
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL
@@ -58,15 +65,17 @@ export async function GET(request: Request): Promise<Response> {
   }
 
   const log = createLogger({ route: 'api/cron/obs-alerts' })
-  // opsTelegramConfigured() already falls back to the app pair, so it alone
-  // tells us whether *any* destination (app-scoped or ops-scoped) exists.
-  // Signals 1-3 additionally need telegramConfigured() (the app pair) to
-  // actually deliver - see sendTelegramAlert() call sites below.
-  if (!opsTelegramConfigured()) {
+  // Only skip entirely when there is truly nowhere to send an alert. Email
+  // (alertEmailConfigured()) is the always-available floor - it needs no
+  // human setup - so this route now actually evaluates all four signals
+  // whenever *any* channel exists, even with no TELEGRAM_* vars set.
+  const channels = { telegram: opsTelegramConfigured(), email: alertEmailConfigured() }
+  if (!anyAlertChannelConfigured()) {
     return Response.json({
       ok: true,
       skipped:
-        'No Telegram destination configured (TELEGRAM_BOT_TOKEN/TELEGRAM_ALERT_CHAT_ID or TELEGRAM_BOT_TOKEN_OPS/TELEGRAM_ALERT_CHAT_ID_OPS)',
+        'No alert channel configured (TELEGRAM_BOT_TOKEN/TELEGRAM_ALERT_CHAT_ID, TELEGRAM_BOT_TOKEN_OPS/TELEGRAM_ALERT_CHAT_ID_OPS, or PLATFORM_ADMIN_EMAIL)',
+      channels,
     })
   }
 
@@ -226,8 +235,10 @@ export async function GET(request: Request): Promise<Response> {
   // `cronstale:` alerts go to the ops-wide Telegram destination (falls back
   // to this app's own bot/chat when TELEGRAM_*_OPS is unset) since the job
   // that went stale may belong to any app on this ops hub, not just xphere.
-  // Signals 1-3 keep using sendTelegramAlert(alert) with no destination
-  // override, i.e. exactly their prior behaviour.
+  // Signals 1-3 keep using deliverAlert(alert) with no destination override,
+  // i.e. exactly their prior Telegram-targeting behaviour, now also falling
+  // through to email. Every candidate is delivered via deliverAlert() rather
+  // than sendTelegramAlert() directly, so email is always tried too.
   const opsDestination = resolveOpsTelegramDestination() ?? undefined
   let sent = 0
   for (const alert of candidates) {
@@ -239,13 +250,13 @@ export async function GET(request: Request): Promise<Response> {
           ? 180
           : 60
     if (await alreadyAlerted(dedupe, alert.key, windowMinutes)) continue
-    const destination = alert.key.startsWith('cronstale:') ? opsDestination : undefined
-    if (await sendTelegramAlert(alert, destination)) {
+    const telegramDestination = alert.key.startsWith('cronstale:') ? opsDestination : undefined
+    if (await deliverAlert(alert, { telegramDestination })) {
       await recordAlert(dedupe, alert.key)
       sent++
     }
   }
 
-  log.info('obs_alerts_run', { candidates: candidates.length, sent })
-  return Response.json({ ok: true, candidates: candidates.length, sent })
+  log.info('obs_alerts_run', { candidates: candidates.length, sent, channels })
+  return Response.json({ ok: true, candidates: candidates.length, sent, channels })
 }

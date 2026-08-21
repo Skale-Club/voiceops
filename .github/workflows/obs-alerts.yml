@@ -4,23 +4,33 @@ name: Observability Alerts
 # Hetzner VPS) and plays a dual role:
 #
 #   1. Trigger the in-app alert sweep. Hits /api/cron/obs-alerts, which checks
-#      cost/scrape/error-rate/cron-heartbeat signals in Supabase and sends its
-#      own deduped Telegram alerts. That endpoint no-ops when
-#      TELEGRAM_BOT_TOKEN / TELEGRAM_ALERT_CHAT_ID are unset, so it's safe to
-#      enable before those secrets are configured.
+#      cost/scrape/error-rate/cron-heartbeat signals in Supabase and delivers
+#      its own deduped alerts via src/lib/obs/alerts.ts (Telegram when
+#      configured, always falling through to email - see that file's header
+#      comment). The endpoint only no-ops when *no* alert channel at all is
+#      configured, so it's safe to keep this enabled regardless of which
+#      channel secrets exist.
 #
 #   2. Act as the outside-the-box liveness check for the whole VPS. If the
 #      endpoint can't be reached at all (VPS down, Coolify down, DNS broken,
 #      etc.) or keeps returning a non-2xx after retries, no in-app alert can
 #      ever fire - the app itself is unreachable. This workflow is the only
-#      thing that can notice that, so on failure it posts its own Telegram
-#      alert directly from the GitHub runner (not via the app) and fails the
-#      job so the failure is also visible in the Actions tab.
+#      thing that can notice that, so on failure it files/updates a GitHub
+#      issue directly from the runner (via the built-in GITHUB_TOKEN, so it
+#      needs no secret setup and notifies watchers by email) and fails the
+#      job so the failure is also visible in the Actions tab. It also posts to
+#      Telegram as an additional best-effort step when those secrets happen to
+#      be configured, but the GitHub issue is the alert of record - it works
+#      with zero setup, unlike Telegram.
 
 on:
   schedule:
     - cron: '0 * * * *'   # hourly
   workflow_dispatch:        # manual trigger
+
+permissions:
+  contents: read
+  issues: write   # the failure step files/updates the unreachable-VPS issue below
 
 concurrency:
   group: obs-alerts
@@ -32,9 +42,7 @@ jobs:
     timeout-minutes: 5
     steps:
       - name: Fire obs-alerts endpoint
-        env:
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_ALERT_CHAT_ID: ${{ secrets.TELEGRAM_ALERT_CHAT_ID }}
+        id: probe
         run: |
           # --retry rides out transient proxy errors (503 "no available server")
           # that occur while Coolify is mid-redeploy; the endpoint itself is healthy.
@@ -45,37 +53,93 @@ jobs:
             "${{ secrets.SITE_URL }}/api/cron/obs-alerts")
           echo "Status: $STATUS"
           echo "Body: $(cat /tmp/body)"
+          echo "status=$STATUS" >> "$GITHUB_OUTPUT"
           if [ "$STATUS" -ge 200 ] && [ "$STATUS" -lt 300 ]; then
             echo "OK"
             exit 0
           fi
-
           echo "obs-alerts failed with status $STATUS" >&2
+          exit 1
 
-          # This is the outside-the-box liveness check failing: the endpoint
-          # was unreachable (or unhealthy) even after retries, meaning xphere
-          # is unreachable from outside the VPS. That's a distinct and more
-          # serious signal than any alert the app itself can send - if the
-          # app can't be reached, it can't alert on its own behalf either.
-          if [ -z "$TELEGRAM_BOT_TOKEN" ] || [ -z "$TELEGRAM_ALERT_CHAT_ID" ]; then
-            echo "TELEGRAM_BOT_TOKEN / TELEGRAM_ALERT_CHAT_ID not set - skipping external liveness alert" >&2
+      # This is the outside-the-box liveness check failing: the endpoint was
+      # unreachable (or unhealthy) even after retries, meaning xphere is
+      # unreachable from outside the VPS. That's a distinct and more serious
+      # signal than any alert the app itself can send - if the app can't be
+      # reached, it can't alert on its own behalf either. Filed as a GitHub
+      # issue (not Telegram) because it needs no secret setup at all: only
+      # GITHUB_TOKEN, which every workflow already has. ONE issue per outage:
+      # the first failure files it, every later failure comments on it, and
+      # recovery (below) closes it, so a long outage can't spam the tracker.
+      - name: File or update the unreachable-VPS issue
+        if: failure() && steps.probe.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          STATUS: ${{ steps.probe.outputs.status }}
+        run: |
+          set -euo pipefail
+          gh label create outage --color B60205 \
+            --description "xphere unreachable from outside the VPS" 2>/dev/null || true
+          existing=$(gh issue list --label outage --state open --limit 1 --json number --jq '.[0].number // empty')
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --body "Still unreachable - last status \`${STATUS:-unknown}\` - $RUN_URL"
           else
-            RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-            # printf (not a literal multi-line string) keeps every line of
-            # this command indented inside the YAML block scalar above, and
-            # embeds real newlines in TEXT for Telegram to render as bullets.
-            TEXT=$(printf '%s\n%s\n%s\n%s\n%s\n%s' \
-              "🔴 *xphere is unreachable from outside the VPS*" \
-              "• signal: hourly GitHub Actions liveness check failed after retries" \
-              "• endpoint: /api/cron/obs-alerts" \
-              "• last status: $STATUS" \
-              "• meaning: the VPS/Coolify/app may be down - in-app alerts cannot fire if the app itself can't be reached" \
-              "• run: $RUN_URL")
-            curl -s -o /dev/null -X POST \
-              "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
-              -H "Content-Type: application/json" \
-              -d "$(jq -n --arg chat_id "$TELEGRAM_ALERT_CHAT_ID" --arg text "$TEXT" \
-                '{chat_id: $chat_id, text: $text, parse_mode: "Markdown", disable_web_page_preview: true}')"
+            gh issue create --label outage \
+              --title "xphere is unreachable from outside the VPS" \
+              --body "$(printf '%s\n' \
+                "**xphere is unreachable from outside the VPS.**" \
+                "" \
+                "This is the hourly GitHub Actions liveness check for \`/api/cron/obs-alerts\` failing after retries - not an in-app alert. It means the app itself could not be reached at all, which is more serious than anything the app's own alerting can report: an unreachable app cannot alert on its own behalf either." \
+                "" \
+                "- last status: \`${STATUS:-unknown}\`" \
+                "- endpoint: /api/cron/obs-alerts" \
+                "- run: $RUN_URL" \
+                "" \
+                "This issue is filed automatically by \`.github/workflows/obs-alerts.yml\` and closes itself once the probe succeeds again. Later failures are added as comments rather than new issues.")"
           fi
 
-          exit 1
+      # Best-effort extra channel. Skips silently (not a failure) when the
+      # Telegram secrets aren't configured - the GitHub issue above is already
+      # the alert of record and needs no secrets, so there's nothing to fall
+      # back to here.
+      - name: Best-effort Telegram post
+        if: failure() && steps.probe.outcome == 'failure'
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_ALERT_CHAT_ID: ${{ secrets.TELEGRAM_ALERT_CHAT_ID }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          STATUS: ${{ steps.probe.outputs.status }}
+        run: |
+          if [ -z "$TELEGRAM_BOT_TOKEN" ] || [ -z "$TELEGRAM_ALERT_CHAT_ID" ]; then
+            echo "TELEGRAM_BOT_TOKEN / TELEGRAM_ALERT_CHAT_ID not set - skipping (the GitHub issue above is the alert of record)"
+            exit 0
+          fi
+          # printf (not a literal multi-line string) keeps every line of
+          # this command indented inside the YAML block scalar above, and
+          # embeds real newlines in TEXT for Telegram to render as bullets.
+          TEXT=$(printf '%s\n%s\n%s\n%s\n%s\n%s' \
+            "🔴 *xphere is unreachable from outside the VPS*" \
+            "• signal: hourly GitHub Actions liveness check failed after retries" \
+            "• endpoint: /api/cron/obs-alerts" \
+            "• last status: ${STATUS:-unknown}" \
+            "• meaning: the VPS/Coolify/app may be down - in-app alerts cannot fire if the app itself can't be reached" \
+            "• run: $RUN_URL")
+          curl -s -o /dev/null -X POST \
+            "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+            -H "Content-Type: application/json" \
+            -d "$(jq -n --arg chat_id "$TELEGRAM_ALERT_CHAT_ID" --arg text "$TEXT" \
+              '{chat_id: $chat_id, text: $text, parse_mode: "Markdown", disable_web_page_preview: true}')"
+
+      # Recovery closes the loop, so an open `outage` issue always means
+      # "unreachable right now" instead of decaying into a stale one nobody trusts.
+      - name: Close the unreachable-VPS issue on recovery
+        if: success()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          existing=$(gh issue list --label outage --state open --limit 1 --json number --jq '.[0].number // empty')
+          if [ -n "$existing" ]; then
+            gh issue close "$existing" --comment "Reachable again - $RUN_URL"
+          fi
