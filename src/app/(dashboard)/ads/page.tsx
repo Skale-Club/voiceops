@@ -1,5 +1,6 @@
 import { createClient, getUser } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
+import { ConnectionHealthBanner } from './_components/connection-health-banner'
 import { MetaAdsConnect } from './_components/meta-ads-connect'
 import { MetaAdsOverview } from './_components/meta-ads-overview'
 import { NoAccountsSelected } from './_components/no-accounts-selected'
@@ -10,10 +11,11 @@ export default async function AdsPage() {
 
   const supabase = await createClient()
 
-  // All connected accounts (active = shown, available = connected-but-hidden).
+  // All connected accounts (active = shown, available = connected-but-hidden,
+  // error = connected but the credential was rejected).
   const { data: rows } = await supabase
     .from('ads_connections')
-    .select('id, ad_account_id, ad_account_name, status, ad_objective, created_at')
+    .select('id, ad_account_id, ad_account_name, status, ad_objective, connection_error, token_expires_at, created_at')
     .eq('platform', 'meta')
     .order('created_at', { ascending: true })
 
@@ -22,17 +24,34 @@ export default async function AdsPage() {
     return <MetaAdsConnect />
   }
 
+  // Rendered above whatever comes next: an expired token leaves the account
+  // out of the `active` set below, so without this the page would silently
+  // fall back to the empty state and give no hint that a reconnect is needed.
+  const healthBanner = (
+    <ConnectionHealthBanner
+      platform="meta"
+      connections={all}
+      connectHref="/api/ads/meta/connect"
+    />
+  )
+
   const connections = all.filter((c) => c.status === 'active')
 
   // Connected, but the admin hasn't picked which accounts to show yet.
   if (connections.length === 0) {
-    return <NoAccountsSelected platform="meta" />
+    return (
+      <div className="space-y-4">
+        {healthBanner}
+        <NoAccountsSelected platform="meta" />
+      </div>
+    )
   }
 
   const primaryAccount = connections[0]
 
   return (
-    <div>
+    <div className="space-y-4">
+      {healthBanner}
       <MetaAdsOverview
         adAccountId={primaryAccount.ad_account_id}
         adAccountName={primaryAccount.ad_account_name ?? primaryAccount.ad_account_id}

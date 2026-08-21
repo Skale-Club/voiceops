@@ -1,0 +1,67 @@
+name: Ads Tick
+
+# Nightly maintenance for the Ads module (src/app/api/cron/ads-tick/route.ts):
+#
+#   1. Captures per-campaign daily metrics into ads_insights_daily, giving the
+#      product its own history instead of re-querying the platform APIs on
+#      every render. The job re-captures a 7-day trailing window because Meta
+#      and Google both restate recent days as attribution windows close.
+#
+#   2. Flags ad connections whose token is expiring or already expired. Meta
+#      user tokens last ~60 days; without this the dashboard, the Copilot and
+#      the CAPI fallback token all fail silently once one lapses.
+#
+# Cadence: once daily at 05:10 UTC — after both platforms have settled the
+# previous day's numbers, and off the hour so it doesn't pile onto the other
+# scheduled jobs in this repo. Re-runs are safe: the snapshot upserts on
+# (org, platform, account, campaign, date).
+
+on:
+  schedule:
+    - cron: '10 5 * * *'
+  workflow_dispatch:
+    inputs:
+      org_id:
+        description: 'Process a single org (optional)'
+        required: false
+      skip_snapshot:
+        description: 'Run only the expiry watch, skip the insight capture'
+        type: boolean
+        default: false
+
+concurrency:
+  group: ads-tick
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  tick:
+    name: Capture insights and check connection health
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Fire ads-tick endpoint
+        run: |
+          QS=""
+          if [ -n "${{ github.event.inputs.org_id }}" ]; then
+            QS="?org_id=${{ github.event.inputs.org_id }}"
+          fi
+          if [ "${{ github.event.inputs.skip_snapshot }}" = "true" ]; then
+            if [ -z "$QS" ]; then QS="?skip_snapshot=true"; else QS="$QS&skip_snapshot=true"; fi
+          fi
+
+          # --retry only covers transient connection failures. The endpoint is
+          # idempotent (upsert on a natural key), so a duplicate run is safe.
+          STATUS=$(curl -s -o /tmp/body -w "%{http_code}" \
+            --connect-timeout 15 --max-time 300 \
+            --retry 2 --retry-delay 30 \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            "${{ secrets.SITE_URL }}/api/cron/ads-tick$QS")
+          echo "Status: $STATUS"
+          echo "Body: $(cat /tmp/body)"
+          if [ "$STATUS" != "200" ]; then
+            echo "::error::ads-tick returned $STATUS"
+            exit 1
+          fi

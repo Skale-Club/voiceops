@@ -7,9 +7,19 @@ import {
   ingestGlobalKnowledgeText,
   isPlatformAdminUser,
 } from '@/lib/knowledge/global-knowledge'
-import { decrypt } from '@/lib/crypto'
 import { getInsights, listCampaigns, getAdAccountInfo } from '@/lib/ads/meta-api'
 import type { DatePreset } from '@/lib/ads/meta-api'
+import { resolveAdAccount } from '@/lib/ads/ai-accounts'
+import { getAdsAttributionForOrg } from '@/lib/ads/attribution'
+import { formatCurrency } from '@/lib/ads/currency'
+import {
+  parseTokens,
+  getAccountOverview,
+  listCampaigns as googleListCampaigns,
+  buildGaqlDateCondition,
+} from '@/lib/ads/google-api'
+import { getCustomerInfo, refreshAccessToken } from '@/lib/ads/google-oauth'
+import { compareAdsPeriods, describeComparison } from '@/lib/ads/snapshot'
 import type { McpToolDef } from '../tool-types'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -22,24 +32,6 @@ const MetaDatePresetSchema = z.enum([
   'today', 'yesterday', 'last_7d', 'last_14d', 'last_30d',
   'last_90d', 'this_month', 'last_month', 'maximum',
 ]).default('last_30d')
-
-async function getMetaAccessToken(orgId: string, adAccountId?: string): Promise<{ token: string; accountId: string } | null> {
-  let q = db()
-    .from('ads_connections')
-    .select('ad_account_id, encrypted_access_token, status')
-    .eq('org_id', orgId)
-    .eq('platform', 'meta')
-    .in('status', ['active', 'available'])
-    .order('status') // 'active' sorts before 'available'
-
-  if (adAccountId) q = q.eq('ad_account_id', adAccountId)
-  else q = q.limit(1)
-
-  const { data } = await q
-  const conn = (data as { ad_account_id: string; encrypted_access_token: string }[] | null)?.[0]
-  if (!conn) return null
-  return { token: await decrypt(conn.encrypted_access_token), accountId: conn.ad_account_id }
-}
 
 function parseLeads(actions?: Array<{ action_type: string; value: string }>): number {
   return parseFloat(actions?.find((a) => a.action_type === 'lead')?.value ?? '0')
@@ -76,15 +68,15 @@ export const adsTools: McpToolDef[] = [
     name: 'ads_meta_get_overview',
     title: 'Get Meta Ads overview',
     description:
-      'Get account-level Meta Ads performance metrics: spend, impressions, clicks, CTR, CPM, CPC, reach, and leads. Pass ad_account_id to target a specific account, otherwise uses the first active Meta connection for the org.',
+      'Get account-level Meta Ads performance metrics: spend, impressions, clicks, CTR, CPM, CPC, reach, and leads. Pass ad_account_id to target a specific account. If the org has more than one active account and none is specified, this returns the list so you can ask which one — it never guesses. All money values are in the account currency returned alongside them.',
     area: 'general_xphere',
     inputSchema: z.object({
       ad_account_id: z.string().optional(),
       date_preset: MetaDatePresetSchema,
     }).strict(),
     handler: async ({ ad_account_id, date_preset }, { auth }) => {
-      const conn = await getMetaAccessToken(auth.orgId, ad_account_id)
-      if (!conn) return { error: 'no_connection', detail: 'No active Meta Ads connection found for this org.' }
+      const conn = await resolveAdAccount(auth.orgId, 'meta', ad_account_id)
+      if (!conn.ok) return { error: conn.error, detail: conn.detail, available_accounts: conn.available }
 
       try {
         const [accountInfo, insights] = await Promise.all([
@@ -94,13 +86,15 @@ export const adsTools: McpToolDef[] = [
         const raw = insights.data[0] ?? null
         const leads = raw ? parseLeads(raw.actions) : 0
         const spend = raw ? parseFloat(raw.spend ?? '0') : 0
+        const currency = accountInfo.currency
         return {
           ad_account_id: conn.accountId,
           ad_account_name: accountInfo.name,
-          currency: accountInfo.currency,
+          currency,
           date_preset,
           metrics: raw ? {
             spend,
+            spend_formatted: formatCurrency(spend, currency),
             impressions: parseInt(raw.impressions ?? '0', 10),
             clicks: parseInt(raw.clicks ?? '0', 10),
             reach: parseInt(raw.reach ?? '0', 10),
@@ -111,6 +105,7 @@ export const adsTools: McpToolDef[] = [
             cpp: raw.cpp ? parseFloat(raw.cpp) : null,
             frequency: raw.frequency ? parseFloat(raw.frequency) : null,
             cpl: leads > 0 ? spend / leads : null,
+            cpl_formatted: leads > 0 ? formatCurrency(spend / leads, currency) : null,
             date_start: raw.date_start,
             date_stop: raw.date_stop,
           } : null,
@@ -125,18 +120,19 @@ export const adsTools: McpToolDef[] = [
     name: 'ads_meta_list_campaigns',
     title: 'List Meta Ads campaigns',
     description:
-      'List Meta Ads campaigns for the org with enriched performance insights: status, spend, impressions, clicks, CTR, CPM, CPC, leads, and CPL. Use this to analyze which campaigns are active and performing.',
+      'List Meta Ads campaigns for the org with enriched performance insights: status, spend, impressions, clicks, CTR, CPM, CPC, leads, and CPL. Use this to analyze which campaigns are active and performing. Money values are in the account currency returned alongside them.',
     area: 'general_xphere',
     inputSchema: z.object({
       ad_account_id: z.string().optional(),
       date_preset: MetaDatePresetSchema,
     }).strict(),
     handler: async ({ ad_account_id, date_preset }, { auth }) => {
-      const conn = await getMetaAccessToken(auth.orgId, ad_account_id)
-      if (!conn) return { error: 'no_connection', detail: 'No active Meta Ads connection found for this org.' }
+      const conn = await resolveAdAccount(auth.orgId, 'meta', ad_account_id)
+      if (!conn.ok) return { error: conn.error, detail: conn.detail, available_accounts: conn.available }
 
       try {
-        const [campaigns, insights] = await Promise.all([
+        const [accountInfo, campaigns, insights] = await Promise.all([
+          getAdAccountInfo(conn.accountId, conn.token).catch(() => null),
           listCampaigns(conn.accountId, conn.token),
           getInsights(conn.accountId, conn.token, {
             level: 'campaign',
@@ -144,6 +140,7 @@ export const adsTools: McpToolDef[] = [
             fields: ['impressions', 'clicks', 'spend', 'reach', 'cpc', 'cpm', 'ctr', 'actions', 'campaign_id', 'campaign_name'],
           }),
         ])
+        const currency = accountInfo?.currency ?? 'USD'
 
         const insightMap = new Map(
           insights.data.map((i) => {
@@ -180,6 +177,8 @@ export const adsTools: McpToolDef[] = [
 
         return {
           ad_account_id: conn.accountId,
+          ad_account_name: conn.accountName,
+          currency,
           date_preset,
           campaigns: enriched,
           total_campaigns: enriched.length,
@@ -191,155 +190,179 @@ export const adsTools: McpToolDef[] = [
     },
   },
 
+  // ─── Google Ads live metrics ──────────────────────────────────────────────────
+  // Previously the AI could read Meta but not Google, even though the journey
+  // accepted platform='google' — so it could record plans about an account it
+  // was structurally unable to look at.
+
+  {
+    name: 'ads_google_get_overview',
+    title: 'Get Google Ads overview',
+    description:
+      'Account-level Google Ads performance: cost, impressions, clicks, CTR, average CPC, conversions and cost per conversion. Pass customer_id to target a specific account; with several connected and none specified, this returns the list instead of guessing.',
+    area: 'general_xphere',
+    inputSchema: z.object({
+      customer_id: z.string().optional(),
+      date_preset: z.string().default('last_30d'),
+    }).strict(),
+    handler: async ({ customer_id, date_preset }, { auth }) => {
+      const conn = await resolveAdAccount(auth.orgId, 'google', customer_id)
+      if (!conn.ok) return { error: conn.error, detail: conn.detail, available_accounts: conn.available }
+
+      try {
+        const tokens = parseTokens(conn.token)
+        const duration = buildGaqlDateCondition(date_preset)
+        const [info, overview] = await Promise.all([
+          refreshAccessToken(tokens.refresh_token)
+            .then((at) => getCustomerInfo(conn.accountId, at))
+            .catch(() => null),
+          getAccountOverview(conn.accountId, tokens.refresh_token, duration),
+        ])
+
+        const currency = info?.currency_code ?? 'USD'
+        // Google reports money in micros (1e6 per major unit) in every currency.
+        const cost = Number(overview.costMicros) / 1_000_000
+        const conversions = parseFloat(overview.conversions)
+
+        return {
+          customer_id: conn.accountId,
+          customer_name: info?.name ?? conn.accountName,
+          currency,
+          date_preset,
+          metrics: {
+            cost,
+            cost_formatted: formatCurrency(cost, currency),
+            impressions: parseInt(overview.impressions, 10),
+            clicks: parseInt(overview.clicks, 10),
+            conversions,
+            ctr: parseFloat(overview.ctr),
+            average_cpc: Number(overview.averageCpc) / 1_000_000,
+            cost_per_conversion: conversions > 0 ? cost / conversions : null,
+          },
+        }
+      } catch (e) {
+        return { error: 'google_api_error', detail: e instanceof Error ? e.message : 'Unknown error' }
+      }
+    },
+  },
+
+  {
+    name: 'ads_google_list_campaigns',
+    title: 'List Google Ads campaigns',
+    description:
+      'List Google Ads campaigns with status, channel type, bidding strategy, daily budget, cost, clicks, conversions and CPA. Use to find which campaigns to diagnose.',
+    area: 'general_xphere',
+    inputSchema: z.object({
+      customer_id: z.string().optional(),
+      date_preset: z.string().default('last_30d'),
+    }).strict(),
+    handler: async ({ customer_id, date_preset }, { auth }) => {
+      const conn = await resolveAdAccount(auth.orgId, 'google', customer_id)
+      if (!conn.ok) return { error: conn.error, detail: conn.detail, available_accounts: conn.available }
+
+      try {
+        const tokens = parseTokens(conn.token)
+        const duration = buildGaqlDateCondition(date_preset)
+        const [info, campaigns] = await Promise.all([
+          refreshAccessToken(tokens.refresh_token)
+            .then((at) => getCustomerInfo(conn.accountId, at))
+            .catch(() => null),
+          googleListCampaigns(conn.accountId, tokens.refresh_token, duration),
+        ])
+        const currency = info?.currency_code ?? 'USD'
+
+        const enriched = campaigns.map((c) => {
+          const cost = Number(c.costMicros) / 1_000_000
+          const conversions = parseFloat(c.conversions)
+          return {
+            id: c.id,
+            name: c.name,
+            status: c.status,
+            channel_type: c.channelType,
+            bidding_strategy: c.biddingStrategy,
+            daily_budget: Number(c.budgetAmountMicros) / 1_000_000,
+            cost,
+            impressions: parseInt(c.impressions, 10),
+            clicks: parseInt(c.clicks, 10),
+            conversions,
+            ctr: parseFloat(c.ctr),
+            cpa: conversions > 0 ? cost / conversions : null,
+          }
+        })
+
+        return {
+          customer_id: conn.accountId,
+          customer_name: info?.name ?? conn.accountName,
+          currency,
+          date_preset,
+          campaigns: enriched,
+          total_campaigns: enriched.length,
+          active_campaigns: enriched.filter((c) => c.status === 'ENABLED').length,
+        }
+      } catch (e) {
+        return { error: 'google_api_error', detail: e instanceof Error ? e.message : 'Unknown error' }
+      }
+    },
+  },
+
+  {
+    name: 'ads_compare_periods',
+    title: 'Compare ads periods',
+    description:
+      "Compare a window against the immediately preceding window of equal length, from Xphere's own stored daily history: spend, leads, conversions, CTR, CPC, CPL and the percent change in each. Use before claiming any trend. Returns no_data when history hasn't been captured for the account yet — report that rather than treating zeros as a decline.",
+    area: 'general_xphere',
+    inputSchema: z.object({
+      platform: z.enum(['meta', 'google']).default('meta'),
+      ad_account_id: z.string().optional(),
+      date_preset: z.string().default('last_30d'),
+    }).strict(),
+    handler: async ({ platform, ad_account_id, date_preset }, { auth }) => {
+      const conn = await resolveAdAccount(auth.orgId, platform, ad_account_id)
+      if (!conn.ok) return { error: conn.error, detail: conn.detail, available_accounts: conn.available }
+
+      const comparison = await compareAdsPeriods({
+        orgId: auth.orgId,
+        platform,
+        adAccountId: conn.accountId,
+        preset: date_preset,
+      })
+      return { ...comparison, summary: describeComparison(comparison) }
+    },
+  },
+
   // ─── Attribution ──────────────────────────────────────────────────────────────
 
   {
     name: 'ads_get_attribution',
     title: 'Get ads attribution',
     description:
-      'UTM-level lead and revenue attribution for ad campaigns. Joins traffic sessions → visitor contacts → CRM opportunities. Returns sessions, identified contacts, opportunities and pipeline revenue per campaign.',
+      'UTM-level lead and revenue attribution. Joins analytics sessions -> identified contacts -> CRM opportunities. Single-touch: each contact and each opportunity is credited to exactly ONE campaign (last_touch by default, first_touch optional), so the rows are additive and the totals are real pipeline, not influenced-revenue counted several times.',
     area: 'general_xphere',
     inputSchema: z.object({
       days: DaysSchema.optional(),
       platform: PlatformSchema,
+      model: z.enum(['last_touch', 'first_touch']).default('last_touch'),
     }).strict(),
-    handler: async ({ days = 30, platform }, { auth }) => {
+    handler: async ({ days = 30, platform, model }, { auth }) => {
       const from = new Date(Date.now() - days * 864e5).toISOString()
       const to = new Date().toISOString()
 
-      let sessionQ = db()
-        .from('analytics_sessions')
-        .select('id, utm_source, utm_medium, utm_campaign, visitor_id')
-        .eq('organization_id', auth.orgId)
-        .not('utm_campaign', 'is', null)
-        .gte('started_at', from)
-        .lte('started_at', to)
-        .limit(5000)
+      const summary = await getAdsAttributionForOrg({
+        orgId: auth.orgId,
+        from,
+        to,
+        platformFilter: platform ?? null,
+        model,
+      })
 
-      if (platform === 'meta') {
-        sessionQ = sessionQ.in('utm_source', ['meta', 'facebook', 'instagram', 'fb'])
-      } else if (platform === 'google') {
-        sessionQ = sessionQ.in('utm_source', ['google', 'adwords', 'google-ads'])
+      return {
+        rows: summary.rows,
+        totals: summary.totals,
+        model: summary.model,
+        truncated: summary.truncated,
+        period_days: days,
+        platform: platform ?? 'all',
       }
-
-      const { data: sessions, error: sessErr } = await sessionQ
-      if (sessErr) return { error: 'query_failed', detail: sessErr.message }
-      if (!sessions?.length) {
-        return {
-          rows: [],
-          totals: { sessions: 0, identified_contacts: 0, opportunities: 0, revenue: 0 },
-          period_days: days,
-          platform: platform ?? 'all',
-        }
-      }
-
-      const visitorIds = [...new Set((sessions as { visitor_id: string }[]).map((s) => s.visitor_id))]
-      const { data: visitors } = await db()
-        .from('analytics_visitors')
-        .select('id, contact_id')
-        .in('id', visitorIds)
-        .not('contact_id', 'is', null)
-
-      const visitorContactMap = new Map<string, string>()
-      for (const v of (visitors ?? []) as { id: string; contact_id: string }[]) {
-        visitorContactMap.set(v.id, v.contact_id)
-      }
-
-      const sessionIds = (sessions as { id: string }[]).map((s) => s.id)
-      const { data: events } = await db()
-        .from('analytics_events')
-        .select('session_id, contact_id')
-        .in('session_id', sessionIds)
-        .not('contact_id', 'is', null)
-
-      const eventContactMap = new Map<string, string>()
-      for (const e of (events ?? []) as { session_id: string; contact_id: string }[]) {
-        if (!eventContactMap.has(e.session_id)) eventContactMap.set(e.session_id, e.contact_id)
-      }
-
-      type CampaignRow = {
-        utm_source: string | null
-        utm_medium: string | null
-        utm_campaign: string | null
-        sessions: number
-        contact_ids: Set<string>
-        opp_ids: Set<string>
-        revenue: number
-      }
-      const map = new Map<string, CampaignRow>()
-
-      for (const s of sessions as { id: string; visitor_id: string; utm_source: string | null; utm_medium: string | null; utm_campaign: string | null }[]) {
-        const key = `${s.utm_source ?? ''}|${s.utm_medium ?? ''}|${s.utm_campaign ?? ''}`
-        if (!map.has(key)) {
-          map.set(key, {
-            utm_source: s.utm_source,
-            utm_medium: s.utm_medium,
-            utm_campaign: s.utm_campaign,
-            sessions: 0,
-            contact_ids: new Set(),
-            opp_ids: new Set(),
-            revenue: 0,
-          })
-        }
-        const row = map.get(key)!
-        row.sessions++
-        const contactId = visitorContactMap.get(s.visitor_id) ?? eventContactMap.get(s.id)
-        if (contactId) row.contact_ids.add(contactId)
-      }
-
-      const allContactIds = [...new Set([...visitorContactMap.values(), ...eventContactMap.values()])]
-      if (allContactIds.length) {
-        const { data: opps } = await db()
-          .from('opportunities')
-          .select('id, contact_id, value')
-          .in('contact_id', allContactIds)
-          .eq('org_id', auth.orgId)
-
-        const contactSessionKeys = new Map<string, string[]>()
-        for (const s of sessions as { id: string; visitor_id: string; utm_source: string | null; utm_medium: string | null; utm_campaign: string | null }[]) {
-          const contactId = visitorContactMap.get(s.visitor_id) ?? eventContactMap.get(s.id)
-          if (!contactId) continue
-          const key = `${s.utm_source ?? ''}|${s.utm_medium ?? ''}|${s.utm_campaign ?? ''}`
-          const keys = contactSessionKeys.get(contactId) ?? []
-          if (!keys.includes(key)) keys.push(key)
-          contactSessionKeys.set(contactId, keys)
-        }
-
-        for (const opp of (opps ?? []) as { id: string; contact_id: string; value: number | null }[]) {
-          const keys = contactSessionKeys.get(opp.contact_id) ?? []
-          for (const key of keys) {
-            const row = map.get(key)
-            if (row && !row.opp_ids.has(opp.id)) {
-              row.opp_ids.add(opp.id)
-              row.revenue += opp.value ?? 0
-            }
-          }
-        }
-      }
-
-      const rows = Array.from(map.values())
-        .map((r) => ({
-          utm_source: r.utm_source,
-          utm_medium: r.utm_medium,
-          utm_campaign: r.utm_campaign,
-          sessions: r.sessions,
-          identified_contacts: r.contact_ids.size,
-          opportunities: r.opp_ids.size,
-          revenue: r.revenue,
-        }))
-        .sort((a, b) => b.revenue - a.revenue || b.sessions - a.sessions)
-
-      const totals = rows.reduce(
-        (acc, r) => ({
-          sessions: acc.sessions + r.sessions,
-          identified_contacts: acc.identified_contacts + r.identified_contacts,
-          opportunities: acc.opportunities + r.opportunities,
-          revenue: acc.revenue + r.revenue,
-        }),
-        { sessions: 0, identified_contacts: 0, opportunities: 0, revenue: 0 },
-      )
-
-      return { rows, totals, period_days: days, platform: platform ?? 'all' }
     },
   },
 

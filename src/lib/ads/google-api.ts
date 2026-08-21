@@ -1,6 +1,12 @@
 import { refreshAccessToken, type GoogleAdsTokens } from './google-oauth'
+import { getCachedAccessToken, setCachedAccessToken, clearCachedAccessToken } from './cache'
+import { resolveNonNativeGoogleRange } from './date-range'
+import { assertIsoDate, assertNumericId } from './validation'
 
 const GADS_BASE = 'https://googleads.googleapis.com/v20'
+
+/** Cap on pages walked per search — a runaway loop guard, not a result cap. */
+const MAX_SEARCH_PAGES = 20
 
 export class GoogleAdsError extends Error {
   constructor(
@@ -26,8 +32,19 @@ export function parseTokens(stored: string): GoogleAdsTokens {
   return { access_token: parsed.access_token, refresh_token: parsed.refresh_token, expires_in: parsed.expires_in ?? 3600 }
 }
 
+/**
+ * Access tokens live ~1 hour, but this client used to mint a brand new one for
+ * every single API call — one campaigns page could spend three or four
+ * round-trips on Google's token endpoint (itself rate limited) before doing any
+ * real work. Cache it just under its lifetime and reuse.
+ */
 async function getFreshAccessToken(refreshToken: string): Promise<string> {
-  return refreshAccessToken(refreshToken)
+  const cached = await getCachedAccessToken(refreshToken)
+  if (cached) return cached
+
+  const token = await refreshAccessToken(refreshToken)
+  await setCachedAccessToken(refreshToken, token)
+  return token
 }
 
 // ─── Core request helper ───────────────────────────────────────────────────────
@@ -35,7 +52,7 @@ async function getFreshAccessToken(refreshToken: string): Promise<string> {
 async function gadsRequest<T>(
   path: string,
   refreshToken: string,
-  options: { method?: string; body?: unknown; loginCustomerId?: string },
+  options: { method?: string; body?: unknown; loginCustomerId?: string; isRetry?: boolean },
 ): Promise<T> {
   const accessToken = await getFreshAccessToken(refreshToken)
   const method = options.method ?? 'GET'
@@ -56,6 +73,14 @@ async function gadsRequest<T>(
   })
 
   if (!res.ok) {
+    // A cached access token can be revoked before its TTL runs out. Drop it and
+    // retry once with a freshly minted one before surfacing an auth failure —
+    // otherwise caching would turn a recoverable blip into a "reconnect" prompt.
+    if (res.status === 401 && !options.isRetry) {
+      await clearCachedAccessToken(refreshToken)
+      return gadsRequest<T>(path, refreshToken, { ...options, isRetry: true })
+    }
+
     let msg = `Google Ads API error ${res.status}`
     let code: string | undefined
     try {
@@ -65,23 +90,57 @@ async function gadsRequest<T>(
       msg = body.error?.message ?? msg
       code = body.error?.status
     } catch { /* ignore */ }
+    if (res.status === 401) code ??= 'UNAUTHENTICATED'
+    if (res.status === 403) code ??= 'PERMISSION_DENIED'
     throw new GoogleAdsError(msg, code)
   }
 
   return res.json() as Promise<T>
 }
 
+/**
+ * Run a GAQL query, following `nextPageToken` to completion. The previous
+ * version read only the first page, so any account past one page of results
+ * was silently truncated.
+ */
 async function gaqlSearch<T>(
   customerId: string,
   refreshToken: string,
   query: string,
 ): Promise<T[]> {
-  const res = await gadsRequest<{ results?: T[] }>(
-    `customers/${customerId}/googleAds:search`,
-    refreshToken,
-    { method: 'POST', body: { query } },
-  )
-  return res.results ?? []
+  const safeCustomerId = assertNumericId(customerId, 'customer_id')
+  const rows: T[] = []
+  let pageToken: string | undefined
+
+  for (let page = 0; page < MAX_SEARCH_PAGES; page++) {
+    const res = await gadsRequest<{ results?: T[]; nextPageToken?: string }>(
+      `customers/${safeCustomerId}/googleAds:search`,
+      refreshToken,
+      { method: 'POST', body: pageToken ? { query, pageToken } : { query } },
+    )
+    rows.push(...(res.results ?? []))
+    if (!res.nextPageToken) return rows
+    pageToken = res.nextPageToken
+  }
+
+  console.warn('[ads/google] search hit the page cap; results may be truncated', {
+    customerId: safeCustomerId,
+    pages: MAX_SEARCH_PAGES,
+  })
+  return rows
+}
+
+/**
+ * Escape hatch for callers that need a query this module doesn't expose as a
+ * named helper (currently the daily snapshot, which selects segments.date to
+ * get day-grain rows). Same pagination and validation as every other read.
+ */
+export async function runGaqlQuery<T>(
+  customerId: string,
+  refreshToken: string,
+  query: string,
+): Promise<T[]> {
+  return gaqlSearch<T>(customerId, refreshToken, query)
 }
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
@@ -151,28 +210,62 @@ export function toGaqlDuration(preset: string): GAdsDuration {
   return map[preset] ?? 'LAST_30_DAYS'
 }
 
+const GAQL_NATIVE_DURATIONS: Record<string, string> = {
+  today: 'TODAY',
+  yesterday: 'YESTERDAY',
+  last_7d: 'LAST_7_DAYS',
+  last_14d: 'LAST_14_DAYS',
+  last_30d: 'LAST_30_DAYS',
+  last_90d: 'LAST_90_DAYS',
+  this_month: 'THIS_MONTH',
+  last_month: 'LAST_MONTH',
+  last_year: 'LAST_YEAR',
+}
+
 /**
- * Builds a GAQL WHERE date condition that accepts either a named preset or a
- * custom since/until range. Handles the new shared presets (last_3m, last_6m,
- * last_year, last_2y) that the Google API doesn't natively support.
+ * Builds a GAQL WHERE date condition from either a named preset or an explicit
+ * since/until range.
+ *
+ * Two things this guards.
+ *
+ * Injection: the Google Ads API has no bound-parameter form, so dates end up as
+ * literals inside the query string. `since`/`until` arrive from request query
+ * params, so they are validated as real YYYY-MM-DD calendar dates before being
+ * interpolated — an unvalidated value could close the quote and append clauses.
+ *
+ * Silent substitution: presets Google has no keyword for (last_3m, last_6m,
+ * last_2y, maximum) used to fall through to LAST_30_DAYS, answering a different
+ * question than the operator asked without saying so. They are now resolved to
+ * a concrete range instead.
  */
 export function buildGaqlDateCondition(preset: string, since?: string, until?: string): string {
-  if (since && until) return `segments.date BETWEEN '${since}' AND '${until}'`
-  const nativeMap: Record<string, string> = {
-    today: 'TODAY',
-    yesterday: 'YESTERDAY',
-    last_7d: 'LAST_7_DAYS',
-    last_14d: 'LAST_14_DAYS',
-    last_30d: 'LAST_30_DAYS',
-    last_90d: 'LAST_90_DAYS',
-    this_month: 'THIS_MONTH',
-    last_month: 'LAST_MONTH',
-    last_year: 'LAST_YEAR',
+  if (since && until) {
+    const safeSince = assertIsoDate(since, 'since')
+    const safeUntil = assertIsoDate(until, 'until')
+    return `segments.date BETWEEN '${safeSince}' AND '${safeUntil}'`
   }
-  const native = nativeMap[preset]
+
+  const native = GAQL_NATIVE_DURATIONS[preset]
   if (native) return `segments.date DURING ${native}`
-  // Non-native: last_3m, last_6m, last_2y — caller should pass since/until
-  return `segments.date DURING LAST_30_DAYS`
+
+  const resolved = resolveNonNativeGoogleRange(preset)
+  if (resolved) {
+    return `segments.date BETWEEN '${assertIsoDate(resolved.since, 'since')}' AND '${assertIsoDate(resolved.until, 'until')}'`
+  }
+
+  return `segments.date DURING ${GAQL_NATIVE_DURATIONS.last_30d}`
+}
+
+/**
+ * Accepts either a bare GAQL duration keyword (LAST_30_DAYS) or a full
+ * condition produced by buildGaqlDateCondition, and returns a condition.
+ * Both call styles exist across the codebase; this collapses the branch that
+ * was duplicated in every query builder below.
+ */
+function toDateCondition(duration: string): string {
+  return duration.includes('BETWEEN') || duration.includes('DURING')
+    ? duration
+    : `segments.date DURING ${duration}`
 }
 
 // ─── Account overview ──────────────────────────────────────────────────────────
@@ -192,10 +285,7 @@ export async function getAccountOverview(
       averageCpc: string
     }
   }
-  // duration may be a raw GAQL condition (BETWEEN / DURING) from buildGaqlDateCondition
-  const dateClause = duration.includes('BETWEEN') || duration.includes('DURING')
-    ? `WHERE ${duration}`
-    : `WHERE segments.date DURING ${duration}`
+  const dateClause = `WHERE ${toDateCondition(duration)}`
   const rows = await gaqlSearch<Row>(
     customerId,
     refreshToken,
@@ -263,7 +353,7 @@ export async function listCampaigns(
             metrics.conversions, metrics.ctr, metrics.average_cpc
      FROM campaign
      WHERE campaign.status != 'REMOVED'
-       AND ${duration.includes('BETWEEN') || duration.includes('DURING') ? duration : `segments.date DURING ${duration}`}
+       AND ${toDateCondition(duration)}
      ORDER BY metrics.cost_micros DESC`,
   )
 
@@ -298,7 +388,11 @@ export async function listAdGroups(
     metrics: { impressions: string; clicks: string; costMicros: string }
   }
 
-  const campaignFilter = campaignId ? ` AND campaign.id = ${campaignId}` : ''
+  // campaignId reaches here straight from a request query param and lands in a
+  // query literal — validate it as digits-only before interpolating.
+  const campaignFilter = campaignId
+    ? ` AND campaign.id = ${assertNumericId(campaignId, 'campaign_id')}`
+    : ''
   const rows = await gaqlSearch<Row>(
     customerId,
     refreshToken,
@@ -307,7 +401,7 @@ export async function listAdGroups(
             metrics.impressions, metrics.clicks, metrics.cost_micros
      FROM ad_group
      WHERE ad_group.status != 'REMOVED'${campaignFilter}
-       AND ${duration.includes('BETWEEN') || duration.includes('DURING') ? duration : `segments.date DURING ${duration}`}
+       AND ${toDateCondition(duration)}
      ORDER BY metrics.cost_micros DESC`,
   )
 
@@ -331,8 +425,10 @@ export async function updateCampaignStatus(
   status: 'ENABLED' | 'PAUSED',
   refreshToken: string,
 ): Promise<void> {
+  const safeCustomerId = assertNumericId(customerId, 'customer_id')
+  const safeCampaignId = assertNumericId(campaignId, 'campaign_id')
   await gadsRequest(
-    `customers/${customerId}/campaigns:mutate`,
+    `customers/${safeCustomerId}/campaigns:mutate`,
     refreshToken,
     {
       method: 'POST',
@@ -340,7 +436,7 @@ export async function updateCampaignStatus(
         operations: [
           {
             update: {
-              resourceName: `customers/${customerId}/campaigns/${campaignId}`,
+              resourceName: `customers/${safeCustomerId}/campaigns/${safeCampaignId}`,
               status,
             },
             updateMask: 'status',
@@ -357,8 +453,10 @@ export async function updateCampaignBudget(
   amountMicros: number,
   refreshToken: string,
 ): Promise<void> {
+  const safeCustomerId = assertNumericId(customerId, 'customer_id')
+  const safeBudgetId = assertNumericId(budgetId, 'budget_id')
   await gadsRequest(
-    `customers/${customerId}/campaignBudgets:mutate`,
+    `customers/${safeCustomerId}/campaignBudgets:mutate`,
     refreshToken,
     {
       method: 'POST',
@@ -366,7 +464,7 @@ export async function updateCampaignBudget(
         operations: [
           {
             update: {
-              resourceName: `customers/${customerId}/campaignBudgets/${budgetId}`,
+              resourceName: `customers/${safeCustomerId}/campaignBudgets/${safeBudgetId}`,
               amountMicros: String(amountMicros),
             },
             updateMask: 'amount_micros',
@@ -375,4 +473,38 @@ export async function updateCampaignBudget(
       },
     },
   )
+}
+
+/**
+ * Current name / status / budget for one campaign — the "before" half of an
+ * audit record, captured before a mutation overwrites it.
+ */
+export async function getCampaignSnapshot(
+  customerId: string,
+  campaignId: string,
+  refreshToken: string,
+): Promise<{ name: string; status: string; budgetAmountMicros: string; currency: string } | null> {
+  type Row = {
+    campaign: { id: string; name: string; status: string }
+    campaignBudget?: { amountMicros?: string }
+    customer?: { currencyCode?: string }
+  }
+  const safeCampaignId = assertNumericId(campaignId, 'campaign_id')
+  const rows = await gaqlSearch<Row>(
+    customerId,
+    refreshToken,
+    `SELECT campaign.id, campaign.name, campaign.status,
+            campaign_budget.amount_micros, customer.currency_code
+     FROM campaign
+     WHERE campaign.id = ${safeCampaignId}
+     LIMIT 1`,
+  )
+  const row = rows[0]
+  if (!row) return null
+  return {
+    name: row.campaign.name,
+    status: row.campaign.status,
+    budgetAmountMicros: row.campaignBudget?.amountMicros ?? '0',
+    currency: row.customer?.currencyCode ?? 'USD',
+  }
 }

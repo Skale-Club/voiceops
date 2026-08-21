@@ -17,6 +17,9 @@ export class MetaAdsError extends Error {
   }
 }
 
+/** Runaway-loop guard when walking `paging.next` — not a result cap. */
+const MAX_PAGES = 25
+
 async function graphRequest<T>(
   path: string,
   accessToken: string,
@@ -53,6 +56,55 @@ async function graphRequest<T>(
     throw new MetaAdsError(msg, code, subcode)
   }
   return res.json() as Promise<T>
+}
+
+type PagedResponse<T> = { data?: T[]; paging?: { cursors?: { after?: string }; next?: string } }
+
+/**
+ * Follow `paging.next` until the edge is exhausted.
+ *
+ * Every list call here used to send `limit=100` and read only the first page,
+ * so an account with more than 100 campaigns (or ad sets, or ads) was silently
+ * truncated — and because insights are joined to those lists by id, the metrics
+ * for everything past the cut simply disappeared from the dashboard with no
+ * indication anything was missing.
+ */
+async function graphRequestAll<T>(path: string, accessToken: string): Promise<T[]> {
+  const items: T[] = []
+  let page = await graphRequest<PagedResponse<T>>(path, accessToken)
+  items.push(...(page.data ?? []))
+
+  for (let i = 1; i < MAX_PAGES; i++) {
+    const next = page.paging?.next
+    if (!next) return items
+
+    // `paging.next` is an absolute URL that already carries the access token
+    // and cursor, so it is fetched directly rather than rebuilt.
+    const res = await fetch(next, {
+      headers: { Accept: 'application/json' },
+      cache: 'no-store',
+    })
+    if (!res.ok) {
+      let msg = `Meta API error ${res.status}`
+      let code: number | undefined
+      let subcode: number | undefined
+      try {
+        const body = (await res.json()) as MetaErrorPayload
+        msg = body.error?.message ?? msg
+        code = body.error?.code
+        subcode = body.error?.error_subcode
+      } catch { /* ignore parse error */ }
+      throw new MetaAdsError(msg, code, subcode)
+    }
+    page = (await res.json()) as PagedResponse<T>
+    items.push(...(page.data ?? []))
+  }
+
+  console.warn('[ads/meta] paging hit the page cap; results may be truncated', {
+    path: path.split('?')[0],
+    pages: MAX_PAGES,
+  })
+  return items
 }
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -113,11 +165,29 @@ export async function listCampaigns(
   adAccountId: string,
   accessToken: string,
 ): Promise<MetaCampaign[]> {
-  const res = await graphRequest<{ data?: MetaCampaign[] }>(
+  return graphRequestAll<MetaCampaign>(
     `${adAccountId}/campaigns?fields=id,name,status,effective_status,objective,daily_budget,lifetime_budget,start_time,stop_time,created_time,updated_time&limit=100`,
     accessToken,
   )
-  return res.data ?? []
+}
+
+/**
+ * Current name / status / budget for one campaign — the "before" half of an
+ * audit record, read before a mutation overwrites it.
+ */
+export async function getCampaign(
+  campaignId: string,
+  accessToken: string,
+): Promise<MetaCampaign | null> {
+  try {
+    return await graphRequest<MetaCampaign>(
+      `${campaignId}?fields=id,name,status,effective_status,objective,daily_budget,lifetime_budget,start_time,stop_time,created_time,updated_time`,
+      accessToken,
+    )
+  } catch {
+    // A missing "before" value must not block the mutation itself.
+    return null
+  }
 }
 
 export async function updateCampaignStatus(
@@ -156,8 +226,7 @@ export async function listAdSets(
   // Drilling into a campaign: query the campaign node so results are actually
   // scoped to it (the account /adsets edge ignores a campaign_id param).
   const node = campaignId ? `${campaignId}/adsets` : `${adAccountId}/adsets`
-  const res = await graphRequest<{ data?: MetaAdSet[] }>(`${node}?${params.toString()}`, accessToken)
-  return res.data ?? []
+  return graphRequestAll<MetaAdSet>(`${node}?${params.toString()}`, accessToken)
 }
 
 export type MetaAd = {
@@ -181,8 +250,7 @@ export async function listAds(
   })
   // Scope to the ad set node when drilling down.
   const node = adsetId ? `${adsetId}/ads` : `${adAccountId}/ads`
-  const res = await graphRequest<{ data?: MetaAd[] }>(`${node}?${params.toString()}`, accessToken)
-  return res.data ?? []
+  return graphRequestAll<MetaAd>(`${node}?${params.toString()}`, accessToken)
 }
 
 // ─── Insights ─────────────────────────────────────────────────────────────────
@@ -223,7 +291,13 @@ export async function getInsights(
   if (opts.breakdowns?.length) params.set('breakdowns', opts.breakdowns.join(','))
   if (opts.timeIncrement) params.set('time_increment', String(opts.timeIncrement))
 
-  return graphRequest<MetaInsightsPaged>(`${objectId}/insights?${params.toString()}`, accessToken)
+  // Insights page too: a 90-day daily trend, or an account with many
+  // campaigns, exceeds one page and used to come back quietly clipped.
+  const data = await graphRequestAll<MetaInsights>(
+    `${objectId}/insights?${params.toString()}`,
+    accessToken,
+  )
+  return { data }
 }
 
 // ─── Account Overview ─────────────────────────────────────────────────────────
