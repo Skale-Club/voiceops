@@ -22,7 +22,11 @@ export async function POST(request: Request): Promise<Response> {
     return Response.json({ error: auth.error, code: auth.code }, { status: auth.status })
   }
 
-  const rl = await rateLimit('commerce:evt:' + auth.key.orgId, 600, 60, { failMode: 'open' })
+  // X8: bounded per-instance fallback instead of 'open' — this is an
+  // authenticated endpoint that fans out into workflow dispatch, so if Redis
+  // is down, failMode 'open' would remove the 600/min/org cap entirely
+  // (DoS / billing amplifier). 'memory' keeps a coarse but non-zero limit.
+  const rl = await rateLimit('commerce:evt:' + auth.key.orgId, 600, 60, { failMode: 'memory' })
   if (!rl.allowed) {
     return Response.json({ error: 'Too many events', code: 'rate_limited' }, { status: 429 })
   }

@@ -17,7 +17,7 @@ import { isRequestAllowed, normalizeWidgetUrlMode, normalizeWidgetUrlRules } fro
 import { rateLimit } from '@/lib/rate-limit'
 import { getClientIp } from '@/lib/request-ip'
 import { getMedusaCredentialsForOrg } from '@/lib/medusa/credentials'
-import { verifyCommerceContext, writeCommerceContext } from '@/lib/medusa/context'
+import { verifyCommerceContext, writeCommerceContext, consumeContextJti } from '@/lib/medusa/context'
 import { linkVerifiedContact } from '@/lib/contacts/link-verified-contact'
 
 export const runtime = 'nodejs'
@@ -198,7 +198,7 @@ export async function POST(
       }
     })
 
-    // 6b. Verify + pin the storefront-minted commerce context (contract §3, anti-IDOR).
+    // 6b. Verify + pin the storefront-minted commerce context (contract §3 v2, anti-IDOR).
     // Absent → skip entirely (orgs without a medusa integration pay nothing).
     // ALL failures are fail-soft: warn + continue the chat with no pin. Runs
     // BEFORE runAgent so a tool call in the first turn sees the pin.
@@ -208,11 +208,27 @@ export async function POST(
         if (creds) {
           const claims = await verifyCommerceContext(commerce_context, creds.connectionToken, org.id)
           if (claims) {
-            const repin = await writeCommerceContext(supabase, ctx.dbSessionId, org.id, claims)
-            if (repin?.repinnedFrom) log.info('commerce_ctx_repinned', { orgId: org.id, from: repin.repinnedFrom, to: claims.cart })
-            // UIX-03: a verified email means we know the visitor — link the CRM contact.
-            // claims.email is `string | null`; linkVerifiedContact is throttled + fail-soft.
-            if (claims.email) await linkVerifiedContact(supabase, org.id, ctx.dbSessionId, claims.email)
+            // X2 token binding, layer 2: consume the one-time jti BEFORE any
+            // pin write. A false/errored result means this exact token was
+            // already used (replay) — drop it, never call writeCommerceContext.
+            const jtiOk = await consumeContextJti(supabase, org.id, claims.jti)
+            if (!jtiOk) {
+              log.warn('commerce_ctx_jti_replay', { orgId: org.id })
+            } else {
+              // X2 token binding, layer 3: cnonce binding. writeCommerceContext
+              // returns `{ rejected: true }` when this token's cnonce doesn't
+              // match the conversation's already-pinned cnonce — the prior pin
+              // is left completely untouched (no repin, no contact link).
+              const result = await writeCommerceContext(supabase, ctx.dbSessionId, org.id, claims, claims.cnonce)
+              if (result && 'rejected' in result) {
+                log.warn('commerce_ctx_cnonce_mismatch', { orgId: org.id })
+              } else {
+                if (result?.repinnedFrom) log.info('commerce_ctx_repinned', { orgId: org.id, from: result.repinnedFrom, to: claims.cart })
+                // UIX-03: a verified email means we know the visitor — link the CRM contact.
+                // claims.email is `string | null`; linkVerifiedContact is throttled + fail-soft.
+                if (claims.email) await linkVerifiedContact(supabase, org.id, ctx.dbSessionId, claims.email)
+              }
+            }
           } else {
             log.warn('commerce_ctx_invalid', { orgId: org.id })
           }

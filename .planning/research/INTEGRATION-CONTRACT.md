@@ -1,6 +1,6 @@
 # Stuscle ⇄ Xphere Integration Contract
 
-**Status: FROZEN v1** — this document is the single source of truth for the integration between the Stuscle e-commerce (Medusa 2.17 backend + Next.js 15 storefront, repo `C:\Users\Vanildo\Dev\stuscle`) and the Xphere CRM (Next.js + Supabase, repo `C:\Users\Vanildo\Dev\xphere`). Both sides are planned and built against this contract. Any change to a payload, header, or endpoint here requires updating this file first, in both repos' copies (`.planning/research/INTEGRATION-CONTRACT.md`).
+**Status: FROZEN v2** (§3 commerce context token bumped v1→v2 — see `stuscle/docs/INTEGRATION-XPHERE-X2-TOKEN-BINDING.md`) — this document is the single source of truth for the integration between the Stuscle e-commerce (Medusa 2.17 backend + Next.js 15 storefront, repo `C:\Users\Vanildo\Dev\stuscle`) and the Xphere CRM (Next.js + Supabase, repo `C:\Users\Vanildo\Dev\xphere`). Both sides are planned and built against this contract. Any change to a payload, header, or endpoint here requires updating this file first, in both repos' copies (`.planning/research/INTEGRATION-CONTRACT.md`).
 
 ## 1. Overview
 
@@ -35,13 +35,15 @@ Rotation: rotating the `xph_` key rotates every trust relationship at once — u
 
 ## 3. Commerce context token (storefront → widget → xphere)
 
-Compact HMAC blob (no JWT lib): `token = base64url(payloadJson) + "." + base64url(HMAC_SHA256(XPHERE_CONNECTION_TOKEN, base64url(payloadJson)))`
+**Status: v2** (bumped from v1 — see `docs/INTEGRATION-XPHERE-X2-TOKEN-BINDING.md` for the full design rationale). v1 tokens are rejected outright; there is no transition window because the integration was not yet wired/in production when the bump landed.
+
+Compact HMAC blob (no JWT lib): `token = base64url(payloadJson) + "." + base64url(HMAC_SHA256(XPHERE_CONNECTION_TOKEN, base64url(payloadJson)))`. The signature covers the base64url payload **string** — Xphere verifies by recomputing the HMAC over the received string, it never re-serializes the JSON, so adding claim fields (as v2 does) needs no change to the signing bytes.
 
 Payload claims:
 
 ```jsonc
 {
-  "v": 1,
+  "v": 2,                            // was 1
   "org": "<xphere org uuid>",        // from env XPHERE_ORG_ID; xphere checks it matches the widget token's org
   "cart": "cart_01H..." | null,      // from httpOnly _medusa_cart_id cookie
   "cus": "cus_01H..." | null,        // ONLY after server-side verification of _medusa_jwt via GET /store/customers/me
@@ -49,19 +51,21 @@ Payload claims:
   "wishlist_ref": "<uuid>" | null,   // guest wishlist key (httpOnly cookie _wishlist_ref)
   "country_code": "dk",
   "region_id": "reg_01..." | null,
+  "jti": "<uuid>",                   // NEW v2 — one-time use; consumed server-side on pin (replay rejected)
+  "cnonce": "<uuid>",                // NEW v2 — client-generated (widget, in-memory, per page load); binds the token to one conversation
   "iat": 1750000000,
-  "exp": 1750000900                  // iat + 900 (15 min TTL)
+  "exp": 1750000300                  // iat + 300 (was +900 — 5 min TTL)
 }
 ```
 
-- **Minting**: `GET /api/chat-context` on the storefront (same-origin only — reject cross-origin `Sec-Fetch-Site`/Origin; IP rate limit 30/min). Response: `{ "token": "<payload>.<sig>" }`. Never decode-and-trust the JWT: `cus`/`email` are emitted only after a live `/store/customers/me` check.
-- **Widget**: reads `data-context-endpoint` from its script tag; fetches a token lazily (on first message, and re-fetches when `exp` passed or after a `cart_created` event); sends it as `commerce_context` in every chat POST. Also exposes `window.Opps.setContext(token)` for manual refresh.
-- **Xphere verification** (chat route): constant-time HMAC compare using the org's decrypted `medusa` integration key → check `exp` → check `org` equals the org resolved from the widget token. On success, merge claims into `conversations.memory.commerce`. On failure: log, drop the context, continue the chat (fail-soft — commerce tools then report "no cart connected").
+- **Minting**: `GET /api/chat-context` on the storefront (same-origin only — reject cross-origin `Sec-Fetch-Site`/Origin; IP rate limit 30/min). Reads `cnonce` from `?cnonce=` on the request (opaque id, ≤64 chars, `/^[A-Za-z0-9_-]+$/`); absent/invalid → the storefront generates a server-side fallback (`crypto.randomUUID()`) so a direct curl mint still works. Generates a fresh `jti = crypto.randomUUID()` per mint. Response: `{ "token": "<payload>.<sig>" }`. Never decode-and-trust the JWT: `cus`/`email` are emitted only after a live `/store/customers/me` check.
+- **Widget**: reads `data-context-endpoint` from its script tag; generates one `cnonce` (UUID) per page load, held in memory only (never localStorage), and appends it as `?cnonce=` on every mint request; fetches a token lazily (on first message, and re-fetches when `exp` passed or after a `cart_created` event — the shorter 300s TTL needs no extra widget logic, the existing exp-based re-fetch already covers it); sends the token as `commerce_context` in every chat POST. Also exposes `window.Opps.setContext(token)` for manual refresh.
+- **Xphere verification** (chat route): constant-time HMAC compare using the org's decrypted `medusa` integration key → check `v === 2` (reject v1 and any other version) → check `exp` → check `org` equals the org resolved from the widget token. On success: **(1)** consume `jti` via the `medusa_consume_context_jti` RPC (insert-once ledger keyed `(org_id, jti)`; a repeated `jti` is rejected as replay and the context is dropped, chat continues); **(2)** on successful jti consumption, merge claims into `conversations.memory.commerce` via `medusa_write_commerce_context`, which now also enforces `cnonce` binding — the conversation's **first** pin records `cnonce`; every later re-pin must present the same `cnonce` or the merge is aborted (`{rejected:true}`) and the prior pin is left intact. On any failure: log, drop the context, continue the chat (fail-soft — commerce tools then report "no cart connected").
 
 ### Identity pinning rules (anti-IDOR core)
 
 - Commerce tool executors take `cart_id` / `customer_id` / `email` / `wishlist_ref` **exclusively** from the pinned `conversations.memory.commerce`. **Tool input schemas contain none of these fields.** The LLM addresses "the cart", never "a cart".
-- Re-pinning is allowed only from a newly verified token (legit cart rotation after checkout). Never from message text or model output.
+- Re-pinning is allowed only from a newly verified token (legit cart rotation after checkout) **and only when its `cnonce` matches the conversation's already-pinned `cnonce`**. Never from message text or model output.
 - When the agent creates a cart (visitor had none), Xphere immediately writes `metadata.xphere_sig = hex(HMAC_SHA256(secret, cart_id))` onto the cart (store API cart update), pins it, and emits the `commerce`/`cart_created` SSE event including that `sig`.
 
 ## 4. Xphere → Medusa

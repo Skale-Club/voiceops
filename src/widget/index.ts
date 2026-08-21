@@ -939,6 +939,12 @@ function buildPanel(
   let cachedToken: string | null = null
   let cachedExp = 0 // unix seconds
 
+  // X2 token binding (contract §3 v2): one cnonce per page load, in memory
+  // only — never localStorage. Sent on every mint request so the storefront
+  // can embed it in the token; Xphere records it on the conversation's first
+  // pin and rejects any later re-pin whose token carries a different cnonce.
+  const cnonce = crypto.randomUUID()
+
   function b64urlToJson(b64: string): { exp?: number } | null {
     try {
       const pad = b64.length % 4 === 0 ? '' : '='.repeat(4 - (b64.length % 4))
@@ -961,7 +967,10 @@ function buildPanel(
     try {
       // SAME-ORIGIN against the host page (storefront) — never prefixed with
       // apiBase. The storefront mints this token from its own httpOnly cookies.
-      const res = await fetch(contextEndpoint, { credentials: 'same-origin' })
+      const res = await fetch(
+        contextEndpoint + (contextEndpoint.includes('?') ? '&' : '?') + 'cnonce=' + encodeURIComponent(cnonce),
+        { credentials: 'same-origin' }
+      )
       if (!res.ok) return null
       const { token: fetchedToken } = (await res.json()) as { token?: string }
       if (!fetchedToken) return null
@@ -1020,7 +1029,9 @@ function buildPanel(
       }
       const actions = document.createElement('div')
       actions.className = 'opps-card-actions'
-      if (typeof it.url === 'string' && it.url) {
+      // X7-url: it.url is untrusted store data — only allow a relative path
+      // or an https: URL as href; reject javascript:/data:/etc. schemes.
+      if (typeof it.url === 'string' && it.url && (it.url.startsWith('/') || it.url.startsWith('https://'))) {
         const view = document.createElement('a')
         view.className = 'opps-card-view'
         view.href = it.url

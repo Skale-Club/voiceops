@@ -29,23 +29,56 @@ vi.mock('@/lib/rate-limit', () => ({
 }))
 
 // ---- Supabase chainable stub (conversations lookup) ------------------------
-// Supports both maybeSingle() reads (loadPinnedContext / pinCartId /
-// bumpConversationWriteCount) and .update().eq().eq() writes — copied idiom
-// from tests/medusa-context.test.ts's buildSupabase.
+// Supports maybeSingle() reads (loadPinnedContext) and simulates the
+// medusa_pin_cart_id / medusa_increment_write_count SECURITY DEFINER RPCs
+// (migration 1283, X9 hardening) that pinCartId / bumpConversationWriteCount
+// now delegate to instead of a client-side SELECT-then-UPDATE. The rpc mock
+// mutates an in-memory `memory` fixture the same way the real SQL functions
+// would (partial jsonb merge), so the JS wrapper contract is still exercised
+// without a real Postgres instance. Copied/extended idiom from
+// tests/medusa-context.test.ts's buildSupabase.
 function buildSupabase(row: { session_key?: string | null; memory: Record<string, unknown> | null } | null) {
-  const maybeSingle = vi.fn().mockResolvedValue({ data: row, error: null })
-  const update = vi.fn().mockReturnThis()
+  let memory: Record<string, unknown> | null = row ? (row.memory ?? null) : null
+  const sessionKey = row?.session_key ?? null
+  const exists = row !== null
+
+  const rpc = vi.fn(async (name: string, params: Record<string, unknown>) => {
+    if (name === 'medusa_pin_cart_id') {
+      if (exists) {
+        const base = (memory ?? {}) as Record<string, unknown>
+        const commerce = ((base.commerce as Record<string, unknown> | undefined) ?? {}) as Record<string, unknown>
+        memory = { ...base, commerce: { ...commerce, cart: params.p_cart_id } }
+      }
+      return { data: null, error: null }
+    }
+    if (name === 'medusa_increment_write_count') {
+      const base = (memory ?? {}) as Record<string, unknown>
+      const commerce = ((base.commerce as Record<string, unknown> | undefined) ?? {}) as Record<string, unknown>
+      const count = typeof commerce.write_count === 'number' ? commerce.write_count : 0
+      const cap = typeof params.p_cap === 'number' ? params.p_cap : 25
+      if (count >= cap) return { data: { allowed: false, count }, error: null }
+      const next = count + 1
+      if (exists) memory = { ...base, commerce: { ...commerce, write_count: next } }
+      return { data: { allowed: true, count: next }, error: null }
+    }
+    throw new Error(`unexpected rpc: ${name}`)
+  })
+
+  const maybeSingle = vi
+    .fn()
+    .mockImplementation(async () => ({ data: exists ? { session_key: sessionKey, memory } : null, error: null }))
   const eq = vi.fn().mockReturnThis()
   const select = vi.fn().mockReturnThis()
-  const chain = { select, eq, maybeSingle, update }
+  const chain = { select, eq, maybeSingle }
   const from = vi.fn().mockReturnValue(chain)
   return {
-    supabase: { from } as unknown as SupabaseClient<Database>,
+    supabase: { from, rpc } as unknown as SupabaseClient<Database>,
     from,
     eq,
     maybeSingle,
-    update,
     select,
+    rpc,
+    getMemory: () => memory,
   }
 }
 
@@ -71,47 +104,48 @@ describe('signCartSig — cross-repo adoption-sig vector (CRT-01, SECURITY CRITI
 
 describe('pinCartId — cart-only re-pin merge (CRT-01)', () => {
   it('touches ONLY commerce.cart — region_id/cus/email/wishlist_ref survive unchanged', async () => {
-    const { supabase, update, eq } = buildSupabase({
+    const { supabase, rpc, getMemory } = buildSupabase({
       memory: { commerce: { region_id: 'reg_1', cus: 'cus_9', email: 'a@b.com', wishlist_ref: 'w-1' } },
     })
     const { pinCartId } = await import('@/lib/medusa/context')
 
     await pinCartId(supabase, 'conv-1', 'org-1', 'cart_NEW')
 
-    expect(update).toHaveBeenCalledTimes(1)
-    const updateArg = update.mock.calls[0][0] as { memory: Record<string, unknown> }
-    const commerce = updateArg.memory.commerce as Record<string, unknown>
+    expect(rpc).toHaveBeenCalledTimes(1)
+    const rpcArgs = rpc.mock.calls[0][1] as Record<string, unknown>
+    expect(rpcArgs.p_conversation_id).toBe('conv-1')
+    expect(rpcArgs.p_org_id).toBe('org-1')
+    expect(rpcArgs.p_cart_id).toBe('cart_NEW')
+    const commerce = (getMemory() as Record<string, unknown>).commerce as Record<string, unknown>
     expect(commerce.cart).toBe('cart_NEW')
     expect(commerce.region_id).toBe('reg_1')
     expect(commerce.cus).toBe('cus_9')
     expect(commerce.email).toBe('a@b.com')
     expect(commerce.wishlist_ref).toBe('w-1')
     expect(commerce).not.toHaveProperty('verified_at')
-    expect(eq).toHaveBeenCalledWith('id', 'conv-1')
-    expect(eq).toHaveBeenCalledWith('org_id', 'org-1')
   })
 
   it('starts from an empty commerce object when none was pinned yet', async () => {
-    const { supabase, update } = buildSupabase({ memory: {} })
+    const { supabase, getMemory } = buildSupabase({ memory: {} })
     const { pinCartId } = await import('@/lib/medusa/context')
 
     await pinCartId(supabase, 'conv-1', 'org-1', 'cart_FRESH')
 
-    const updateArg = update.mock.calls[0][0] as { memory: Record<string, unknown> }
-    expect((updateArg.memory.commerce as Record<string, unknown>).cart).toBe('cart_FRESH')
+    const commerce = (getMemory() as Record<string, unknown>).commerce as Record<string, unknown>
+    expect(commerce.cart).toBe('cart_FRESH')
   })
 })
 
 describe('bumpConversationWriteCount — 25-per-conversation cap (CRT-02)', () => {
   it('allows and increments while under the cap', async () => {
-    const { supabase, update } = buildSupabase({ memory: { commerce: { write_count: 5 } } })
+    const { supabase, getMemory } = buildSupabase({ memory: { commerce: { write_count: 5 } } })
     const { bumpConversationWriteCount } = await import('@/lib/medusa/context')
 
     const result = await bumpConversationWriteCount(supabase, 'conv-1', 'org-1')
 
     expect(result).toEqual({ allowed: true, count: 6 })
-    const updateArg = update.mock.calls[0][0] as { memory: Record<string, unknown> }
-    expect((updateArg.memory.commerce as Record<string, unknown>).write_count).toBe(6)
+    const commerce = (getMemory() as Record<string, unknown>).commerce as Record<string, unknown>
+    expect(commerce.write_count).toBe(6)
   })
 
   it('defaults write_count to 0 when absent', async () => {
@@ -124,25 +158,25 @@ describe('bumpConversationWriteCount — 25-per-conversation cap (CRT-02)', () =
   })
 
   it('denies WITHOUT writing once write_count reaches the cap (25)', async () => {
-    const { supabase, update } = buildSupabase({ memory: { commerce: { write_count: 25 } } })
+    const { supabase, getMemory } = buildSupabase({ memory: { commerce: { write_count: 25 } } })
     const { bumpConversationWriteCount } = await import('@/lib/medusa/context')
 
     const result = await bumpConversationWriteCount(supabase, 'conv-1', 'org-1')
 
     expect(result).toEqual({ allowed: false, count: 25 })
-    expect(update).not.toHaveBeenCalled()
+    expect((getMemory() as Record<string, unknown>).commerce).toEqual({ write_count: 25 }) // unchanged
   })
 
   it('preserves other commerce keys on both the allow and deny paths', async () => {
-    const { supabase, update } = buildSupabase({
+    const { supabase, getMemory } = buildSupabase({
       memory: { commerce: { cart: 'cart_1', write_count: 3 } },
     })
     const { bumpConversationWriteCount } = await import('@/lib/medusa/context')
 
     await bumpConversationWriteCount(supabase, 'conv-1', 'org-1')
 
-    const updateArg = update.mock.calls[0][0] as { memory: Record<string, unknown> }
-    expect((updateArg.memory.commerce as Record<string, unknown>).cart).toBe('cart_1')
+    const commerce = (getMemory() as Record<string, unknown>).commerce as Record<string, unknown>
+    expect(commerce.cart).toBe('cart_1')
   })
 })
 

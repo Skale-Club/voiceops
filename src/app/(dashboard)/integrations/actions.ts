@@ -4,6 +4,7 @@ import { createServiceRoleClient } from '@/lib/supabase/admin'
 import { revalidatePath } from 'next/cache'
 import { encrypt, decrypt, maskApiKey } from '@/lib/crypto'
 import { testResendApiKey } from '@/lib/email/resend'
+import { assertSafeBaseUrl, MedusaUnsafeBaseUrlError } from '@/lib/medusa/client'
 
 // Type returned to UI | encrypted_api_key is NEVER included
 export type IntegrationForDisplay = {
@@ -354,6 +355,20 @@ export async function saveIntegrationCredentials(
   // client panel (ApiKeyPanel), so a direct/programmatic call can't bypass it.
   if (provider === 'xkedule' && apiKey && !/^xph_.{8,}/.test(apiKey)) {
     return { ok: false, error: 'Connection Token must be a Xphere API key starting with "xph_".' }
+  }
+
+  // X10 (SSRF hardening): the Medusa "Server URL" field becomes
+  // MedusaCredentials.baseUrl (src/lib/medusa/client.ts), which this server
+  // then sends signed/keyed requests to on every commerce tool call. Reject
+  // an unsafe value (non-https, or a private/link-local/metadata IP) at save
+  // time too, not just at fetch time, so a bad URL never gets persisted.
+  if (provider === 'medusa' && locationId) {
+    try {
+      assertSafeBaseUrl(locationId)
+    } catch (err) {
+      if (err instanceof MedusaUnsafeBaseUrlError) return { ok: false, error: err.message }
+      throw err
+    }
   }
 
   // Find an existing row for this provider/org

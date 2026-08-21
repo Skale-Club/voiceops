@@ -42,15 +42,17 @@ vi.mock('@/lib/rate-limit', () => ({ rateLimit: mockRateLimit }))
 
 // Mock the Phase 133 signed-context verify+pin modules — commerce-context
 // tests exercise route wiring/branching only, never real crypto/DB (133-02-PLAN.md).
-const { mockGetCreds, mockVerify, mockWrite } = vi.hoisted(() => ({
+const { mockGetCreds, mockVerify, mockWrite, mockConsumeJti } = vi.hoisted(() => ({
   mockGetCreds: vi.fn(),
   mockVerify: vi.fn(),
   mockWrite: vi.fn(),
+  mockConsumeJti: vi.fn(),
 }))
 vi.mock('@/lib/medusa/credentials', () => ({ getMedusaCredentialsForOrg: mockGetCreds }))
 vi.mock('@/lib/medusa/context', () => ({
   verifyCommerceContext: mockVerify,
   writeCommerceContext: mockWrite,
+  consumeContextJti: mockConsumeJti,
 }))
 
 import { createServiceRoleClient } from '@/lib/supabase/admin'
@@ -100,10 +102,12 @@ describe('POST /api/chat/[token]', () => {
     mockRateLimit.mockResolvedValue({ allowed: true, remaining: 99, resetAt: 0 })
     // Default mockRunAgent: returns a simple SSE stream with session + token + done
     mockRunAgent.mockReturnValue(makeDefaultStream())
-    // Commerce-context defaults (CTX-02): creds present, verify fails closed,
-    // write is a no-op — existing tests (no commerce_context) are unaffected.
+    // Commerce-context defaults (CTX-02/X2): creds present, verify fails closed,
+    // jti consume succeeds, write is a no-op — existing tests (no
+    // commerce_context) are unaffected.
     mockGetCreds.mockResolvedValue({ connectionToken: 'xph_secret' })
     mockVerify.mockResolvedValue(null)
+    mockConsumeJti.mockResolvedValue(true)
     mockWrite.mockResolvedValue(null)
   })
 
@@ -459,7 +463,7 @@ describe('POST /api/chat/[token]', () => {
 
     it('valid token → writeCommerceContext pins claims before runAgent', async () => {
       const claims = {
-        v: 1,
+        v: 2,
         org: 'org-1',
         cart: 'cart_1',
         cus: null,
@@ -467,10 +471,13 @@ describe('POST /api/chat/[token]', () => {
         wishlist_ref: null,
         country_code: 'dk',
         region_id: null,
+        jti: 'jti-1',
+        cnonce: 'cnonce-1',
         iat: 1,
         exp: 9999999999,
       }
       mockVerify.mockResolvedValue(claims)
+      mockConsumeJti.mockResolvedValue(true)
       mockWrite.mockResolvedValue(null)
       const { POST } = await import('@/app/api/chat/[token]/route')
       const res = await POST(makeRequest({ message: 'hi', commerce_context: 'good.token' }), {
@@ -479,7 +486,64 @@ describe('POST /api/chat/[token]', () => {
       expect(res.status).toBe(200)
       const lines = await readSseLines(res)
       expect(lines[lines.length - 1]).toMatchObject({ event: 'done' })
-      expect(mockWrite).toHaveBeenCalledWith(mockSupabase, 'db-sess-uuid', 'org-1', claims)
+      expect(mockConsumeJti).toHaveBeenCalledWith(mockSupabase, 'org-1', 'jti-1')
+      expect(mockWrite).toHaveBeenCalledWith(mockSupabase, 'db-sess-uuid', 'org-1', claims, 'cnonce-1')
+    })
+
+    it('(a) jti replay → consumeContextJti returns false, writeCommerceContext never called', async () => {
+      const claims = {
+        v: 2,
+        org: 'org-1',
+        cart: 'cart_1',
+        cus: null,
+        email: null,
+        wishlist_ref: null,
+        country_code: 'dk',
+        region_id: null,
+        jti: 'jti-reused',
+        cnonce: 'cnonce-1',
+        iat: 1,
+        exp: 9999999999,
+      }
+      mockVerify.mockResolvedValue(claims)
+      mockConsumeJti.mockResolvedValue(false) // already consumed
+      const { POST } = await import('@/app/api/chat/[token]/route')
+      const res = await POST(makeRequest({ message: 'hi', commerce_context: 'replayed.token' }), {
+        params: Promise.resolve({ token: 'valid-token' }),
+      })
+      expect(res.status).toBe(200)
+      expect(mockConsumeJti).toHaveBeenCalledWith(mockSupabase, 'org-1', 'jti-reused')
+      expect(mockWrite).not.toHaveBeenCalled()
+      const lines = await readSseLines(res)
+      expect(lines[lines.length - 1]).toMatchObject({ event: 'done' })
+    })
+
+    it('(b) cnonce mismatch → writeCommerceContext resolves {rejected:true}, chat continues fine', async () => {
+      const claims = {
+        v: 2,
+        org: 'org-1',
+        cart: 'cart_ATTACKER',
+        cus: null,
+        email: null,
+        wishlist_ref: null,
+        country_code: 'dk',
+        region_id: null,
+        jti: 'jti-2',
+        cnonce: 'cnonce-attacker',
+        iat: 1,
+        exp: 9999999999,
+      }
+      mockVerify.mockResolvedValue(claims)
+      mockConsumeJti.mockResolvedValue(true)
+      mockWrite.mockResolvedValue({ rejected: true })
+      const { POST } = await import('@/app/api/chat/[token]/route')
+      const res = await POST(makeRequest({ message: 'hi', commerce_context: 'mismatched.token' }), {
+        params: Promise.resolve({ token: 'valid-token' }),
+      })
+      expect(res.status).toBe(200)
+      expect(mockWrite).toHaveBeenCalledWith(mockSupabase, 'db-sess-uuid', 'org-1', claims, 'cnonce-attacker')
+      const lines = await readSseLines(res)
+      expect(lines[lines.length - 1]).toMatchObject({ event: 'done' })
     })
 
     it('no creds for org → verify skipped, chat still streams', async () => {
@@ -496,7 +560,7 @@ describe('POST /api/chat/[token]', () => {
 
     it('writeCommerceContext throws → fail-soft, chat still streams 200', async () => {
       const claims = {
-        v: 1,
+        v: 2,
         org: 'org-1',
         cart: 'cart_1',
         cus: null,
@@ -504,6 +568,8 @@ describe('POST /api/chat/[token]', () => {
         wishlist_ref: null,
         country_code: 'dk',
         region_id: null,
+        jti: 'jti-3',
+        cnonce: 'cnonce-3',
         iat: 1,
         exp: 9999999999,
       }

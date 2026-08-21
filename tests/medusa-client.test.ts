@@ -70,3 +70,55 @@ describe('MED-03: medusaStoreFetch', () => {
     await expect(medusaStoreFetch(creds, '/store/products', 'org-1')).rejects.toThrow('500')
   })
 })
+
+// X10 (SSRF hardening): assertSafeBaseUrl gates integrations.location_id, an
+// org-admin-controlled value both fetch functions send signed/keyed requests to.
+describe('X10: assertSafeBaseUrl', () => {
+  it('accepts https remote hosts', async () => {
+    const { assertSafeBaseUrl } = await import('@/lib/medusa/client')
+    expect(() => assertSafeBaseUrl('https://store.example.com')).not.toThrow()
+    expect(() => assertSafeBaseUrl('https://store.example.com:9000/')).not.toThrow()
+  })
+
+  it('accepts http only for localhost / loopback (dev)', async () => {
+    const { assertSafeBaseUrl } = await import('@/lib/medusa/client')
+    expect(() => assertSafeBaseUrl('http://localhost:9000')).not.toThrow()
+    expect(() => assertSafeBaseUrl('http://127.0.0.1:9000')).not.toThrow()
+    expect(() => assertSafeBaseUrl('http://[::1]:9000')).not.toThrow()
+  })
+
+  it('rejects http to a remote (non-localhost) host', async () => {
+    const { assertSafeBaseUrl, MedusaUnsafeBaseUrlError } = await import('@/lib/medusa/client')
+    expect(() => assertSafeBaseUrl('http://store.example.com')).toThrow(MedusaUnsafeBaseUrlError)
+  })
+
+  it('rejects the cloud metadata IP and private/link-local ranges', async () => {
+    const { assertSafeBaseUrl, MedusaUnsafeBaseUrlError } = await import('@/lib/medusa/client')
+    for (const u of [
+      'https://169.254.169.254', // metadata
+      'https://10.0.0.5',
+      'https://172.16.0.1',
+      'https://172.31.255.254',
+      'https://192.168.1.1',
+      'https://100.64.0.1', // CGNAT
+      'http://10.0.0.5', // http remote AND private
+      'https://[fc00::1]', // IPv6 ULA
+      'https://[fe80::1]', // IPv6 link-local
+    ]) {
+      expect(() => assertSafeBaseUrl(u), u).toThrow(MedusaUnsafeBaseUrlError)
+    }
+  })
+
+  it('rejects an unparseable URL', async () => {
+    const { assertSafeBaseUrl, MedusaUnsafeBaseUrlError } = await import('@/lib/medusa/client')
+    expect(() => assertSafeBaseUrl('not a url')).toThrow(MedusaUnsafeBaseUrlError)
+  })
+
+  it('is enforced by medusaStoreFetch before any network call', async () => {
+    mockFetch.mockClear() // this file's earlier describe left calls on the shared mock
+    const { medusaStoreFetch, MedusaUnsafeBaseUrlError } = await import('@/lib/medusa/client')
+    const bad = { baseUrl: 'https://169.254.169.254', connectionToken: 'xph_x', publishableKey: 'pk_test' }
+    await expect(medusaStoreFetch(bad, '/store/products', 'org-1')).rejects.toThrow(MedusaUnsafeBaseUrlError)
+    expect(mockFetch).not.toHaveBeenCalled()
+  })
+})
