@@ -1,5 +1,5 @@
 -- =============================================================================
--- Migration 1284: ads_insights_daily — durable per-campaign daily metrics
+-- Migration 1286: ads_insights_daily — durable per-campaign daily metrics
 -- =============================================================================
 -- Every ads view and every AI tool call reads live from the Graph API / Google
 -- Ads API. That means: no period-over-period comparison that survives a rate

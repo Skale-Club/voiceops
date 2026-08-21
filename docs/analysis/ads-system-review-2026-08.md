@@ -33,7 +33,7 @@ O sistema de Ads é composto por sete subsistemas:
 **Correção:** `src/lib/ads/connection-health.ts` classifica erros de auth (Meta 190/102/463/467 + subcodes; Google UNAUTHENTICATED/invalid_grant) e distingue de falhas transitórias (rate limit **não** dispara reconexão). `withConnectionHealth` embrulha toda leitura/mutação. O cron `/api/cron/ads-tick` marca tokens expirados e avisa 7 dias antes. `ConnectionHealthBanner` renderiza o prompt de reconexão — inclusive quando a conta sai do conjunto `active` e a página cairia no estado vazio.
 
 ### A2. Zero cache e zero histórico ✅
-**Correção:** `src/lib/ads/cache.ts` — cache Redis por org+conta+relatório+janela (120s ao vivo, 900s para janelas fechadas), invalidado após mutação; degrada para fetch direto sem Redis. `ads_insights_daily` (migration 1284) guarda campanha × dia, alimentada pelo cron com janela retroativa de 7 dias (plataformas restatem dias recentes). Dinheiro em `BIGINT` de unidades menores + moeda, nunca float.
+**Correção:** `src/lib/ads/cache.ts` — cache Redis por org+conta+relatório+janela (120s ao vivo, 900s para janelas fechadas), invalidado após mutação; degrada para fetch direto sem Redis. `ads_insights_daily` (migration 1286) guarda campanha × dia, alimentada pelo cron com janela retroativa de 7 dias (plataformas restatem dias recentes). Dinheiro em `BIGINT` de unidades menores + moeda, nunca float.
 
 ### A3. Cobertura de testes zero ✅
 **Correção:** 71 testes em 7 suítes — validação/GAQL, presets de data, atribuição, moeda, saúde de conexão, resolução de conta no AI, e as rotas de mutação (RBAC, teto, conversão de moeda, auditoria).
@@ -42,14 +42,14 @@ O sistema de Ads é composto por sete subsistemas:
 **Correção:** `src/lib/ads/validation.ts` com `IsoDateSchema` (regex **e** data de calendário real — rejeita `2026-02-31`) e `NumericIdSchema`. Validado nas rotas e reassertado dentro de `google-api.ts`, então a biblioteca é segura independentemente do chamador.
 
 ### A5. Trilha de auditoria não estava ligada ✅
-**Correção:** `recordMutationExecution` agora é chamado nas duas rotas de mutação com before/after, ator e direção correta (`budget_decrease` em cortes). Gate `ads.manage` via RBAC. Teto de orçamento (`ADS_MAX_DAILY_BUDGET`, padrão 10.000) rejeitando com 422. Coluna `executed_by` (migration 1286).
+**Correção:** `recordMutationExecution` agora é chamado nas duas rotas de mutação com before/after, ator e direção correta (`budget_decrease` em cortes). Gate `ads.manage` via RBAC. Teto de orçamento (`ADS_MAX_DAILY_BUDGET`, padrão 10.000) rejeitando com 422. Coluna `executed_by` (migration 1288).
 
 ## 4. Achados de severidade MÉDIA — corrigidos
 
 | # | Achado | Correção |
 |---|---|---|
 | M1 | Refresh de token Google a cada request | Cache de ~55 min (Redis + fallback em memória); retry único ao receber 401 para não transformar um token revogado cedo em prompt de reconexão. |
-| M2 | Dupla contagem na atribuição | Modelo single-touch explícito (migration 1285 + JS). Uma oportunidade de $10k de contato que tocou 3 campanhas agora reporta $10k, não $30k. Coberto por teste. |
+| M2 | Dupla contagem na atribuição | Modelo single-touch explícito (migration 1287 + JS). Uma oportunidade de $10k de contato que tocou 3 campanhas agora reporta $10k, não $30k. Coberto por teste. |
 | M3 | Paginação ignorada | `graphRequestAll` segue `paging.next` (Meta) e `gaqlSearch` segue `nextPageToken` (Google), com teto de páginas que **loga** quando atingido. |
 | M4 | Moeda hardcoded em `$` | `src/lib/ads/currency.ts` com suporte a moedas de zero decimais (JPY/KRW). Toda tool de AI retorna `currency`; o system prompt instrui a nunca assumir dólar. |
 | M5 | Código morto (`snapshot.ts`) | Reescrito como comparação período-a-período lendo do histórico novo, e ligado como tool (`compare_ads_periods`) no Copilot e no MCP. |
@@ -61,7 +61,7 @@ O sistema de Ads é composto por sete subsistemas:
 
 - **B1** `getOrCreateJourney` usa upsert `onConflict: 'org_id'` com re-leitura em caso de corrida.
 - **B2** Extração de memórias por tool-use estruturado em vez de regex sobre JSON; modelo em `ADS_MEMORY_MODEL`.
-- **B3** `platform` aceita `tiktok`/`linkedin`/`microsoft` (migrations 1283/1286).
+- **B3** `platform` aceita `tiktok`/`linkedin`/`microsoft` (migrations 1285/1288).
 - **B4** Presets não-nativos do Google resolvidos para intervalo concreto em vez de virarem `LAST_30_DAYS` silenciosamente.
 
 ## 6. Operação
@@ -70,7 +70,9 @@ O sistema de Ads é composto por sete subsistemas:
 
 **Nova variável opcional** — `ADS_MAX_DAILY_BUDGET` (padrão 10.000, em unidades maiores da moeda da conta) limita uma única alteração de orçamento diário.
 
-**Migrations a aplicar** — 1283 (saúde de conexão + plataformas), 1284 (`ads_insights_daily`), 1285 (modelo de atribuição), 1286 (ator da execução). Rodar `npx supabase db push`.
+**Migrations — já aplicadas em produção** (projeto `mwklvkmggmsintqcqfvu`): 1285 (saúde de conexão + plataformas), 1286 (`ads_insights_daily`), 1287 (modelo de atribuição), 1288 (ator da execução), 1289 (grants das funções).
+
+> ⚠️ **Drift detectado no banco.** As versões 1283 e 1284 já estavam aplicadas em produção com outros nomes — `medusa_context_atomic_writes` e `commerce_context_v2_binding` — e **não existem em nenhum branch do repositório**. Foram aplicadas direto no banco por outra sessão. Por isso as migrations de Ads foram renumeradas para 1285–1289. Um `supabase db push` a partir de um checkout limpo não reproduz produção enquanto esses dois arquivos não forem versionados; vale recuperá-los do histórico do Supabase.
 
 **Cache** — usa o `REDIS_URL` existente. Sem Redis, tudo continua funcionando (cai direto na API); só se perde o benefício.
 

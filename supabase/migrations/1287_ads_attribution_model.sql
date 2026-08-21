@@ -1,5 +1,5 @@
 -- =============================================================================
--- Migration 1285: get_ads_attribution — explicit single-touch attribution model
+-- Migration 1287: get_ads_attribution — explicit single-touch attribution model
 -- =============================================================================
 -- Bug: revenue was counted once per campaign a contact ever touched.
 --

@@ -1,5 +1,5 @@
 -- =============================================================================
--- Migration 1283: Ads connection health + extensible platform set
+-- Migration 1285: Ads connection health + extensible platform set
 -- =============================================================================
 -- Two problems this fixes.
 --
