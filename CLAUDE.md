@@ -95,9 +95,53 @@ export async function POST(request: Request) {
 
 ## Database
 
-Migrations live in `supabase/migrations/`. After adding a migration:
-1. `npx supabase db push`
-2. Update `src/types/database.ts` manually or regenerate it
+Migrations live in `supabase/migrations/` as numbered SQL files (`1281_short_name.sql`).
+
+### `db push` is the only way to apply a migration
+
+**Never apply schema changes with the Supabase MCP `apply_migration` tool or the
+dashboard SQL editor.** Both write to production without leaving a file in this
+repo, and `apply_migration` additionally records its own generated timestamp
+version (`20260815021606`) in `supabase_migrations.schema_migrations`. Because
+that version has no counterpart in `supabase/migrations/`, the next
+`supabase db push` aborts with *"Remote migration versions not found in local
+migrations directory"* — the whole team is then blocked from shipping schema
+until someone reconciles the history table by hand.
+
+To add a migration:
+
+1. Write `supabase/migrations/<next-number>_<short_name>.sql`. Make it
+   idempotent (`IF NOT EXISTS`, `DROP … IF EXISTS` before `CREATE`) so a re-run
+   is a no-op.
+2. `npx supabase db push`
+3. Update `src/types/database.ts` manually or regenerate it
+4. Commit the migration file in the same PR as the code that depends on it
+
+`supabase db push` is the only path that keeps three things in agreement: the
+files in this repo, the remote history table, and what a fresh
+`supabase db reset` reproduces. The MCP tool keeps only the third.
+
+**Read-only MCP/SQL-editor queries are fine** — inspecting the live schema,
+checking data, running `SELECT`. The rule is about DDL.
+
+### If the history table drifts anyway
+
+`npx supabase migration list --linked` shows Local vs Remote. Before repairing,
+verify against the live schema whether each migration's objects actually exist —
+never trust the recorded `name`, which has drifted from the file numbering
+before (a row named `1266_event_types_look_busy` was really file `1267`).
+
+- Applied but unrecorded → `npx supabase migration repair --linked --status applied <version>`
+- Recorded but no local file → recover the DDL from the live schema into a new
+  numbered file and mark that applied; only use `--status reverted` once nothing
+  is left to preserve, since it deletes the row outright.
+
+Back up `supabase_migrations.schema_migrations` before any repair pass.
+
+A migration whose effects were later undone by a *subsequent* migration (1267
+added `event_types.look_busy_*`; 1268 dropped them) is still **applied** — its
+DDL ran. Marking it `reverted` would make `db push` re-run it and reintroduce
+what 1268 deliberately removed.
 
 **Active org:** Stored in `user_active_org` plus the `vo_active_org` cookie. `get_current_org_id()` prefers the explicit selection and falls back to the first membership.
 
