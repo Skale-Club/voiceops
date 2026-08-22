@@ -7786,6 +7786,8 @@ export interface Database {
           created_at: string
           encrypted_access_token: string
           id: string
+          last_error_at: string | null
+          last_verified_at: string | null
           meta_app_scoped_user_id: string | null
           org_id: string
           platform: string
@@ -7801,6 +7803,8 @@ export interface Database {
           created_at?: string
           encrypted_access_token: string
           id?: string
+          last_error_at?: string | null
+          last_verified_at?: string | null
           meta_app_scoped_user_id?: string | null
           org_id: string
           platform: string
@@ -7816,6 +7820,8 @@ export interface Database {
           created_at?: string
           encrypted_access_token?: string
           id?: string
+          last_error_at?: string | null
+          last_verified_at?: string | null
           meta_app_scoped_user_id?: string | null
           org_id?: string
           platform?: string
@@ -7842,6 +7848,7 @@ export interface Database {
           created_at: string
           description: string | null
           executed_at: string
+          executed_by: string | null
           executed_by_ai: boolean
           id: string
           journey_id: string
@@ -7859,6 +7866,7 @@ export interface Database {
           created_at?: string
           description?: string | null
           executed_at?: string
+          executed_by?: string | null
           executed_by_ai?: boolean
           id?: string
           journey_id: string
@@ -7876,6 +7884,7 @@ export interface Database {
           created_at?: string
           description?: string | null
           executed_at?: string
+          executed_by?: string | null
           executed_by_ai?: boolean
           id?: string
           journey_id?: string
@@ -7905,6 +7914,77 @@ export interface Database {
             columns: ["plan_id"]
             isOneToOne: false
             referencedRelation: "ads_plans"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      ads_insights_daily: {
+        Row: {
+          ad_account_id: string
+          campaign_id: string
+          campaign_name: string | null
+          captured_at: string
+          clicks: number
+          conversions: number
+          created_at: string
+          currency: string
+          id: string
+          impressions: number
+          leads: number
+          org_id: string
+          platform: string
+          raw: Json
+          reach: number
+          spend_minor: number
+          stat_date: string
+          updated_at: string
+        }
+        Insert: {
+          ad_account_id: string
+          campaign_id: string
+          campaign_name?: string | null
+          captured_at?: string
+          clicks?: number
+          conversions?: number
+          created_at?: string
+          currency?: string
+          id?: string
+          impressions?: number
+          leads?: number
+          org_id: string
+          platform: string
+          raw?: Json
+          reach?: number
+          spend_minor?: number
+          stat_date: string
+          updated_at?: string
+        }
+        Update: {
+          ad_account_id?: string
+          campaign_id?: string
+          campaign_name?: string | null
+          captured_at?: string
+          clicks?: number
+          conversions?: number
+          created_at?: string
+          currency?: string
+          id?: string
+          impressions?: number
+          leads?: number
+          org_id?: string
+          platform?: string
+          raw?: Json
+          reach?: number
+          spend_minor?: number
+          stat_date?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ads_insights_daily_org_id_fkey"
+            columns: ["org_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
             referencedColumns: ["id"]
           },
         ]
@@ -8472,7 +8552,7 @@ export interface Database {
         Returns: Json
       }
       get_ads_attribution: {
-        Args: { p_from: string; p_platform?: string; p_to: string }
+        Args: { p_from: string; p_platform?: string; p_to: string; p_model?: string }
         Returns: {
           identified_contacts: number
           opportunities: number
@@ -8481,6 +8561,19 @@ export interface Database {
           utm_campaign: string
           utm_medium: string
           utm_source: string
+        }[]
+      }
+      get_ads_daily_totals: {
+        Args: { p_platform: string; p_ad_account_id: string; p_from: string; p_to: string }
+        Returns: {
+          impressions: number
+          clicks: number
+          reach: number
+          spend_minor: number
+          conversions: number
+          leads: number
+          currency: string
+          days: number
         }[]
       }
       _is_cluster_fully_excluded: {

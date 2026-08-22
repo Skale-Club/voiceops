@@ -2,11 +2,17 @@ import { NextRequest } from 'next/server'
 import Anthropic from '@anthropic-ai/sdk'
 import { z } from 'zod'
 
+import { captureApiError } from '@/lib/api-error'
 import { createClient, getUser } from '@/lib/supabase/server'
 import { createMemory } from '@/lib/ads/journey-db'
 import type { AdsMemoryType } from '@/lib/ads/journey-db'
 
 export const runtime = 'nodejs'
+
+/** Extraction is a cheap background summarisation — override per deployment. */
+const MEMORY_EXTRACTION_MODEL = process.env.ADS_MEMORY_MODEL ?? 'claude-haiku-4-5-20251001'
+
+const MEMORY_TYPES = ['insight', 'decision', 'plan', 'risk', 'observation', 'result', 'goal'] as const
 
 function err(msg: string, status = 400) {
   return Response.json({ error: msg }, { status })
@@ -58,21 +64,47 @@ export async function POST(request: NextRequest): Promise<Response> {
   }> = []
 
   try {
+    // Structured tool use rather than "return only JSON" plus a regex: the
+    // schema is enforced by the API, so a stray sentence before the object,
+    // a code fence, or a nested brace can't silently produce zero memories
+    // (the old `/\{[\s\S]*\}/` match was greedy and would swallow prose too).
     const response = await anthropic.messages.create({
-      model: 'claude-haiku-4-5-20251001',
+      model: MEMORY_EXTRACTION_MODEL,
       max_tokens: 1024,
+      tools: [
+        {
+          name: 'record_memories',
+          description: 'Record the memories worth keeping from this conversation.',
+          input_schema: {
+            type: 'object',
+            properties: {
+              memories: {
+                type: 'array',
+                maxItems: 3,
+                items: {
+                  type: 'object',
+                  properties: {
+                    type: { type: 'string', enum: MEMORY_TYPES },
+                    title: { type: 'string', description: 'Short title, max 80 characters' },
+                    content: { type: 'string', description: 'Concise description, max 300 characters' },
+                    campaign_name: { type: 'string', description: 'Only when the memory is about one specific campaign' },
+                    confidence: { type: 'integer', minimum: 1, maximum: 5 },
+                  },
+                  required: ['type', 'title', 'content', 'confidence'],
+                },
+              },
+            },
+            required: ['memories'],
+          },
+        },
+      ],
+      tool_choice: { type: 'tool', name: 'record_memories' },
       messages: [
         {
           role: 'user',
-          content: `Analyze this ads management conversation and extract 0-3 key insights, decisions, plans, risks, or observations worth remembering for future sessions.
+          content: `Extract 0-3 memories worth keeping from this ads management conversation.
 
-Only extract things that are genuinely useful context for future conversations: strategic decisions made, performance insights discovered, plans established, risks identified, or goals set.
-Skip small talk, tool output summaries, or anything already obvious.
-
-Return ONLY valid JSON in this exact format:
-{"memories":[{"type":"insight|decision|plan|risk|observation|result|goal","title":"short title max 80 chars","content":"concise description max 300 chars","campaign_name":"campaign name if specific","confidence":1-5}]}
-
-If nothing notable: {"memories":[]}
+Keep only things that are genuinely useful context for a future session: strategic decisions made, performance insights discovered, plans established, risks identified, or goals set. Skip small talk, restatements of tool output, and anything a reader would already know. Returning an empty list is the right answer more often than not.
 
 Conversation:
 ${conversationText.slice(0, 6000)}`,
@@ -80,23 +112,25 @@ ${conversationText.slice(0, 6000)}`,
       ],
     })
 
-    const text = response.content.find((b) => b.type === 'text')?.text ?? ''
-    const jsonMatch = text.match(/\{[\s\S]*\}/)
-    if (jsonMatch) {
-      const parsed2 = JSON.parse(jsonMatch[0]) as { memories?: unknown[] }
-      if (Array.isArray(parsed2.memories)) {
-        extracted = parsed2.memories.slice(0, 3) as typeof extracted
+    const toolUse = response.content.find((b) => b.type === 'tool_use')
+    if (toolUse && toolUse.type === 'tool_use') {
+      const input = toolUse.input as { memories?: unknown[] }
+      if (Array.isArray(input.memories)) {
+        extracted = input.memories.slice(0, 3) as typeof extracted
       }
     }
-  } catch {
+  } catch (e) {
+    // Extraction is a nice-to-have on top of a conversation that already
+    // succeeded — never fail the caller, but don't swallow the reason either.
+    captureApiError(e, { route: 'ads/memories/extract', orgId })
+    console.error('[ads/memories/extract] extraction failed:', e instanceof Error ? e.message : e)
     return Response.json({ memories: [] })
   }
 
   const created: Array<{ id: string; title: string; type: string }> = []
 
   for (const m of extracted) {
-    const validTypes = ['insight', 'decision', 'plan', 'risk', 'observation', 'result', 'goal']
-    if (!validTypes.includes(m.type)) continue
+    if (!(MEMORY_TYPES as readonly string[]).includes(m.type)) continue
     if (!m.title?.trim() || !m.content?.trim()) continue
 
     const id = await createMemory({

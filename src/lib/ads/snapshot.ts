@@ -1,134 +1,182 @@
-import { listCampaigns as metaListCampaigns, getInsights, getAdAccountInfo } from './meta-api'
-import { listCampaigns as googleListCampaigns, getAccountOverview, toGaqlDuration } from './google-api'
-import { getCustomerInfo, refreshAccessToken } from './google-oauth'
+// Period-over-period comparison, served from stored history.
+//
+// This module previously built a text table for injection into the Copilot
+// system prompt, by calling the Meta and Google APIs directly. It was never
+// imported anywhere, formatted every currency as "$", and would have put two
+// live API round-trips in front of every Copilot message — including the ones
+// with nothing to do with ads. The live tools superseded it.
+//
+// What it does now is the thing the module was reaching for and could not do:
+// answer "compared to what?". That needs history, which ads_insights_daily now
+// holds, so a comparison costs one indexed query instead of re-fetching two
+// windows from a rate-limited platform API — and still works for a window the
+// operator has since disconnected the account for.
 
-// Builds a compact text snapshot of an ad account for injection into the AI
-// system prompt. Keeps it tight (< 1500 chars) so it doesn't waste tokens.
-// Always resolves — returns '' on any error so the chat still works.
+import { createServiceRoleClient } from '@/lib/supabase/admin'
+import { formatCurrency, minorUnitsPerMajor } from './currency'
+import { resolvePresetRange, previousRange, type PresetRange } from './date-range'
 
-function usd(micros: string | number): string {
-  return `$${(Number(micros) / 1_000_000).toFixed(2)}`
+export type PeriodTotals = {
+  impressions: number
+  clicks: number
+  spend: number
+  conversions: number
+  leads: number
+  ctr: number | null
+  cpc: number | null
+  cpl: number | null
+  currency: string
+  days: number
 }
 
-function fmt(n: string | number, decimals = 0): string {
-  return Number(n).toLocaleString('en-US', { maximumFractionDigits: decimals })
+export type PeriodComparison = {
+  platform: 'meta' | 'google'
+  adAccountId: string
+  currency: string
+  current: PeriodTotals & { range: PresetRange }
+  previous: PeriodTotals & { range: PresetRange }
+  /** Signed percentage change per metric; null when the baseline is zero. */
+  deltaPct: Record<'impressions' | 'clicks' | 'spend' | 'conversions' | 'leads' | 'ctr' | 'cpc' | 'cpl', number | null>
+  /** True when no stored history covers the window at all. */
+  noData: boolean
 }
 
-// ─── Meta ─────────────────────────────────────────────────────────────────────
+type DailyRow = {
+  impressions: number
+  clicks: number
+  spend_minor: number
+  conversions: number
+  leads: number
+  currency: string
+  stat_date: string
+}
 
-export async function buildMetaSnapshot(adAccountId: string, accessToken: string): Promise<string> {
-  try {
-    const [account, campaigns, insights] = await Promise.all([
-      getAdAccountInfo(adAccountId, accessToken),
-      metaListCampaigns(adAccountId, accessToken),
-      getInsights(adAccountId, accessToken, { level: 'campaign', datePreset: 'last_30d' }),
-    ])
-
-    // campaign_id is returned alongside the insight row at campaign level
-    const insightMap = new Map(
-      insights.data.map((i) => {
-        const row = i as typeof i & { campaign_id?: string }
-        return [row.campaign_id ?? '', i]
-      }),
-    )
-
-    const active = campaigns.filter((c) => c.effective_status === 'ACTIVE' || c.status === 'ACTIVE')
-
-    let totalSpend = 0
-    let totalImpressions = 0
-    let totalClicks = 0
-    let totalLeads = 0
-
-    const rows = active.map((c) => {
-      const ins = insightMap.get(c.id)
-      const spend = parseFloat(ins?.spend ?? '0')
-      const impressions = parseInt(ins?.impressions ?? '0', 10)
-      const clicks = parseInt(ins?.clicks ?? '0', 10)
-      const leads = parseInt(
-        ins?.actions?.find((a) => a.action_type === 'lead')?.value ?? '0',
-        10,
-      )
-      totalSpend += spend
-      totalImpressions += impressions
-      totalClicks += clicks
-      totalLeads += leads
-
-      const budget = c.daily_budget
-        ? `$${(parseInt(c.daily_budget, 10) / 100).toFixed(0)}/day`
-        : c.lifetime_budget
-          ? `$${(parseInt(c.lifetime_budget, 10) / 100).toFixed(0)} lifetime`
-          : '—'
-      const cpl = leads > 0 ? `$${(spend / leads).toFixed(2)}` : '—'
-      const ctr = impressions > 0 ? `${((clicks / impressions) * 100).toFixed(2)}%` : '—'
-
-      return `  ${c.name.slice(0, 30).padEnd(30)} ${budget.padEnd(14)} $${spend.toFixed(0).padEnd(8)} ${fmt(impressions).padEnd(10)} ${fmt(clicks).padEnd(8)} ${ctr.padEnd(8)} ${leads > 0 ? `${leads} leads / CPL ${cpl}` : ''}`
-    })
-
-    const avgCpl = totalLeads > 0 ? ` | Avg CPL: $${(totalSpend / totalLeads).toFixed(2)}` : ''
-    const ctr = totalImpressions > 0 ? ` | CTR: ${((totalClicks / totalImpressions) * 100).toFixed(2)}%` : ''
-
-    const lines = [
-      `## Meta Ads — ${account.name} (${account.currency}) · Last 30 days`,
-      `Spend: $${totalSpend.toFixed(0)} | Impressions: ${fmt(totalImpressions)} | Clicks: ${fmt(totalClicks)}${ctr}${avgCpl}`,
-      `Active campaigns: ${active.length} of ${campaigns.length} total`,
-      '',
-      `  ${'Campaign'.padEnd(30)} ${'Budget'.padEnd(14)} ${'Spend'.padEnd(9)} ${'Impressions'.padEnd(10)} ${'Clicks'.padEnd(8)} ${'CTR'.padEnd(8)} Leads`,
-      `  ${'─'.repeat(90)}`,
-      ...rows,
-    ]
-
-    return lines.join('\n')
-  } catch {
-    return ''
+function emptyTotals(currency = 'USD'): PeriodTotals {
+  return {
+    impressions: 0, clicks: 0, spend: 0, conversions: 0, leads: 0,
+    ctr: null, cpc: null, cpl: null, currency, days: 0,
   }
 }
 
-// ─── Google ───────────────────────────────────────────────────────────────────
+function aggregate(rows: DailyRow[]): PeriodTotals {
+  if (!rows.length) return emptyTotals()
 
-export async function buildGoogleSnapshot(customerId: string, refreshToken: string): Promise<string> {
-  try {
-    const accessToken = await refreshAccessToken(refreshToken)
-    const duration = toGaqlDuration('last_30d')
+  const currency = rows[0].currency ?? 'USD'
+  const perMajor = minorUnitsPerMajor(currency)
 
-    const [account, overview, campaigns] = await Promise.all([
-      getCustomerInfo(customerId, accessToken).catch(() => ({
-        id: customerId,
-        name: customerId,
-        currency_code: 'USD',
-        manager: false,
-        test_account: false,
-      })),
-      getAccountOverview(customerId, refreshToken, duration),
-      googleListCampaigns(customerId, refreshToken, duration),
-    ])
+  let impressions = 0
+  let clicks = 0
+  let spendMinor = 0
+  let conversions = 0
+  let leads = 0
+  const days = new Set<string>()
 
-    const active = campaigns.filter((c) => c.status === 'ENABLED')
-    const totalCost = Number(overview.costMicros)
-    const totalConversions = parseFloat(overview.conversions)
-    const costPerConv = totalConversions > 0 ? totalCost / totalConversions / 1_000_000 : null
-
-    const rows = active.map((c) => {
-      const cost = Number(c.costMicros)
-      const conv = parseFloat(c.conversions)
-      const budget = `$${(Number(c.budgetAmountMicros) / 1_000_000).toFixed(0)}/day`
-      const cpa = conv > 0 ? `$${(cost / conv / 1_000_000).toFixed(2)}` : '—'
-      return `  ${c.name.slice(0, 30).padEnd(30)} ${budget.padEnd(12)} ${usd(cost).padEnd(10)} ${fmt(c.impressions).padEnd(12)} ${fmt(c.clicks).padEnd(8)} ${conv > 0 ? `${fmt(conv, 1)} conv / CPA ${cpa}` : '—'}`
-    })
-
-    const cpaLine = costPerConv ? ` | Avg CPA: $${costPerConv.toFixed(2)}` : ''
-
-    const lines = [
-      `## Google Ads — ${account.name} (${account.currency_code}) · Last 30 days`,
-      `Spend: ${usd(overview.costMicros)} | Impressions: ${fmt(overview.impressions)} | Clicks: ${fmt(overview.clicks)} | Conversions: ${fmt(overview.conversions, 1)}${cpaLine}`,
-      `Active campaigns: ${active.length} of ${campaigns.length} total`,
-      '',
-      `  ${'Campaign'.padEnd(30)} ${'Budget'.padEnd(12)} ${'Spend'.padEnd(10)} ${'Impressions'.padEnd(12)} ${'Clicks'.padEnd(8)} Performance`,
-      `  ${'─'.repeat(90)}`,
-      ...rows,
-    ]
-
-    return lines.join('\n')
-  } catch {
-    return ''
+  for (const r of rows) {
+    impressions += r.impressions
+    clicks += r.clicks
+    // Spend is summed in integer minor units, then converted once — summing
+    // floats across a quarter drifts.
+    spendMinor += r.spend_minor
+    conversions += Number(r.conversions)
+    leads += r.leads
+    days.add(r.stat_date)
   }
+
+  const spend = spendMinor / perMajor
+
+  return {
+    impressions,
+    clicks,
+    spend,
+    conversions,
+    leads,
+    ctr: impressions > 0 ? (clicks / impressions) * 100 : null,
+    cpc: clicks > 0 ? spend / clicks : null,
+    cpl: leads > 0 ? spend / leads : null,
+    currency,
+    days: days.size,
+  }
+}
+
+/** Signed percent change. Null when there's no baseline to compare against. */
+function pctChange(current: number | null, previous: number | null): number | null {
+  if (current === null || previous === null) return null
+  if (previous === 0) return null
+  return ((current - previous) / Math.abs(previous)) * 100
+}
+
+async function fetchRange(
+  orgId: string,
+  platform: 'meta' | 'google',
+  adAccountId: string,
+  range: PresetRange,
+): Promise<DailyRow[]> {
+  const supabase = createServiceRoleClient()
+  const { data } = await supabase
+    .from('ads_insights_daily')
+    .select('impressions, clicks, spend_minor, conversions, leads, currency, stat_date')
+    .eq('org_id', orgId)
+    .eq('platform', platform)
+    .eq('ad_account_id', adAccountId)
+    .gte('stat_date', range.since)
+    .lte('stat_date', range.until)
+  return (data ?? []) as DailyRow[]
+}
+
+/**
+ * Compare a window against the immediately preceding window of equal length.
+ *
+ * Reads only from ads_insights_daily, so it returns `noData: true` rather than
+ * silently reporting zeros when the nightly snapshot hasn't run for this
+ * account yet — a fabricated "-100%" is worse than an honest gap.
+ */
+export async function compareAdsPeriods(params: {
+  orgId: string
+  platform: 'meta' | 'google'
+  adAccountId: string
+  preset?: string
+  now?: Date
+}): Promise<PeriodComparison> {
+  const currentRange = resolvePresetRange(params.preset ?? 'last_30d', params.now)
+  const priorRange = previousRange(currentRange)
+
+  const [currentRows, priorRows] = await Promise.all([
+    fetchRange(params.orgId, params.platform, params.adAccountId, currentRange),
+    fetchRange(params.orgId, params.platform, params.adAccountId, priorRange),
+  ])
+
+  const current = aggregate(currentRows)
+  const previous = aggregate(priorRows)
+  const currency = currentRows[0]?.currency ?? priorRows[0]?.currency ?? 'USD'
+
+  return {
+    platform: params.platform,
+    adAccountId: params.adAccountId,
+    currency,
+    current: { ...current, currency, range: currentRange },
+    previous: { ...previous, currency, range: priorRange },
+    deltaPct: {
+      impressions: pctChange(current.impressions, previous.impressions),
+      clicks: pctChange(current.clicks, previous.clicks),
+      spend: pctChange(current.spend, previous.spend),
+      conversions: pctChange(current.conversions, previous.conversions),
+      leads: pctChange(current.leads, previous.leads),
+      ctr: pctChange(current.ctr, previous.ctr),
+      cpc: pctChange(current.cpc, previous.cpc),
+      cpl: pctChange(current.cpl, previous.cpl),
+    },
+    noData: currentRows.length === 0 && priorRows.length === 0,
+  }
+}
+
+/** One-line human summary, in the account's own currency. */
+export function describeComparison(cmp: PeriodComparison): string {
+  if (cmp.noData) {
+    return 'No stored history for this account yet — the nightly snapshot has not captured it.'
+  }
+  const spend = formatCurrency(cmp.current.spend, cmp.currency)
+  const cpl = cmp.current.cpl != null ? formatCurrency(cmp.current.cpl, cmp.currency) : '—'
+  const cplDelta = cmp.deltaPct.cpl
+  const trend = cplDelta === null ? '' : ` (${cplDelta > 0 ? '+' : ''}${cplDelta.toFixed(1)}% vs previous period)`
+  return `${spend} spent, ${cmp.current.leads} leads, CPL ${cpl}${trend}.`
 }
