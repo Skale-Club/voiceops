@@ -189,19 +189,37 @@ When you need to author a workflow (manually, via Copilot, or from a Claude Code
 
 ## Deployment
 
-- Self-hosted **Coolify** (Hetzner box, shared Docker host) builds and runs the
-  Next.js app from the `Dockerfile` (standalone output). Production: `xphere.app`.
-  Coolify app `xphere-zdt`, uuid `fwjo7xriuqibl01v96vah7fz` (zero-downtime
-  Docker Image app; serves `xphere.app`, `www.xphere.app`, `xphere-stage.skale.club`),
-  GitHub App source, branch `main`. (Superseded the old app
-  `c70jg4t9o88x985dctsl57qy` during the 2026-06-10 migration.)
-- **Auto-deploy:** every push to `main` triggers `.github/workflows/deploy.yml`,
-  which pings the Coolify deploy API (`/api/v1/deploy?uuid=…`); Coolify then
-  pulls the commit and rebuilds/runs. Coolify still does the actual build/run —
-  the workflow is only the push→deploy trigger (the native auto-deploy toggle
-  isn't exposed by the Coolify v4.1.1 API). Requires repo secret `COOLIFY_TOKEN`;
-  if that token is rotated, update the secret. Don't also enable Coolify's UI
-  "Automatic Deployment" or pushes will deploy twice.
+- **GitHub Actions builds the image; self-hosted Coolify only runs it.** The
+  Docker image is built on GitHub runners from the `Dockerfile` (standalone
+  output) and pushed to GHCR — Coolify pulls that prebuilt image and rolls it
+  out. Production: `xphere.app`, on a Hetzner box (shared Docker host).
+  Coolify app `xphere-zdt`, uuid `fwjo7xriuqibl01v96vah7fz` — a **Docker Image**
+  resource (rolling update, zero-downtime) tracking
+  `ghcr.io/skale-club/xphere:latest`; serves `xphere.app`, `www.xphere.app`,
+  `xphere-stage.skale.club`. (Superseded the old app
+  `c70jg4t9o88x985dctsl57qy` during the 2026-06-10 migration; the build moved
+  off the VPS because the 8GB CX32 OOM-thrashes on `next build`.)
+- **Auto-deploy:** every push to `main` runs `.github/workflows/build-deploy.yml`
+  ("Build and Deploy", job `build-and-deploy`): Checkout → Set up Docker Buildx →
+  Log in to GHCR → **Build image and push to GHCR** (tags `:latest` and
+  `:<sha>`, GHA layer cache, `NEXT_PUBLIC_*` passed as build args) → **Trigger
+  Coolify deploy** via `POST /api/v1/deploy?uuid=…`. Coolify then pulls
+  `:latest`, starts the new container, waits for `/api/health`, and swaps
+  traffic. Because the build now happens in CI, a run takes **~8 minutes** end
+  to end (measured 7m44s-9m39s over the last seven successful runs) — not the
+  few seconds the old trigger-only workflow took. `deploy.yml`
+  no longer exists (removed to stop a double Coolify trigger); `concurrency:
+  build-deploy` with `cancel-in-progress` means a newer push cancels an
+  in-flight build. Requires repo secret `COOLIFY_TOKEN` — if it is missing the
+  job still builds and pushes to GHCR and only warns on the deploy step, so a
+  rotated token shows up as "image updated, site unchanged". Don't also enable
+  Coolify's UI "Automatic Deployment" or pushes will deploy twice.
+- **Manual-dispatch ops workflows** (never run on push):
+  `coolify-set-envs.yml` upserts runtime env vars from GitHub Secrets into the
+  Coolify app and redeploys — runtime env is *not* managed by `build-deploy.yml`,
+  which only passes `NEXT_PUBLIC_*` build args. `coolify-zero-downtime.yml`
+  enables the Coolify health check on `/api/health`; note it still targets the
+  superseded uuid `c70jg4t9o88x985dctsl57qy`.
 - Supabase handles background Edge Functions and database-backed jobs
 - Other GitHub Actions are low-risk scheduled automation (cron-tick, keepalive,
   etc.) — domain-stable.
