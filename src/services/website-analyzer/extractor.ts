@@ -10,11 +10,34 @@
 // and parser are only needed when analyzeWebsite() is called.
 import type { BrandColor, RawExtraction } from './types'
 import { discoverBooking, type BookingCandidate } from './booking-discovery'
+import { withBrowserSlot } from './concurrency'
 
 const DESKTOP_VIEWPORT = { width: 1280, height: 800 }
 const MOBILE_VIEWPORT  = { width: 390, height: 844 }
 const PAGE_TIMEOUT_MS  = 30_000
 const NAV_TIMEOUT_MS   = 45_000
+
+/** Hard ceiling for one analysis, from launch to the last screenshot.
+ *  The per-page timeouts above only bound individual Playwright calls — they
+ *  cannot save us from a browser that stops answering altogether, which is
+ *  what leaked 74 Chromium instances on 2026-08-30. When this fires the
+ *  browser is force-closed, every in-flight call rejects, and the caller's
+ *  `finally` reclaims the slot.
+ *
+ *  Two passes (desktop + mobile) at worst-case NAV_TIMEOUT_MS + settle waits
+ *  land near 110s, so 150s is a genuine "this is wedged" signal rather than a
+ *  limit healthy-but-slow sites would trip. */
+const ANALYSIS_TIMEOUT_MS = readPositiveInt(process.env.WEBSITE_ANALYZER_TIMEOUT_MS, 150_000)
+
+/** How long a graceful browser.close() may take before we stop waiting on it.
+ *  Never blocks slot release: a close that hangs must not become a second way
+ *  to stall the pool. */
+const CLOSE_TIMEOUT_MS = 15_000
+
+function readPositiveInt(raw: string | undefined, fallback: number): number {
+  const parsed = Number(raw)
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback
+}
 
 /** Normalise a URL — add https:// if scheme is missing. */
 export function normaliseUrl(input: string): string {
@@ -215,10 +238,18 @@ async function resilientGoto(page: import('playwright').Page, url: string): Prom
   return loadMs
 }
 
-/** Run full Playwright analysis on a URL. */
+/** Run full Playwright analysis on a URL.
+ *
+ *  Every launch goes through the global browser pool (see ./concurrency), so
+ *  however many callers pile in — the 10-minute cron batch, the public API, a
+ *  dashboard action — only WEBSITE_ANALYZER_MAX_CONCURRENT browsers exist at
+ *  any moment. Throws AnalyzerBusyError when the pool and its queue are both
+ *  full; the caller should leave the row pending and retry on a later tick. */
 export async function analyzeWebsite(rawUrl: string): Promise<RawExtraction> {
-  const url = normaliseUrl(rawUrl)
+  return withBrowserSlot(() => extractWithBrowser(normaliseUrl(rawUrl)))
+}
 
+async function extractWithBrowser(url: string): Promise<RawExtraction> {
   // Dynamic import — loaded here (not at module top-level) so that GET
   // requests to /analyze can succeed even if playwright is unavailable.
   const { chromium } = await import('playwright')
@@ -239,6 +270,16 @@ export async function analyzeWebsite(rawUrl: string): Promise<RawExtraction> {
       '--ignore-certificate-errors', // many small-business sites have expired/self-signed certs
     ],
   })
+
+  // Force-close if the passes below wedge. Closing the browser is what makes
+  // every pending Playwright call reject, which unwinds us into the `finally`
+  // — without it a stuck page holds its Chromium open forever.
+  const watchdog = setTimeout(() => {
+    console.error(
+      `[website-analyzer] analysis exceeded ${ANALYSIS_TIMEOUT_MS}ms, force-closing browser for ${url}`
+    )
+    void browser.close().catch(() => {})
+  }, ANALYSIS_TIMEOUT_MS)
 
   try {
     // ── Desktop pass ──────────────────────────────────────────────────────────
@@ -344,6 +385,35 @@ export async function analyzeWebsite(rawUrl: string): Promise<RawExtraction> {
       rawCssVars,
     }
   } finally {
-    await browser.close()
+    clearTimeout(watchdog)
+    await closeBrowser(browser, url)
+  }
+}
+
+/** Close a browser without ever hanging the caller.
+ *
+ *  A graceful close is attempted first; if it has not returned within
+ *  CLOSE_TIMEOUT_MS we stop waiting and log it. Waiting forever here would
+ *  hold the pool slot open, which is precisely the failure this module is
+ *  meant to prevent — a leaked process is bad, a wedged pool is worse. */
+async function closeBrowser(browser: import('playwright').Browser, url: string): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const abandon = new Promise<'timeout'>((resolve) => {
+    timer = setTimeout(() => resolve('timeout'), CLOSE_TIMEOUT_MS)
+  })
+
+  try {
+    const outcome = await Promise.race([browser.close().then(() => 'closed' as const), abandon])
+    if (outcome === 'timeout') {
+      console.error(
+        `[website-analyzer] browser.close() did not return within ${CLOSE_TIMEOUT_MS}ms for ${url} — abandoning it`
+      )
+    }
+  } catch (err) {
+    // An already-crashed or watchdog-killed browser throws here. Nothing left
+    // to clean up, and it must not mask the original extraction error.
+    console.error(`[website-analyzer] browser.close() failed for ${url}:`, err)
+  } finally {
+    if (timer) clearTimeout(timer)
   }
 }
