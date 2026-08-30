@@ -9,6 +9,8 @@
 //   TELEGRAM_BOT_TOKEN_OPS     - Optional. Bot token for an ops-wide destination shared
 //                                across apps (xphere, xkedule, skaleclub, xtimator, ...).
 //   TELEGRAM_ALERT_CHAT_ID_OPS - Optional. Chat id to pair with TELEGRAM_BOT_TOKEN_OPS.
+//   TELEGRAM_THREAD_ID         - Optional. Topic id, only for a group with Topics
+//                                enabled. Ignored for a private chat.
 //   PLATFORM_ADMIN_EMAIL       - Recipient for the email alert channel. Sent via
 //                                sendPlatformEmail() (platform_email_settings / Resend).
 // When TELEGRAM_BOT_TOKEN / TELEGRAM_ALERT_CHAT_ID are unset, this app's own alerts
@@ -44,6 +46,9 @@ const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN
 const TELEGRAM_ALERT_CHAT_ID = process.env.TELEGRAM_ALERT_CHAT_ID
 const TELEGRAM_BOT_TOKEN_OPS = process.env.TELEGRAM_BOT_TOKEN_OPS
 const TELEGRAM_ALERT_CHAT_ID_OPS = process.env.TELEGRAM_ALERT_CHAT_ID_OPS
+// Optional. Only applies when the destination chat is a group with Topics
+// enabled; ignored for a private chat, which is where alerts go today.
+const TELEGRAM_THREAD_ID = process.env.TELEGRAM_THREAD_ID
 
 export function telegramConfigured(): boolean {
   return Boolean(TELEGRAM_BOT_TOKEN && TELEGRAM_ALERT_CHAT_ID)
@@ -106,8 +111,13 @@ export function errorRateBreached(total: number, errors: number, minVolume = 20,
  * ops-wide signals that aren't specific to this app.
  */
 export async function sendTelegramAlert(alert: Alert, destination?: TelegramDestination): Promise<boolean> {
-  const botToken = destination?.botToken ?? TELEGRAM_BOT_TOKEN
-  const chatId = destination?.chatId ?? TELEGRAM_ALERT_CHAT_ID
+  // Trim whitespace, CR included. The token goes straight into the request
+  // PATH, so one stray character 404s every call — and the failure reads as
+  // "wrong token" rather than "trailing newline", which is a long way to
+  // travel for a fix. Env vars pasted into a Coolify field or piped through
+  // `gh secret set` from PowerShell both pick up that character routinely.
+  const botToken = (destination?.botToken ?? TELEGRAM_BOT_TOKEN)?.trim()
+  const chatId = (destination?.chatId ?? TELEGRAM_ALERT_CHAT_ID)?.trim()
   if (!botToken || !chatId) return false
   const icon = alert.severity === 'critical' ? '🔴' : '🟠'
   const lines = [`${icon} *${alert.title}*`]
@@ -121,9 +131,29 @@ export async function sendTelegramAlert(alert: Alert, destination?: TelegramDest
         text: lines.join('\n'),
         parse_mode: 'Markdown',
         disable_web_page_preview: true,
+        // Only meaningful when the destination is a group with Topics enabled;
+        // omitted entirely otherwise. Present so moving these alerts from the
+        // current private chat to an ops group is a config change, not a code
+        // change.
+        ...(TELEGRAM_THREAD_ID ? { message_thread_id: Number(TELEGRAM_THREAD_ID) } : {}),
       }),
     })
-    return res.ok
+    if (res.ok) return true
+
+    // Log Telegram's own explanation rather than just the status code. The
+    // failure that matters most is the supergroup migration: when a group is
+    // upgraded its chat id changes, every later alert fails, and ops alerting
+    // dies silently. Telegram returns the REPLACEMENT id in this body, so
+    // printing it raw is the entire remedy — discarding it, as this function
+    // used to, is what makes the death silent.
+    const body = await res.text().catch(() => '')
+    createLogger({ route: 'obs-alerts', alertKey: alert.key }).warn('telegram_rejected', {
+      status: res.status,
+      // e.g. "Bad Request: group chat was upgraded to a supergroup chat" with
+      // parameters.migrate_to_chat_id carrying the new id to configure.
+      response: body.slice(0, 500),
+    })
+    return false
   } catch {
     return false
   }

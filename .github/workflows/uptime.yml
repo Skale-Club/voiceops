@@ -1,0 +1,161 @@
+name: Uptime
+
+# LAYER 1 of three (see docs/TELEGRAM-ALERTS.md). The only monitoring that
+# survives the app dying, because it does not run on the app's machine.
+#
+# Everything else that watches Xphere — /api/cron/obs-alerts, the error-spike
+# detector in src/lib/obs/logger.ts, the skale-cron heartbeats — executes on the
+# Hetzner box. All of it goes silent at exactly the moment it matters most: a
+# host that is down cannot tell you it is down. This job runs on GitHub's
+# runners, outside the container, outside Coolify, outside Hetzner and outside
+# the network path to it, so it can still see and still reach Telegram.
+#
+# Deliberately swimming against this repo's own migration: on 2026-08-21 every
+# scheduled tick moved OFF GitHub Actions onto the skale-cron service on the VPS,
+# because GitHub throttled */5 schedules into 28-37 minute gaps and billed a full
+# runner-minute per curl. Both complaints are true here too — expect this to
+# drift well past five minutes. It stays on GitHub Actions anyway, because a
+# liveness check hosted on the machine it checks is not a liveness check. A probe
+# that drifts to 30 minutes still beats one that dies with the host.
+#
+# Alerting is TRANSITION-ONLY: one message when it goes down, one when it comes
+# back. Never one per check. The previous state is carried between runs in the
+# Actions cache; a channel that repeats "still down" every five minutes is a
+# channel that gets muted, which costs you the alerts that matter.
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: uptime
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout (for scripts/telegram-notify.sh)
+        uses: actions/checkout@v4
+
+      # Prefix restore-key: each run saves under a unique key (a fixed key can
+      # only be written once), so the most recent matching entry is the previous
+      # run's state.
+      - name: Restore previous state
+        id: restore
+        uses: actions/cache/restore@v4
+        with:
+          path: .uptime-state
+          key: uptime-state-${{ github.run_id }}
+          restore-keys: |
+            uptime-state-
+
+      - name: Probe public endpoints
+        id: probe
+        env:
+          SITE_URL: ${{ secrets.SITE_URL }}
+        run: |
+          set -uo pipefail
+          BASE="${SITE_URL:-https://xphere.app}"
+
+          # Two endpoints, because one is not enough to tell "up" from "serving".
+          # /api/health is a static handler that answers as long as the Node
+          # process accepts connections — it stays green while the app itself is
+          # broken. The login page exercises Next's rendering path, so a build
+          # that boots but cannot render still reads as down.
+          health=$(curl -s -o /dev/null -w "%{http_code}" \
+            --connect-timeout 15 --max-time 30 \
+            --retry 3 --retry-delay 10 --retry-all-errors \
+            "${BASE}/api/health" || echo "000")
+          page=$(curl -s -L -o /dev/null -w "%{http_code}" \
+            --connect-timeout 15 --max-time 30 \
+            --retry 3 --retry-delay 10 --retry-all-errors \
+            "${BASE}/login" || echo "000")
+
+          echo "health=${health} login=${page}"
+
+          state="up"
+          detail=""
+          if [ "${health}" -lt 200 ] || [ "${health}" -ge 300 ]; then
+            state="down"; detail="/api/health returned ${health}"
+          elif [ "${page}" -lt 200 ] || [ "${page}" -ge 400 ]; then
+            state="down"; detail="/login returned ${page}"
+          fi
+
+          {
+            echo "state=${state}"
+            echo "detail=${detail}"
+            echo "health=${health}"
+            echo "page=${page}"
+            echo "base=${BASE}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Compare against previous state
+        id: transition
+        env:
+          CURRENT: ${{ steps.probe.outputs.state }}
+        run: |
+          set -uo pipefail
+          previous="unknown"
+          [ -f .uptime-state ] && previous=$(tr -d '[:space:]' < .uptime-state)
+          echo "previous=${previous} current=${CURRENT}"
+
+          # unknown -> up is a cold start (first run, or the cache expired after
+          # 7 days of no eviction), NOT a recovery. Announcing it would cry wolf.
+          # unknown -> down still alerts: a real outage on a cold start is a real
+          # outage.
+          changed="no"
+          if [ "${previous}" != "${CURRENT}" ]; then
+            if [ "${previous}" = "unknown" ] && [ "${CURRENT}" = "up" ]; then
+              changed="no"
+            else
+              changed="yes"
+            fi
+          fi
+
+          printf '%s' "${CURRENT}" > .uptime-state
+          echo "changed=${changed}" >> "$GITHUB_OUTPUT"
+          echo "previous=${previous}" >> "$GITHUB_OUTPUT"
+
+      - name: Alert — went down
+        if: steps.transition.outputs.changed == 'yes' && steps.probe.outputs.state == 'down'
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_ALERT_CHAT_ID: ${{ secrets.TELEGRAM_ALERT_CHAT_ID }}
+          TELEGRAM_THREAD_ID: ${{ vars.TELEGRAM_THREAD_ID }}
+          DETAIL: ${{ steps.probe.outputs.detail }}
+          HEALTH: ${{ steps.probe.outputs.health }}
+          PAGE: ${{ steps.probe.outputs.page }}
+          BASE: ${{ steps.probe.outputs.base }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          bash scripts/telegram-notify.sh \
+            "🔴 <b>Xphere is DOWN</b>" \
+            "${DETAIL}\n\n• host: ${BASE}\n• /api/health: ${HEALTH}\n• /login: ${PAGE}\n• probed from GitHub Actions (outside the VPS)\n• run: ${RUN_URL}"
+
+      - name: Alert — recovered
+        if: steps.transition.outputs.changed == 'yes' && steps.probe.outputs.state == 'up'
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_ALERT_CHAT_ID: ${{ secrets.TELEGRAM_ALERT_CHAT_ID }}
+          TELEGRAM_THREAD_ID: ${{ vars.TELEGRAM_THREAD_ID }}
+          BASE: ${{ steps.probe.outputs.base }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          bash scripts/telegram-notify.sh \
+            "✅ <b>Xphere is back UP</b>" \
+            "• host: ${BASE}\n• run: ${RUN_URL}"
+
+      # Always saves, including on the no-change path — the state file must
+      # advance every run or the next one compares against a stale value.
+      - name: Save state
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: .uptime-state
+          key: uptime-state-${{ github.run_id }}
