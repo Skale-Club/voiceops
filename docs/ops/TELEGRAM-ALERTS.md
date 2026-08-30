@@ -1,8 +1,9 @@
 # Telegram alerts
 
 Xphere reports its own problems to a Telegram chat: the site going down, a cron
-that stopped ticking, workflows failing, agent cost running toward the cap, and
-a sudden jump in the error rate.
+that stopped ticking, workflows failing, agent cost running toward the cap, a
+sudden jump in the error rate, and the host itself running out of disk or
+memory.
 
 The bot is **@xphereoppsbot** ("Xphere | Opps"), created for this project only.
 Do not reuse a bot from another project: one bot per project keeps a revoked or
@@ -52,8 +53,9 @@ purpose — see below.
 | 🟠 Workflow runs failing, grouped by cause | in-app cron | once per distinct cause per 24h |
 | 🔴 Cron heartbeat stale | in-app cron | every 3h while stale |
 | 🔴 Error spike | in-app, in-process | ≥10 errors in 5 min, then 30 min quiet |
+| ⚠️ Disk / memory / swap / container down on the host | on-box watchdog | every 10 min, once per 6h while it persists |
 
-## Why the monitoring lives in three places
+## Why the monitoring lives in four places
 
 This is the part worth understanding, because it is what makes the system
 trustworthy rather than merely reassuring.
@@ -75,8 +77,23 @@ cadence to drift well past five minutes; a probe that drifts to 30 minutes still
 beats one that dies with the host.
 
 **But an HTTP probe from outside is nearly blind.** It sees "the page loads" and
-stays green while a workflow fails on every run, a token quietly expires, or
-cost climbs toward the cap. The **in-app cron** catches those, because it can
+stays green while the disk fills, a container restart-loops, or memory creeps
+toward the OOM killer — right up until it abruptly goes red. The **on-box
+watchdog** catches those hours earlier, because it can see things no external
+request can. It lives in the ops repo, not this one, because it watches the
+*host* — which runs seven apps, not just Xphere:
+`skaleclub-apps/scripts/skale-watchdog.sh`, installed at
+`/usr/local/bin/skale-watchdog.sh` and run every 10 minutes by
+`/etc/cron.d/skale-watchdog`. It runs on the host rather than in a container,
+because a watchdog inside Docker cannot report that Docker is what died. Note
+that the box collects far more than it alerts on: Netdata has no alarms wired
+and its diskspace plugin does not even expose `/`, and `skale-disk-sampler.sh`
+ships disk numbers to the apps dashboard and stops there. See that repo's
+`RUNBOOK.md` → _On-box watchdog_.
+
+**The probe also cannot see the product.** A workflow that fails on every run,
+a token that quietly expires, cost climbing toward the cap — none of that
+changes an HTTP status code. The **in-app cron** catches those, because it can
 query the database the probe cannot see.
 
 **And neither can see a burst.** A specific signal only fires for a failure
@@ -84,7 +101,7 @@ someone thought to instrument. The **error-spike detector** is the net under all
 of them: it lives inside `logger.emit()` and reports a change in the error
 *rate*, whatever the cause.
 
-Three vantage points, three blind spots, deliberately overlapping.
+Four vantage points, four blind spots, deliberately overlapping.
 
 ## Alert fatigue is a failure mode
 
@@ -213,3 +230,4 @@ Set `TELEGRAM_ALERT_CHAT_ID` to that id in both places to restore alerting.
 | `src/lib/obs/alerts.ts` | Delivery, dedupe, Telegram + email channels |
 | `src/lib/obs/error-spike.ts` | Layer 3 — rate-change detector |
 | `src/lib/obs/logger.ts`, `src/lib/logger.ts` | Where errors fan out to Sentry, `event_logs` and the spike detector |
+| `skaleclub-apps/scripts/skale-watchdog.sh` | On-box watchdog — host disk/memory/swap/containers (different repo) |
