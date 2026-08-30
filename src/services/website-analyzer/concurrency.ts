@@ -26,8 +26,17 @@ const MAX_CONCURRENT = readPositiveInt(process.env.WEBSITE_ANALYZER_MAX_CONCURRE
 
 /** Callers waiting for a slot. Beyond this the analyzer reports itself busy
  *  instead of growing an unbounded backlog — a queue that can never drain is
- *  just the original bug with extra steps. */
-const MAX_QUEUED = readPositiveInt(process.env.WEBSITE_ANALYZER_MAX_QUEUED, 8)
+ *  just the original bug with extra steps.
+ *
+ *  The depth is bounded from above by the stale reclaim, not just by taste:
+ *  a queued analysis is holding a website_analyses row, and
+ *  reclaim_stale_website_analyses fails any row untouched for
+ *  DEFAULT_STALE_MINUTES (10). The last caller in line waits about
+ *  ceil(MAX_QUEUED / MAX_CONCURRENT) * ANALYSIS_TIMEOUT_MS, so at 6/2/150s
+ *  that is 7.5 minutes — comfortably inside the window even if every analysis
+ *  ahead of it runs to its hard timeout. Raising this without raising the
+ *  stale threshold would let the reclaim fail work that is merely waiting. */
+const MAX_QUEUED = readPositiveInt(process.env.WEBSITE_ANALYZER_MAX_QUEUED, 6)
 
 function readPositiveInt(raw: string | undefined, fallback: number): number {
   const parsed = Number(raw)

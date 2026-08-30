@@ -133,7 +133,16 @@ export async function runAnalysis(opts: {
 
   try {
     // ── 1. Extract ──────────────────────────────────────────────────────────
-    const extraction = await analyzeWebsite(url)
+    // The row was marked 'running' above, but the browser pool may hold this
+    // call in its queue first. reclaim_stale_website_analyses fails any
+    // pending/running row untouched for DEFAULT_STALE_MINUTES, so restart that
+    // clock when the analysis genuinely begins — otherwise a run that merely
+    // waited its turn gets reclaimed out from under itself.
+    const extraction = await analyzeWebsite(url, {
+      onStart: async () => {
+        await wa.update({ updated_at: new Date().toISOString() }).eq('id', analysisId)
+      },
+    })
 
     // ── 2. Upload screenshots ────────────────────────────────────────────────
     const [screenshotDesktopUrl, screenshotMobileUrl] = await Promise.all([

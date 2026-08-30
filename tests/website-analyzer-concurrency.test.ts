@@ -5,6 +5,8 @@ import {
   withBrowserSlot,
   __resetAnalyzerConcurrencyForTests,
 } from '@/services/website-analyzer/concurrency'
+import { ANALYSIS_TIMEOUT_MS } from '@/services/website-analyzer/extractor'
+import { DEFAULT_STALE_MINUTES } from '@/services/website-analyzer/staleness'
 
 // These assume the built-in defaults (2 concurrent, 8 queued). The module
 // reads its limits once at import time, so the tests describe that shape
@@ -33,7 +35,18 @@ describe('website-analyzer concurrency pool', () => {
 
   it('exposes the defaults that keep the shared host alive', () => {
     expect(maxConcurrent).toBe(2)
-    expect(maxQueued).toBe(8)
+    expect(maxQueued).toBe(6)
+  })
+
+  it('cannot queue for longer than the stale reclaim tolerates', () => {
+    // A queued analysis is holding a website_analyses row, and
+    // reclaim_stale_website_analyses fails rows untouched for
+    // DEFAULT_STALE_MINUTES. If the back of the queue can wait longer than
+    // that, the reclaim starts killing work that is merely waiting its turn.
+    // This guards the three constants moving independently.
+    const worstCaseWaitMs =
+      Math.ceil(maxQueued / maxConcurrent) * ANALYSIS_TIMEOUT_MS
+    expect(worstCaseWaitMs).toBeLessThan(DEFAULT_STALE_MINUTES * 60_000)
   })
 
   it('runs work immediately while slots are free', async () => {

@@ -27,7 +27,7 @@ const NAV_TIMEOUT_MS   = 45_000
  *  Two passes (desktop + mobile) at worst-case NAV_TIMEOUT_MS + settle waits
  *  land near 110s, so 150s is a genuine "this is wedged" signal rather than a
  *  limit healthy-but-slow sites would trip. */
-const ANALYSIS_TIMEOUT_MS = readPositiveInt(process.env.WEBSITE_ANALYZER_TIMEOUT_MS, 150_000)
+export const ANALYSIS_TIMEOUT_MS = readPositiveInt(process.env.WEBSITE_ANALYZER_TIMEOUT_MS, 150_000)
 
 /** How long a graceful browser.close() may take before we stop waiting on it.
  *  Never blocks slot release: a close that hangs must not become a second way
@@ -244,9 +244,20 @@ async function resilientGoto(page: import('playwright').Page, url: string): Prom
  *  however many callers pile in — the 10-minute cron batch, the public API, a
  *  dashboard action — only WEBSITE_ANALYZER_MAX_CONCURRENT browsers exist at
  *  any moment. Throws AnalyzerBusyError when the pool and its queue are both
- *  full; the caller should leave the row pending and retry on a later tick. */
-export async function analyzeWebsite(rawUrl: string): Promise<RawExtraction> {
-  return withBrowserSlot(() => extractWithBrowser(normaliseUrl(rawUrl)))
+ *  full; the caller should leave the row pending and retry on a later tick.
+ *
+ *  `onStart` fires once the slot is actually held, i.e. when the browser is
+ *  about to launch rather than when the caller joined the queue. Callers that
+ *  track progress in a store with its own staleness rules need that
+ *  distinction — waiting in line is not the same as being stuck. */
+export async function analyzeWebsite(
+  rawUrl: string,
+  opts: { onStart?: () => void | Promise<void> } = {}
+): Promise<RawExtraction> {
+  return withBrowserSlot(async () => {
+    await opts.onStart?.()
+    return extractWithBrowser(normaliseUrl(rawUrl))
+  })
 }
 
 async function extractWithBrowser(url: string): Promise<RawExtraction> {
