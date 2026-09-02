@@ -53,6 +53,11 @@ export const mirrorPayloadSchema = z.object({
       // Target pipeline name in the caller's org. When omitted, the route falls
       // back to a per-source convention ("<Source> Lifecycle").
       pipeline: z.string().min(1).optional(),
+      // Identity of THIS opportunity within the source. Omitted (Xtimator,
+      // XmartMenu, Xkedule) the company id is the key and a company has one
+      // lifecycle deal, as before. Set (Xpot: one per field sale) each value
+      // is its own row under the same account.
+      external_id: z.string().min(1).max(200).optional(),
     })
     .optional(),
   note: z
@@ -101,13 +106,30 @@ async function upsertAccount(
   c: Company,
   occurredAt: string,
 ): Promise<{ id: string | null; stale: boolean }> {
-  const { data: existing } = await supabase
+  let { data: existing } = await supabase
     .from('accounts')
     .select('id, external_updated_at')
     .eq('org_id', orgId)
     .eq('external_source', source)
     .eq('external_id', companyId)
     .maybeSingle()
+
+  // The same app may have created this account earlier through
+  // POST /api/v1/prospects, which records its identity as source_type +
+  // source_id rather than external_source + external_id. Without this
+  // fallback a company that came in as a prospect and later closes a deal
+  // became two accounts. Adopt the prospect row and claim it for the mirror.
+  if (!existing) {
+    const { data: prospect } = await supabase
+      .from('accounts')
+      .select('id, external_updated_at')
+      .eq('org_id', orgId)
+      .eq('source_type', source)
+      .eq('source_id', companyId)
+      .is('external_source', null)
+      .maybeSingle()
+    if (prospect) existing = { id: prospect.id, external_updated_at: null }
+  }
 
   const fields = {
     name: c.name,
@@ -281,13 +303,16 @@ async function upsertOpportunity(
 
   const status = opp.status ?? (stage.is_won ? 'won' : stage.is_lost ? 'lost' : 'open')
   const title = opp.title || `${companyName} — Subscription`
+  // The dedup key: the caller's own id for this deal when it sends one, else
+  // the company — one lifecycle opportunity per company, the original shape.
+  const oppKey = opp.external_id ?? companyId
 
   const { data: existing } = await supabase
     .from('opportunities')
     .select('id')
     .eq('org_id', orgId)
     .eq('external_source', source)
-    .eq('external_id', companyId)
+    .eq('external_id', oppKey)
     .maybeSingle()
 
   if (existing) {
@@ -316,7 +341,7 @@ async function upsertOpportunity(
       currency: opp.currency ?? 'USD',
       status,
       external_source: source,
-      external_id: companyId,
+      external_id: oppKey,
       external_updated_at: occurredAt,
     })
     .select('id')
@@ -368,14 +393,22 @@ export async function runCrmMirror(
     )
   }
 
-  // 4. Note on the contact timeline (non-idempotent by design — one per event)
-  if (note && contactId) {
+  // 4. Note on the timeline (non-idempotent by design — one per event).
+  // A company with no phone or email gets no contact row (migration 1061's
+  // identity invariant), and the note used to be dropped with it. It goes on
+  // the account instead — crm_entity_type allows it — so a field sale to a
+  // shop that only gave its name still leaves its trace.
+  const noteTarget = contactId
+    ? { entity_type: 'contact', entity_id: contactId }
+    : accountId
+      ? { entity_type: 'account', entity_id: accountId }
+      : null
+  if (note && noteTarget) {
     const { error } = await supabase.from('notes').insert({
       org_id: orgId,
       title: note.title ?? null,
       content: note.content,
-      entity_type: 'contact',
-      entity_id: contactId,
+      ...noteTarget,
     })
     if (error) console.error('[crm-mirror] note insert error:', error)
   }
