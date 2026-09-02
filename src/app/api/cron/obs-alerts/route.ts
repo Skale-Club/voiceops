@@ -241,6 +241,14 @@ export async function GET(request: Request): Promise<Response> {
   // SMS (21408 unenabled region, 21211 invalid number); the rest were an
   // expired Google token and a missing Telegram bot. All of them silent.
   //
+  // Since 2026-09-02 those two Twilio codes no longer reach this signal at
+  // all: send-sms.ts classifies permanent destination rejections as
+  // SmsUndeliverableError and the action engine records a structured skip
+  // instead of failing the run (an account-level cause such as 21408 is
+  // surfaced as `degraded` on the Twilio integration). The calendar-tick
+  // scanner also stopped re-firing the same time-based trigger every night.
+  // What is left here is what a retry or a human can actually fix.
+  //
   // Deliberately NOT a rate: this table sees ~0.15 runs/hour, so an
   // errorRateBreached()-style ratio can never accumulate enough volume to fire
   // (the same reason signal 3 above is currently dormant). What works at this
