@@ -29,7 +29,10 @@ This milestone extends the existing text-agent platform into a tenant-safe voice
   3. The same specialist definition can be invoked from Vapi and the web widget while applying a first-class voice policy for prompt, model, history, tools, latency, and delegation.
   4. Authenticated agent configuration remains tenant-isolated through RLS, while the privileged Vapi resolution path derives tenant context explicitly from trusted mappings.
   5. Existing Vapi and Action Engine baseline suites pass without dependence on stale mocks or live Redis availability, so later failures identify real behavioral regressions.
-**Plans**: TBD
+**Plans**: 3 plans
+- [ ] 131-01-PLAN.md — Repair deterministic Vapi and Action Engine regression baseline.
+- [ ] 131-02-PLAN.md — Add voice channel and tenant-safe assistant entry-agent binding.
+- [ ] 131-03-PLAN.md — Add trusted invocation gateway and expose Vapi entry-agent resolution.
 **UI hint**: yes
 
 ### Phase 132: Authorized Specialist Orchestration
@@ -95,7 +98,7 @@ Phases execute in numeric order: 131 → 132 → 133 → 134 → 135 → 136.
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 131. Trusted Omnichannel Invocation Foundation | 0/TBD | Not started | - |
+| 131. Trusted Omnichannel Invocation Foundation | 0/3 | Ready to execute | - |
 | 132. Authorized Specialist Orchestration | 0/TBD | Not started | - |
 | 133. Idempotent Action and Vapi Safety | 0/TBD | Not started | - |
 | 134. Traceability and Reversible Routing | 0/TBD | Not started | - |

@@ -5,10 +5,10 @@
   "phase": "131",
   "phase_name": "Trusted Omnichannel Invocation Foundation",
   "phase_dir": ".planning/workstreams/omnichannel-agent-orchestration/phases/131-trusted-omnichannel-invocation-foundation",
-  "plan": null,
-  "task": null,
-  "total_tasks": 0,
-  "status": "planning_in_progress",
+  "plan": "131-01",
+  "task": 1,
+  "total_tasks": 7,
+  "status": "ready_to_execute",
   "completed_tasks": [
     {
       "id": 1,
@@ -37,15 +37,16 @@
     {
       "id": 5,
       "name": "Generate Phase 131 detailed plans",
-      "status": "in_progress",
-      "progress": "Planner task /root/plan_phase_131 was running; no PLAN.md had been written at the handoff checkpoint."
+      "status": "done",
+      "progress": "Three plans across two waves were generated locally and passed a documented manual fallback review."
     }
   ],
   "remaining_tasks": [
     {
       "id": 6,
       "name": "Verify Phase 131 plans with gsd-plan-checker",
-      "status": "not_started"
+      "status": "done",
+      "progress": "Checker agent produced no output and was interrupted; 131-PLAN-REVIEW.md records the manual fallback pass."
     },
     {
       "id": 7,
@@ -120,6 +121,6 @@
       "status": "interrupted_without_output_when_handoff_was_finalized"
     }
   ],
-  "next_action": "Inspect the Phase 131 directory for PLAN.md files; verify them if present, otherwise generate them from 131-CONTEXT.md, then execute Phase 131 before planning later phases.",
+  "next_action": "Execute Wave 1 plans 131-01 and 131-02, create summaries, then execute dependent plan 131-03.",
   "context_notes": "Specialization must not create a voice model-call waterfall. Phase order is foundation, authorized routing, action/Vapi safety, trace/rollback, release gates, then Cuts canary. No production source code has been changed yet."
 }
