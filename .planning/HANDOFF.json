@@ -1,0 +1,125 @@
+{
+  "version": "1.0",
+  "timestamp": "2026-09-03T19:11:56.189Z",
+  "workstream": "omnichannel-agent-orchestration",
+  "phase": "131",
+  "phase_name": "Trusted Omnichannel Invocation Foundation",
+  "phase_dir": ".planning/workstreams/omnichannel-agent-orchestration/phases/131-trusted-omnichannel-invocation-foundation",
+  "plan": null,
+  "task": null,
+  "total_tasks": 0,
+  "status": "planning_in_progress",
+  "completed_tasks": [
+    {
+      "id": 1,
+      "name": "Deep architecture and live tenant analysis",
+      "status": "done",
+      "commit": null
+    },
+    {
+      "id": 2,
+      "name": "Create isolated v3.5 workstream and requirements",
+      "status": "done",
+      "commit": null
+    },
+    {
+      "id": 3,
+      "name": "Create six-phase roadmap with 32/32 requirement coverage",
+      "status": "done",
+      "commit": null
+    },
+    {
+      "id": 4,
+      "name": "Capture Phase 131 locked context",
+      "status": "done",
+      "commit": null
+    },
+    {
+      "id": 5,
+      "name": "Generate Phase 131 detailed plans",
+      "status": "in_progress",
+      "progress": "Planner task /root/plan_phase_131 was running; no PLAN.md had been written at the handoff checkpoint."
+    }
+  ],
+  "remaining_tasks": [
+    {
+      "id": 6,
+      "name": "Verify Phase 131 plans with gsd-plan-checker",
+      "status": "not_started"
+    },
+    {
+      "id": 7,
+      "name": "Execute all Phase 131 waves",
+      "status": "not_started"
+    },
+    {
+      "id": 8,
+      "name": "Verify Phase 131 goal and update roadmap",
+      "status": "not_started"
+    },
+    {
+      "id": 9,
+      "name": "Plan and execute Phases 132 through 136 in order",
+      "status": "not_started"
+    }
+  ],
+  "blockers": [
+    {
+      "description": "Secondary-agent usage limit prevented Phase 131 research artifact generation.",
+      "type": "external",
+      "workaround": "Operator explicitly said continue; use 131-CONTEXT.md and ARCHITECTURE-ANALYSIS.md, or rerun research after quota reset."
+    },
+    {
+      "description": "Focused baseline currently has four stale Vapi mocks and one Redis-dependent timeout.",
+      "type": "technical",
+      "workaround": "Repair in Phase 131 before any behavioral cutover."
+    }
+  ],
+  "human_actions_pending": [
+    {
+      "action": "Authorize production migration and canary activation only when the later execution plan reaches those gates.",
+      "context": "Phase 131 planning does not authorize db push, Vapi cutover, or live booking mutation.",
+      "blocking": false
+    }
+  ],
+  "decisions": [
+    {
+      "decision": "Vapi remains the voice runtime; Xphere supplies internal specialist orchestration and actions.",
+      "rationale": "Preserves proven telephony while sharing business intelligence across channels.",
+      "phase": "131-136"
+    },
+    {
+      "decision": "Voice and text reuse the same specialist agents through channel policies.",
+      "rationale": "Avoids duplicated prompts, tools, drift, and per-channel agent forks.",
+      "phase": "131-136"
+    },
+    {
+      "decision": "All Xphere-owned generative inference routes through OpenRouter.",
+      "rationale": "Centralizes provider policy and tenant/platform fallback; embeddings remain a separate compatibility decision.",
+      "phase": "132"
+    },
+    {
+      "decision": "Action Engine remains the authoritative provider execution path.",
+      "rationale": "Protects the core multi-tenant platform invariant.",
+      "phase": "131-136"
+    },
+    {
+      "decision": "Cuts & Culture is a late isolated canary, not a platform default.",
+      "rationale": "Avoids hardcoding one tenant's operating model into the product.",
+      "phase": "136"
+    }
+  ],
+  "uncommitted_files": [
+    ".planning/HANDOFF.json",
+    ".planning/workstreams/omnichannel-agent-orchestration/"
+  ],
+  "background_processes": [
+    {
+      "name": "gsd-planner subagent",
+      "id": "/root/plan_phase_131",
+      "status": "interrupted_without_output_when_handoff_was_finalized"
+    }
+  ],
+  "next_action": "Inspect the Phase 131 directory for PLAN.md files; verify them if present, otherwise generate them from 131-CONTEXT.md, then execute Phase 131 before planning later phases.",
+  "context_notes": "Specialization must not create a voice model-call waterfall. Phase order is foundation, authorized routing, action/Vapi safety, trace/rollback, release gates, then Cuts canary. No production source code has been changed yet."
+}
