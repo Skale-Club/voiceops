@@ -188,20 +188,39 @@ export async function buildWorkflowTools(
         // idempotency gate, but we mirror the legacy pattern here for flows so
         // tool-call replays don't re-execute the whole DAG.
         let idempotencyKey = ''
+        let idempotencyRequestHash = ''
         if (capturedKind === 'flow' && invocationId && invocationId !== '' && invocationId !== 'insert-failed') {
           idempotencyKey = deriveIdempotencyKey(invocationId, currentIndex)
-          const cached = await checkIdempotency(orgId, idempotencyKey)
-          if (cached !== null) {
+          idempotencyRequestHash = hashToolArgs(toolArgs)
+          const outcome = await checkIdempotency(orgId, idempotencyKey, idempotencyRequestHash)
+          if (outcome.status === 'replay') {
             toolCallsLog.push({
               name: capturedToolName,
               args: JSON.parse(JSON.stringify(toolArgs)) as Json,
-              result: cached,
+              result: outcome.response,
               denied: false,
               idempotency_cache_hit: true,
               tool_call_index: currentIndex,
               workflow_id: capturedWorkflowId,
             })
-            return cached
+            return outcome.response
+          }
+          if (outcome.status === 'conflict' || outcome.status === 'abandoned') {
+            // Phase 133 (SAFE-01): never re-execute or answer with someone
+            // else's cached result when the key is reused with different
+            // arguments, or the prior attempt was killed mid-flight and its
+            // ownership is unresolved.
+            toolCallsLog.push({
+              name: capturedToolName,
+              args: JSON.parse(JSON.stringify(toolArgs)) as Json,
+              denied: true,
+              denied_reason: outcome.status === 'conflict' ? 'idempotency_conflict' : 'idempotency_abandoned',
+              tool_call_index: currentIndex,
+              workflow_id: capturedWorkflowId,
+            })
+            return outcome.status === 'conflict'
+              ? 'Tool execution blocked: idempotency key conflict (same key, different arguments).'
+              : 'Tool execution blocked: a previous attempt for this action was interrupted and could not be confirmed. Please retry once ownership is resolved.'
           }
         }
 

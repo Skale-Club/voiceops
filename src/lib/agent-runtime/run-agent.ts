@@ -857,21 +857,39 @@ async function runAgentBlocking(opts: InternalAgentRunOptions): Promise<AgentRun
             // IDEMP-02/03: Idempotency check for side-effecting tools
             const idempotencyNeeded = requiresIdempotency(capturedActionType, resolvedTool.config)
             let idempotencyKey = ''
+            let idempotencyRequestHash = ''
 
             if (idempotencyNeeded && invocationId && invocationId !== 'insert-failed') {
               idempotencyKey = deriveIdempotencyKey(invocationId, currentToolCallIndex)
-              const cachedResponse = await checkIdempotency(orgId, idempotencyKey)
-              if (cachedResponse !== null) {
+              idempotencyRequestHash = hashToolArgs(toolArgs)
+              const outcome = await checkIdempotency(orgId, idempotencyKey, idempotencyRequestHash)
+              if (outcome.status === 'replay') {
                 // Cache hit | return without re-executing
                 toolCallsLog.push({
                   name: capturedToolName,
                   args: JSON.parse(JSON.stringify(toolArgs)) as Json,
-                  result: cachedResponse,
+                  result: outcome.response,
                   denied: false,
                   idempotency_cache_hit: true,
                   tool_call_index: currentToolCallIndex,
                 })
-                return cachedResponse
+                return outcome.response
+              }
+              if (outcome.status === 'conflict' || outcome.status === 'abandoned') {
+                // Phase 133 (SAFE-01): a reused key with different arguments,
+                // or a prior attempt killed mid-flight with unresolved
+                // ownership, must never re-execute or be answered with
+                // someone else's cached result.
+                toolCallsLog.push({
+                  name: capturedToolName,
+                  args: JSON.parse(JSON.stringify(toolArgs)) as Json,
+                  denied: true,
+                  denied_reason: outcome.status === 'conflict' ? 'idempotency_conflict' : 'idempotency_abandoned',
+                  tool_call_index: currentToolCallIndex,
+                })
+                return outcome.status === 'conflict'
+                  ? 'Tool execution blocked: idempotency key conflict (same key, different arguments).'
+                  : 'Tool execution blocked: a previous attempt for this action was interrupted and could not be confirmed. Please retry once ownership is resolved.'
               }
             }
 
@@ -1363,10 +1381,17 @@ function runAgentStreaming(
                 let idempotencyKeyStream = ''
                 if (idempotencyNeededStream && invocationId && invocationId !== 'insert-failed') {
                   idempotencyKeyStream = deriveIdempotencyKey(invocationId, currentToolCallIndex)
-                  const cachedResponse = await checkIdempotency(orgId, idempotencyKeyStream)
-                  if (cachedResponse !== null) {
-                    toolCallsLog.push({ name: capturedToolName, args: JSON.parse(JSON.stringify(toolArgs)) as Json, result: cachedResponse, denied: false, idempotency_cache_hit: true, tool_call_index: currentToolCallIndex })
-                    return cachedResponse
+                  const outcomeStream = await checkIdempotency(orgId, idempotencyKeyStream, hashToolArgs(toolArgs))
+                  if (outcomeStream.status === 'replay') {
+                    toolCallsLog.push({ name: capturedToolName, args: JSON.parse(JSON.stringify(toolArgs)) as Json, result: outcomeStream.response, denied: false, idempotency_cache_hit: true, tool_call_index: currentToolCallIndex })
+                    return outcomeStream.response
+                  }
+                  if (outcomeStream.status === 'conflict' || outcomeStream.status === 'abandoned') {
+                    // Phase 133 (SAFE-01): see the blocking tool-loop branch above.
+                    toolCallsLog.push({ name: capturedToolName, args: JSON.parse(JSON.stringify(toolArgs)) as Json, denied: true, denied_reason: outcomeStream.status === 'conflict' ? 'idempotency_conflict' : 'idempotency_abandoned', tool_call_index: currentToolCallIndex })
+                    return outcomeStream.status === 'conflict'
+                      ? 'Tool execution blocked: idempotency key conflict (same key, different arguments).'
+                      : 'Tool execution blocked: a previous attempt for this action was interrupted and could not be confirmed. Please retry once ownership is resolved.'
                   }
                 }
                 // Phase 134 CRT-02: per-turn commerce-write cap -- BEFORE
