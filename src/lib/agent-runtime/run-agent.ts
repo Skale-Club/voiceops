@@ -37,6 +37,7 @@ import {
   checkCommerceWritesPerTurn,
   createPartnerBudget,
   checkPartnerBudgetTimeout,
+  checkChannelModelInvocationCeiling,
   type PartnerBudget,
 } from './guardrails'
 import { resolveAgent } from './resolve-agent'
@@ -416,6 +417,14 @@ async function buildPartnerTools(params: {
         // through the same authorization AND budget checks).
         const timeoutDenial = checkPartnerBudgetTimeout(partnerBudget, edgeDecision.timeoutMs, orgId, capturedPartner.id)
         if (timeoutDenial) return timeoutDenial
+
+        // PERF-01: the channel's own ceiling on internal specialist model
+        // invocations, counted on the SAME shared budget as everything above —
+        // a specialist three hops deep still spends the caller's turn. Voice
+        // normally permits one internal specialist call before deterministic
+        // tool execution; other channels are uncapped.
+        const ceilingDenial = checkChannelModelInvocationCeiling(partnerBudget, channel, orgId, capturedPartner.id)
+        if (ceilingDenial) return ceilingDenial
 
         // A call actually traverses the edge now — count it against the
         // shared tree-wide budget before recursing.

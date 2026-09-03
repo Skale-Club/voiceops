@@ -57,6 +57,43 @@ describe('getChannelLatencyPolicy', () => {
 })
 
 // ---------------------------------------------------------------------------
+// PERF-01 wiring: the ceiling must gate the RECURSIVE in-process handoff loop
+// in run-agent.ts, not only the gateway entry point. Without this the policy
+// is inert exactly where "a specialist three hops deep" lives.
+// ---------------------------------------------------------------------------
+
+describe('run-agent partner recursion wiring', () => {
+  const runAgentSource: string = require('node:fs').readFileSync(
+    require('node:path').resolve(process.cwd(), 'src/lib/agent-runtime/run-agent.ts'),
+    'utf8',
+  )
+
+  it('imports the ceiling guard from guardrails', () => {
+    expect(runAgentSource).toMatch(/checkChannelModelInvocationCeiling/)
+  })
+
+  it('checks the ceiling against the shared budget and the resolved channel', () => {
+    expect(runAgentSource).toMatch(
+      /checkChannelModelInvocationCeiling\(\s*partnerBudget,\s*channel,/,
+    )
+  })
+
+  it('denies before the traversal is counted, so the Nth call is refused rather than charged', () => {
+    // Order matters: the check compares callCount < max, so it must run while
+    // the counter still reflects calls already made — before the increment.
+    const ceilingAt = runAgentSource.indexOf('checkChannelModelInvocationCeiling(partnerBudget')
+    const incrementAt = runAgentSource.indexOf('partnerBudget.callCount += 1')
+    expect(ceilingAt).toBeGreaterThan(-1)
+    expect(incrementAt).toBeGreaterThan(-1)
+    expect(ceilingAt).toBeLessThan(incrementAt)
+  })
+
+  it('returns the denial to the caller instead of throwing', () => {
+    expect(runAgentSource).toMatch(/const ceilingDenial = checkChannelModelInvocationCeiling[\s\S]{0,200}?if \(ceilingDenial\) return ceilingDenial/)
+  })
+})
+
+// ---------------------------------------------------------------------------
 // Task 2: guardrails.ts — checkChannelModelInvocationCeiling
 // ---------------------------------------------------------------------------
 
