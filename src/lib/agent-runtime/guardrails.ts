@@ -5,7 +5,8 @@
 
 import { createServiceRoleClient } from '@/lib/supabase/admin'
 import { createLogger } from '@/lib/obs/logger'
-import type { AgentRunResult } from './types'
+import type { AgentChannel, AgentRunResult } from './types'
+import { getChannelLatencyPolicy } from './channel-policy'
 
 // ---------------------------------------------------------------------------
 // Cap constants (read from env with documented defaults)
@@ -249,4 +250,39 @@ export function checkPartnerBudgetTimeout(
   })
 
   return 'Specialist call budget timed out | answer from current agent'
+}
+
+// ---------------------------------------------------------------------------
+// Phase 133 (PERF-01): channel-scoped internal specialist model-invocation
+// ceiling, expressed on the SAME Phase 132 tree-shared PartnerBudget above —
+// never a second, independent limiter. run-agent.ts's buildPartnerTools()
+// already increments `partnerBudget.callCount` once per specialist traversal
+// (immediately before recursing); this reads that identical counter and
+// compares it against channel-policy.ts's per-channel ceiling
+// (getChannelLatencyPolicy), so a specialist three hops deep in the same
+// tree still counts against the same turn-wide total. Deterministic tool
+// execution that needs no further model call is never gated by this check —
+// only a NEW specialist traversal (i.e. another internal model invocation)
+// is. Mirrors checkPartnerBudgetTimeout()'s shape exactly: a plain string
+// denial (never an exception) that a caller returns as-is from a partner
+// tool's execute(), or null when the turn is still within budget.
+// ---------------------------------------------------------------------------
+
+export function checkChannelModelInvocationCeiling(
+  budget: PartnerBudget,
+  channel: AgentChannel,
+  orgId: string,
+  agentId: string,
+): string | null {
+  const policy = getChannelLatencyPolicy(channel, orgId)
+  if (budget.callCount < policy.maxInternalSpecialistInvocations) return null
+
+  createLogger({ orgId, agentId }).warn('guardrail_tripped', {
+    cap: 'channel_specialist_invocation_ceiling',
+    channel,
+    value: budget.callCount,
+    limit: policy.maxInternalSpecialistInvocations,
+  })
+
+  return 'Specialist invocation ceiling reached for this channel | answer from current agent'
 }

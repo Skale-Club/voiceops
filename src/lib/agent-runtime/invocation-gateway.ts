@@ -1,5 +1,10 @@
 import { runAgent } from './run-agent'
 import { resolveSpecialistRoute } from './resolve-specialist-route'
+import {
+  createPartnerBudget,
+  checkChannelModelInvocationCeiling,
+  type PartnerBudget,
+} from './guardrails'
 import type {
   AgentChannel,
   AgentInvocationEnvelope,
@@ -129,4 +134,72 @@ export async function resolveTrustedAgentRoute(
   }
 
   return { agentId: params.entryAgentId, specialistMatched: false }
+}
+
+// ---------------------------------------------------------------------------
+// Phase 133 (PERF-01): voice latency policy on the Phase 132 tree-shared
+// PartnerBudget.
+// ---------------------------------------------------------------------------
+
+/**
+ * Lean, recoverable AgentRunResult for when a channel's internal specialist
+ * model-invocation ceiling (channel-policy.ts) has already been spent on the
+ * shared PartnerBudget. Never thrown — invokeInternalSpecialist() returns
+ * this in place of calling runAgent(), so no model call and no side effect
+ * can happen for the denied invocation. `status: 'skipped'` mirrors
+ * checkKillSwitch()'s existing guardrail-tripped shape in guardrails.ts.
+ */
+export function buildSpecialistCeilingExhaustedResult(traceId: string): AgentRunResult {
+  return {
+    text: 'Reached the specialist lookup limit for this turn — continuing with what is already available.',
+    usage: { tokensIn: 0, tokensOut: 0 },
+    invocationId: '',
+    traceId,
+    status: 'skipped',
+    errorDetail: 'channel_specialist_invocation_ceiling',
+  }
+}
+
+/**
+ * Invokes an internal specialist agent through the trusted gateway while
+ * counting the call against the SAME Phase 132 tree-shared PartnerBudget
+ * used by run-agent.ts's own delegation recursion (guardrails.ts
+ * checkChannelModelInvocationCeiling) — never a second, independent
+ * limiter. Callers that share one `partnerBudget` object across multiple
+ * invokeInternalSpecialist() calls within one turn (e.g. trying a second
+ * specialist after the first) get the channel's ceiling enforced across all
+ * of them; a caller that omits `partnerBudget` gets a fresh one, so the
+ * common single-specialist-per-turn case on every channel is unaffected.
+ *
+ * On exhaustion this resolves to buildSpecialistCeilingExhaustedResult()
+ * WITHOUT calling runAgent() at all — no model call, no partial side
+ * effect, and never an exception or a hang.
+ */
+export function invokeInternalSpecialist(
+  envelope: BlockingEnvelope,
+  partnerBudget: PartnerBudget = createPartnerBudget(),
+): Promise<AgentInvocationResult<AgentRunResult>> {
+  const traceId = envelope.route.traceId ?? crypto.randomUUID()
+
+  const ceilingDenial = checkChannelModelInvocationCeiling(
+    partnerBudget,
+    envelope.route.channel,
+    envelope.route.orgId,
+    envelope.route.agentId,
+  )
+  if (ceilingDenial) {
+    return Promise.resolve({
+      traceId,
+      idempotencyKey: envelope.route.idempotencyKey ?? crypto.randomUUID(),
+      externalInteractionId: envelope.route.externalInteractionId,
+      result: buildSpecialistCeilingExhaustedResult(traceId),
+    })
+  }
+
+  partnerBudget.callCount += 1
+
+  return invokeAgent({
+    ...envelope,
+    route: { ...envelope.route, traceId },
+  })
 }
