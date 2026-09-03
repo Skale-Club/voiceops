@@ -9,10 +9,10 @@ Total: **32 active requirements** across 7 delivery categories.
 
 ### Shared Invocation Boundary
 
-- [ ] **AIGW-01**: Every supported conversational channel can invoke an internal agent through one typed invocation boundary carrying server-resolved organization, channel, external interaction ID, actor/contact, locale, message or intent, correlation ID, and idempotency key.
-- [ ] **AIGW-02**: A Vapi assistant mapping can select an internal Xphere entry agent without accepting organization or agent identity from untrusted tool arguments.
-- [ ] **AIGW-03**: `voice` is a first-class agent channel with channel-specific prompt, model, history, tool, latency, and delegation policies.
-- [ ] **AIGW-04**: Web widget and Vapi can invoke the same specialist agent definitions without duplicating prompts, knowledge, or tool assignments per channel.
+- [x] **AIGW-01**: Every supported conversational channel can invoke an internal agent through one typed invocation boundary carrying server-resolved organization, channel, external interaction ID, actor/contact, locale, message or intent, correlation ID, and idempotency key.
+- [x] **AIGW-02**: A Vapi assistant mapping can select an internal Xphere entry agent without accepting organization or agent identity from untrusted tool arguments.
+- [x] **AIGW-03**: `voice` is a first-class agent channel with channel-specific prompt, model, history, tool, latency, and delegation policies.
+- [x] **AIGW-04**: Web widget and Vapi can invoke the same specialist agent definitions without duplicating prompts, knowledge, or tool assignments per channel.
 
 ### Routing and Specialization
 
@@ -27,7 +27,7 @@ Total: **32 active requirements** across 7 delivery categories.
 - [ ] **AUTHZ-01**: Direct tool execution permission is distinct from permission to delegate to a specialist; an orchestrator does not need the specialist's tools attached to call that specialist.
 - [ ] **AUTHZ-02**: A delegated agent can execute only the capabilities allowed by its own grants and the partner edge; delegation never expands access beyond either boundary.
 - [ ] **AUTHZ-03**: Delegation rejects cross-organization agents, cycles, inactive agents, disallowed channels, and calls beyond the configured budget before invoking a model or action.
-- [ ] **AUTHZ-04**: Authenticated agent configuration remains RLS-scoped, while Vapi webhook resolution uses an explicit privileged path and derives organization context from trusted assistant/call mappings.
+- [x] **AUTHZ-04**: Authenticated agent configuration remains RLS-scoped, while Vapi webhook resolution uses an explicit privileged path and derives organization context from trusted assistant/call mappings.
 
 ### Knowledge and Model Routing
 
@@ -55,7 +55,7 @@ Total: **32 active requirements** across 7 delivery categories.
 
 ### Verification Gates
 
-- [ ] **TEST-01**: Existing Vapi and Action Engine baseline tests are repaired before behavioral cutover so failures distinguish regressions from stale mocks or external Redis availability.
+- [x] **TEST-01**: Existing Vapi and Action Engine baseline tests are repaired before behavioral cutover so failures distinguish regressions from stale mocks or external Redis availability.
 - [ ] **TEST-02**: Automated tests cover tenant isolation, direct versus delegated authorization, cross-agent calls, cycle/depth limits, handoff injection resistance, OpenRouter-only generation, and Xkedule idempotency.
 - [ ] **TEST-03**: A realistic timed integration test exercises Vapi ingress to specialist to tool result; simple voice lookup meets a p95 target of 5 seconds under the documented test profile.
 - [ ] **TEST-04**: Build, focused Vitest suites, workflow validation, and a documented voice/text UAT checklist pass before specialist routing is enabled for production traffic.
@@ -86,10 +86,10 @@ Every active v3.5 requirement maps to exactly one implementation phase.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| AIGW-01 | Phase 131 | Pending |
-| AIGW-02 | Phase 131 | Pending |
-| AIGW-03 | Phase 131 | Pending |
-| AIGW-04 | Phase 131 | Pending |
+| AIGW-01 | Phase 131 | Complete |
+| AIGW-02 | Phase 131 | Complete |
+| AIGW-03 | Phase 131 | Complete |
+| AIGW-04 | Phase 131 | Complete |
 | ROUT-01 | Phase 132 | Pending |
 | ROUT-02 | Phase 132 | Pending |
 | ROUT-03 | Phase 132 | Pending |
@@ -98,7 +98,7 @@ Every active v3.5 requirement maps to exactly one implementation phase.
 | AUTHZ-01 | Phase 132 | Pending |
 | AUTHZ-02 | Phase 132 | Pending |
 | AUTHZ-03 | Phase 132 | Pending |
-| AUTHZ-04 | Phase 131 | Pending |
+| AUTHZ-04 | Phase 131 | Complete |
 | KNOW-01 | Phase 132 | Pending |
 | KNOW-02 | Phase 132 | Pending |
 | MODEL-01 | Phase 132 | Pending |
@@ -114,7 +114,7 @@ Every active v3.5 requirement maps to exactly one implementation phase.
 | ROLL-01 | Phase 136 | Pending |
 | ROLL-02 | Phase 134 | Pending |
 | ROLL-03 | Phase 136 | Pending |
-| TEST-01 | Phase 131 | Pending |
+| TEST-01 | Phase 131 | Complete |
 | TEST-02 | Phase 135 | Pending |
 | TEST-03 | Phase 135 | Pending |
 | TEST-04 | Phase 135 | Pending |

@@ -10,7 +10,7 @@ This milestone extends the existing text-agent platform into a tenant-safe voice
 - Integer phases (131, 132, 133): Planned milestone work
 - Decimal phases (131.1, 131.2): Urgent insertions (marked with INSERTED)
 
-- [ ] **Phase 131: Trusted Omnichannel Invocation Foundation** - Voice and widget enter the same tenant-resolved agent boundary on a repaired regression baseline.
+- [x] **Phase 131: Trusted Omnichannel Invocation Foundation** - Voice and widget enter the same tenant-resolved agent boundary on a repaired regression baseline.
 - [ ] **Phase 132: Authorized Specialist Orchestration** - Agents route and delegate with typed contracts, least privilege, scoped knowledge, and centralized model access.
 - [ ] **Phase 133: Idempotent Action and Vapi Safety** - Voice-triggered actions stay fast, replay-safe, timeout-safe, and compatible with the always-200 Vapi contract.
 - [ ] **Phase 134: Traceability and Reversible Routing** - Operators can inspect complete invocation trees and switch each channel between legacy and specialist routing without data loss.
@@ -30,9 +30,9 @@ This milestone extends the existing text-agent platform into a tenant-safe voice
   4. Authenticated agent configuration remains tenant-isolated through RLS, while the privileged Vapi resolution path derives tenant context explicitly from trusted mappings.
   5. Existing Vapi and Action Engine baseline suites pass without dependence on stale mocks or live Redis availability, so later failures identify real behavioral regressions.
 **Plans**: 3 plans
-- [ ] 131-01-PLAN.md — Repair deterministic Vapi and Action Engine regression baseline.
-- [ ] 131-02-PLAN.md — Add voice channel and tenant-safe assistant entry-agent binding.
-- [ ] 131-03-PLAN.md — Add trusted invocation gateway and expose Vapi entry-agent resolution.
+- [x] 131-01-PLAN.md — Repair deterministic Vapi and Action Engine regression baseline.
+- [x] 131-02-PLAN.md — Add voice channel and tenant-safe assistant entry-agent binding.
+- [x] 131-03-PLAN.md — Add trusted invocation gateway and expose Vapi entry-agent resolution.
 **UI hint**: yes
 
 ### Phase 132: Authorized Specialist Orchestration
@@ -98,7 +98,7 @@ Phases execute in numeric order: 131 → 132 → 133 → 134 → 135 → 136.
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 131. Trusted Omnichannel Invocation Foundation | 0/3 | Ready to execute | - |
+| 131. Trusted Omnichannel Invocation Foundation | 3/3 | Complete | 2026-09-03 |
 | 132. Authorized Specialist Orchestration | 0/TBD | Not started | - |
 | 133. Idempotent Action and Vapi Safety | 0/TBD | Not started | - |
 | 134. Traceability and Reversible Routing | 0/TBD | Not started | - |
