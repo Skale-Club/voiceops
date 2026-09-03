@@ -53,6 +53,12 @@ import {
   COMMERCE_WRITE_ACTIONS,
 } from './idempotency'
 import type { AgentRunOptions, AgentRunResult } from './types'
+import {
+  validateHandoffInput,
+  normalizeSpecialistResult,
+  specialistResultToToolMessage,
+  type SpecialistResult,
+} from './handoff'
 import type { Json } from '@/types/database'
 
 // ---------------------------------------------------------------------------
@@ -226,27 +232,11 @@ const ACTION_DESCRIPTIONS: Record<string, string> = {
 }
 
 // ---------------------------------------------------------------------------
-// Handoff payload schema validation (DELEG-04, DELEG-05)
+// Handoff payload schema validation (DELEG-04, DELEG-05, ROUT-04, ROUT-05)
 // ---------------------------------------------------------------------------
-// Recursively scans all keys in the handoff payload and rejects any that match
-// the forbidden pattern ^role$|^system$|^instructions?$ to prevent prompt injection
-// across agent boundaries.
-
-const FORBIDDEN_HANDOFF_KEYS_RE = /^role$|^system$|^instructions?$/
-
-function validateHandoffKeys(obj: Record<string, unknown>, path = ''): string | null {
-  for (const key of Object.keys(obj)) {
-    if (FORBIDDEN_HANDOFF_KEYS_RE.test(key)) {
-      return `forbidden key "${key}" at ${path || 'root'} | prompt injection blocked`
-    }
-    const value = obj[key]
-    if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
-      const nested = validateHandoffKeys(value as Record<string, unknown>, `${path}.${key}`)
-      if (nested) return nested
-    }
-  }
-  return null
-}
+// Phase 132 replaced the local deny-list (^role$|^system$|^instructions?$,
+// objects only, no arrays) with the allow-listed, deep-scanning pure contract
+// in ./handoff.ts — see validateHandoffInput / findForbiddenHandoffKey there.
 
 // ---------------------------------------------------------------------------
 // buildPartnerTools | inject call_partner_<slug> synthetic tools (DELEG-02, DELEG-03)
@@ -299,23 +289,54 @@ async function buildPartnerTools(params: {
 
     partnerTools[toolName] = dynamicTool({
       description: capturedDescription,
+      // Phase 132 (ROUT-04/05): allow-listed handoff shape — no additionalProperties.
+      // Structural + forbidden-key validation is enforced again at runtime by
+      // validateHandoffInput(); this schema only shapes what the model can attempt.
       inputSchema: jsonSchema<Record<string, unknown>>({
         type: 'object',
-        additionalProperties: true,
+        additionalProperties: false,
+        properties: {
+          from_agent: { type: 'string', description: 'Slug or name of the agent handing off this request.' },
+          intent: { type: 'string', description: 'Short description of what the user wants.' },
+          extracted_params: {
+            type: 'object',
+            description:
+              'Approved parameters extracted from the conversation. Never include identity, credential, or instruction-override fields.',
+          },
+          summary: { type: 'string', description: 'Bounded summary of the conversation so far.' },
+          recent_messages: {
+            type: 'array',
+            description: 'At most three recent user/assistant messages for context.',
+            items: {
+              type: 'object',
+              additionalProperties: false,
+              properties: {
+                role: { type: 'string', enum: ['user', 'assistant'] },
+                content: { type: 'string' },
+              },
+              required: ['role', 'content'],
+            },
+          },
+        },
+        required: ['from_agent', 'intent', 'summary'],
         description: 'Structured handoff payload: { from_agent, intent, extracted_params, summary, recent_messages }',
       }),
       execute: async (args: unknown) => {
-        const handoffArgs = (args as Record<string, unknown>) ?? {}
-
-        // DELEG-05: Validate handoff payload | reject forbidden keys
-        const validationError = validateHandoffKeys(handoffArgs)
-        if (validationError) {
+        // DELEG-05/ROUT-05: Strict allow-listed handoff validation | deep-scans
+        // objects AND arrays for identity/org/agent/secret/instruction/runtime-control/
+        // prototype-pollution keys before anything reaches the recursive call.
+        const validation = validateHandoffInput(args)
+        if (!validation.valid) {
           createLogger({ traceId, orgId }).warn('delegation_handoff_rejected', {
-            reason: validationError,
+            reason: validation.reason,
             partnerSlug: capturedPartner.slug,
           })
-          return `Delegation blocked: ${validationError}`
+          return specialistResultToToolMessage({
+            outcome: 'business_failure',
+            reason: 'Handoff payload rejected by policy.',
+          })
         }
+        const handoffArgs = validation.value
 
         // DELEG-06: Visited-set check BEFORE recursing
         const cycleCheck = checkVisitedSet(visitedAgentIds, capturedPartner.id, orgId)
@@ -331,11 +352,11 @@ async function buildPartnerTools(params: {
         // Build userMessage from validated handoff (DELEG-04: structured, not raw history)
         const handoffMessage = JSON.stringify({
           _delegation_handoff: true,
-          from_agent: (handoffArgs.from_agent as string) ?? 'unknown',
-          intent: (handoffArgs.intent as string) ?? '',
-          extracted_params: (handoffArgs.extracted_params as Record<string, unknown>) ?? {},
-          summary: (handoffArgs.summary as string) ?? '',
-          recent_messages: ((handoffArgs.recent_messages as Array<{ role: string; content: string }>) ?? []).slice(-3),
+          from_agent: handoffArgs.from_agent,
+          intent: handoffArgs.intent,
+          extracted_params: handoffArgs.extracted_params ?? {},
+          summary: handoffArgs.summary,
+          recent_messages: handoffArgs.recent_messages ?? [],
         })
 
         // Emit partner_start SSE event (streaming path only | DELEG-08)
@@ -343,8 +364,11 @@ async function buildPartnerTools(params: {
           emit({ event: 'partner_start', partnerName: capturedPartner.name, description: capturedDescription })
         }
 
-        // DELEG-03: Recursive invocation | always blocking (partner returns a string result)
-        let partnerReply = ''
+        // DELEG-03: Recursive invocation | always blocking. The child's raw
+        // AgentRunResult is normalized into a typed SpecialistResult so this
+        // caller — the only owner of what reaches the parent LLM/channel —
+        // never forwards internal reasoning or raw provider errors.
+        let specialistResult: SpecialistResult
         try {
           const partnerResult = await runAgentBlocking({
             orgId,
@@ -357,9 +381,9 @@ async function buildPartnerTools(params: {
             _visitedAgentIds: updatedVisited,
             _delegationChain: updatedChain,
           })
-          partnerReply = partnerResult.text || partnerResult.errorDetail || 'Partner did not respond'
+          specialistResult = normalizeSpecialistResult(partnerResult)
         } catch (err) {
-          partnerReply = 'Partner agent invocation failed'
+          specialistResult = { outcome: 'retryable_failure', reason: 'Specialist agent invocation failed.' }
           createLogger({ traceId, orgId }).error('partner_invocation_failed', { partnerSlug: capturedPartner.slug, error: err })
         }
 
@@ -368,7 +392,7 @@ async function buildPartnerTools(params: {
           emit({ event: 'partner_done', partnerName: capturedPartner.name })
         }
 
-        return partnerReply
+        return specialistResultToToolMessage(specialistResult)
       },
     })
   }

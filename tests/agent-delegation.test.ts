@@ -10,32 +10,23 @@ import {
   requiresIdempotency,
   SIDE_EFFECTING_ACTIONS,
 } from '../src/lib/agent-runtime/idempotency'
+import { findForbiddenHandoffKey } from '../src/lib/agent-runtime/handoff'
 
 // ---------------------------------------------------------------------------
 // Handoff payload validation helpers (DELEG-04, DELEG-05)
-// Mirror the production validateHandoffKeys() in run-agent.ts for unit testing
+// Phase 132: this used to duplicate a local ^role$|^system$|^instructions?$
+// deny-list regex. It now calls the production deep-scan primitive
+// (findForbiddenHandoffKey, in src/lib/agent-runtime/handoff.ts) directly, so
+// this legacy suite exercises the real contract instead of a parallel copy.
+// See tests/agent-handoff-contract.test.ts for the full allow-listed schema
+// (validateHandoffInput) and the typed specialist result contract.
 // ---------------------------------------------------------------------------
-
-const FORBIDDEN_HANDOFF_KEYS_RE = /^role$|^system$|^instructions?$/
 
 function validateHandoffPayload(payload: unknown): { valid: boolean; reason?: string } {
   if (typeof payload !== 'object' || payload === null || Array.isArray(payload)) {
     return { valid: false, reason: 'payload must be a non-null object' }
   }
-  function scanKeys(obj: Record<string, unknown>, path = ''): string | null {
-    for (const key of Object.keys(obj)) {
-      if (FORBIDDEN_HANDOFF_KEYS_RE.test(key)) {
-        return `forbidden key "${key}" at ${path || 'root'}`
-      }
-      const value = obj[key]
-      if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
-        const nested = scanKeys(value as Record<string, unknown>, `${path}.${key}`)
-        if (nested) return nested
-      }
-    }
-    return null
-  }
-  const issue = scanKeys(payload as Record<string, unknown>)
+  const issue = findForbiddenHandoffKey(payload)
   if (issue) return { valid: false, reason: issue }
   return { valid: true }
 }

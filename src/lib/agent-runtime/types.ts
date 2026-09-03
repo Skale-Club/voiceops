@@ -163,3 +163,9 @@ export type ResolvedToolConfig = {
   workflowId?: string
   workflowKind?: 'tool' | 'flow'
 }
+
+// Phase 132: typed allow-listed agent-to-agent handoff input and the
+// discriminated specialist result union. Defined in ./handoff.ts (pure, no
+// dependency on this file) and re-exported here so runtime consumers can
+// import the whole agent-runtime contract surface from one place.
+export type { HandoffMessage, HandoffInput, HandoffValidationResult, SpecialistResult } from './handoff'
