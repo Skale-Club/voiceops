@@ -3,7 +3,14 @@
 // Phase 35 will import runAgent from here to wire it into the web widget endpoint.
 
 export { runAgent } from './run-agent'
-export type { AgentRunResult, AgentRunOptions } from './types'
+export { invokeAgent } from './invocation-gateway'
+export type {
+  AgentInvocationEnvelope,
+  AgentInvocationResult,
+  AgentRunResult,
+  AgentRunOptions,
+  TrustedAgentRoute,
+} from './types'
 // Phase 38: idempotency utilities (exported for test utilities and external tooling)
 export { deriveIdempotencyKey, requiresIdempotency } from './idempotency'
 // Phase 38: guardrail utilities

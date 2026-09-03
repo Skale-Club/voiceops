@@ -42,6 +42,8 @@ export interface ResolvedCallOrg {
   organizationId: string | null
   /** twilio_phone_numbers.id of the org-side number, when one is registered locally. */
   phoneNumberId: string | null
+  /** Internal agent selected only by the trusted active assistant mapping. */
+  entryAgentId: string | null
 }
 
 /**
@@ -78,7 +80,7 @@ export async function resolveOrgForCall(
     assistantId
       ? supabase
           .from('assistant_mappings')
-          .select('organization_id')
+          .select('organization_id, entry_agent_id')
           .eq('vapi_assistant_id', assistantId)
           .eq('is_active', true)
           .maybeSingle()
@@ -97,7 +99,11 @@ export async function resolveOrgForCall(
 
   const numberRow = numberResult.data as { id: string; organization_id: string } | null
 
-  const orgFromMapping = (mappingResult.data as { organization_id: string } | null)?.organization_id
+  const mappingRow = mappingResult.data as {
+    organization_id: string
+    entry_agent_id: string | null
+  } | null
+  const orgFromMapping = mappingRow?.organization_id
   if (orgFromMapping) {
     // Only trust the number row if it belongs to the same tenant — a mismatch
     // means a misconfiguration, and silently attributing the call to another
@@ -105,14 +111,21 @@ export async function resolveOrgForCall(
     return {
       organizationId: orgFromMapping,
       phoneNumberId: numberRow?.organization_id === orgFromMapping ? numberRow.id : null,
+      entryAgentId: mappingRow?.entry_agent_id ?? null,
     }
   }
 
   if (numberRow) {
-    return { organizationId: numberRow.organization_id, phoneNumberId: numberRow.id }
+    return {
+      organizationId: numberRow.organization_id,
+      phoneNumberId: numberRow.id,
+      entryAgentId: null,
+    }
   }
 
-  if (!assistantId) return { organizationId: null, phoneNumberId: null }
+  if (!assistantId) {
+    return { organizationId: null, phoneNumberId: null, entryAgentId: null }
+  }
 
   const { data: phoneRow } = await supabase
     .from('twilio_phone_numbers')
@@ -123,8 +136,14 @@ export async function resolveOrgForCall(
     .limit(1)
     .maybeSingle()
 
-  if (!phoneRow) return { organizationId: null, phoneNumberId: null }
-  return { organizationId: phoneRow.organization_id, phoneNumberId: phoneRow.id }
+  if (!phoneRow) {
+    return { organizationId: null, phoneNumberId: null, entryAgentId: null }
+  }
+  return {
+    organizationId: phoneRow.organization_id,
+    phoneNumberId: phoneRow.id,
+    entryAgentId: null,
+  }
 }
 
 

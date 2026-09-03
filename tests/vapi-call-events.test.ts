@@ -136,12 +136,27 @@ describe('resolveOrgForCall', () => {
   beforeEach(() => vi.clearAllMocks())
 
   it('resolves via assistant_mappings when the assistant is registered', async () => {
-    const spy = createSpyClient({ assistantMapping: { organization_id: 'org-1' } })
+    const spy = createSpyClient({
+      assistantMapping: { organization_id: 'org-1', entry_agent_id: 'agent-entry-1' },
+    })
 
     const result = await resolveOrgForCall({ assistantId: 'asst-1' }, spy.client as never)
 
-    expect(result.organizationId).toBe('org-1')
-    expect(result.phoneNumberId).toBeNull()
+    expect(result).toEqual({
+      organizationId: 'org-1',
+      phoneNumberId: null,
+      entryAgentId: 'agent-entry-1',
+    })
+  })
+
+  it('preserves legacy routing when the active mapping has no entry agent', async () => {
+    const spy = createSpyClient({
+      assistantMapping: { organization_id: 'org-1', entry_agent_id: null },
+    })
+
+    const result = await resolveOrgForCall({ assistantId: 'asst-1' }, spy.client as never)
+
+    expect(result).toEqual({ organizationId: 'org-1', phoneNumberId: null, entryAgentId: null })
   })
 
   it('resolves via the Vapi number when the assistant is not mapped', async () => {
@@ -157,7 +172,11 @@ describe('resolveOrgForCall', () => {
       spy.client as never,
     )
 
-    expect(result).toEqual({ organizationId: 'org-2', phoneNumberId: 'pn-1' })
+    expect(result).toEqual({
+      organizationId: 'org-2',
+      phoneNumberId: 'pn-1',
+      entryAgentId: null,
+    })
   })
 
   it('resolves with no assistant at all, from the number alone', async () => {
@@ -165,12 +184,16 @@ describe('resolveOrgForCall', () => {
 
     const result = await resolveOrgForCall({ phoneNumberId: 'vapi-num-9' }, spy.client as never)
 
-    expect(result).toEqual({ organizationId: 'org-9', phoneNumberId: 'pn-9' })
+    expect(result).toEqual({
+      organizationId: 'org-9',
+      phoneNumberId: 'pn-9',
+      entryAgentId: null,
+    })
   })
 
   it('attaches the number to a call whose assistant is mapped', async () => {
     const spy = createSpyClient({
-      assistantMapping: { organization_id: 'org-1' },
+      assistantMapping: { organization_id: 'org-1', entry_agent_id: null },
       numberByVapiId: { id: 'pn-1', organization_id: 'org-1' },
     })
 
@@ -179,14 +202,18 @@ describe('resolveOrgForCall', () => {
       spy.client as never,
     )
 
-    expect(result).toEqual({ organizationId: 'org-1', phoneNumberId: 'pn-1' })
+    expect(result).toEqual({
+      organizationId: 'org-1',
+      phoneNumberId: 'pn-1',
+      entryAgentId: null,
+    })
   })
 
   it('ignores a number owned by a different org than the mapped assistant', async () => {
     // A misconfiguration; attributing the call to another tenant's number would
     // leak the call into their reporting and workflow triggers.
     const spy = createSpyClient({
-      assistantMapping: { organization_id: 'org-1' },
+      assistantMapping: { organization_id: 'org-1', entry_agent_id: 'agent-entry-1' },
       numberByVapiId: { id: 'pn-other', organization_id: 'org-other' },
     })
 
@@ -195,7 +222,11 @@ describe('resolveOrgForCall', () => {
       spy.client as never,
     )
 
-    expect(result).toEqual({ organizationId: 'org-1', phoneNumberId: null })
+    expect(result).toEqual({
+      organizationId: 'org-1',
+      phoneNumberId: null,
+      entryAgentId: 'agent-entry-1',
+    })
   })
 
   it('falls back to the legacy per-number assistant override', async () => {
@@ -207,7 +238,11 @@ describe('resolveOrgForCall', () => {
 
     const result = await resolveOrgForCall({ assistantId: 'asst-legacy' }, spy.client as never)
 
-    expect(result).toEqual({ organizationId: 'org-3', phoneNumberId: 'pn-legacy' })
+    expect(result).toEqual({
+      organizationId: 'org-3',
+      phoneNumberId: 'pn-legacy',
+      entryAgentId: null,
+    })
   })
 
   it('returns nothing when neither signal identifies an org', async () => {
@@ -215,7 +250,7 @@ describe('resolveOrgForCall', () => {
 
     const result = await resolveOrgForCall({ assistantId: 'asst-x' }, spy.client as never)
 
-    expect(result).toEqual({ organizationId: null, phoneNumberId: null })
+    expect(result).toEqual({ organizationId: null, phoneNumberId: null, entryAgentId: null })
   })
 })
 

@@ -72,6 +72,52 @@ export type AgentRunOptions = {
   _delegationChain?: string[]
 }
 
+/**
+ * Identity resolved by a trusted channel adapter before invoking an agent.
+ * Keep these fields structurally separate from user-controlled message data.
+ */
+export type TrustedAgentRoute = {
+  orgId: string
+  agentId: string
+  channel: AgentChannel
+  externalInteractionId: string
+  conversationId?: string
+  sessionId?: string
+  traceId?: string
+  idempotencyKey?: string
+}
+
+/** Untrusted conversation data plus explicitly allowed runtime tuning. */
+export type AgentInvocationEnvelope = {
+  route: TrustedAgentRoute
+  input: {
+    userMessage: string
+    intent?: string
+    locale?: string
+    actor?: {
+      externalId?: string
+      contactId?: string
+      name?: string
+      phone?: string
+      email?: string
+    }
+    metadata?: Record<string, unknown>
+  }
+  historyWindow?: Array<{ role: 'user' | 'assistant'; content: string }>
+  mode?: 'production' | 'playground'
+  stream?: boolean
+  maxSteps?: number
+  extraInstructions?: string
+}
+
+/** Gateway metadata remains available without changing AgentRunResult. */
+export type AgentInvocationResult<T> = {
+  result: T
+  traceId: string
+  idempotencyKey: string
+  externalInteractionId: string
+}
+
 // Shape returned by resolveAgent() after DB query + channel_overrides merge (D-34-11)
 export type ResolvedAgent = {
   agentId: string
