@@ -1679,6 +1679,10 @@ export interface Database {
           agent_id: string
           partner_agent_id: string
           invocation_description: string
+          allowed_channels: AgentChannel[] | null
+          max_calls_per_turn: number
+          max_depth: number
+          timeout_ms: number
           created_at: string
         }
         Insert: {
@@ -1687,10 +1691,18 @@ export interface Database {
           agent_id: string
           partner_agent_id: string
           invocation_description: string
+          allowed_channels?: AgentChannel[] | null
+          max_calls_per_turn?: number
+          max_depth?: number
+          timeout_ms?: number
           created_at?: string
         }
         Update: {
           invocation_description?: string
+          allowed_channels?: AgentChannel[] | null
+          max_calls_per_turn?: number
+          max_depth?: number
+          timeout_ms?: number
         }
         Relationships: [
           {
@@ -1713,6 +1725,55 @@ export interface Database {
             isOneToOne: false
             referencedRelation: 'agents'
             referencedColumns: ['id']
+          },
+          {
+            foreignKeyName: 'agent_partners_agent_same_org_fkey'
+            columns: ['organization_id', 'agent_id']
+            isOneToOne: false
+            referencedRelation: 'agents'
+            referencedColumns: ['organization_id', 'id']
+          },
+          {
+            foreignKeyName: 'agent_partners_partner_agent_same_org_fkey'
+            columns: ['organization_id', 'partner_agent_id']
+            isOneToOne: false
+            referencedRelation: 'agents'
+            referencedColumns: ['organization_id', 'id']
+          }
+        ]
+      }
+      agent_partner_workflow_grants: {
+        Row: {
+          id: string
+          organization_id: string
+          partner_edge_id: string
+          workflow_id: string
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          organization_id: string
+          partner_edge_id: string
+          workflow_id: string
+          created_at?: string
+        }
+        Update: {
+          workflow_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: 'agent_partner_workflow_grants_edge_same_org_fkey'
+            columns: ['organization_id', 'partner_edge_id']
+            isOneToOne: false
+            referencedRelation: 'agent_partners'
+            referencedColumns: ['organization_id', 'id']
+          },
+          {
+            foreignKeyName: 'agent_partner_workflow_grants_workflow_same_org_fkey'
+            columns: ['organization_id', 'workflow_id']
+            isOneToOne: false
+            referencedRelation: 'workflows'
+            referencedColumns: ['org_id', 'id']
           }
         ]
       }

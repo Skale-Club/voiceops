@@ -75,3 +75,28 @@ export const agentSettingsSchema = agentSchema.omit({
 
 export type AgentSettingsInput = z.input<typeof agentSettingsSchema>
 export type AgentSettingsOutput = z.output<typeof agentSettingsSchema>
+
+/**
+ * Phase 132 (AUTHZ-01): partner-edge policy payload. Bounds mirror the
+ * migration 1291 CHECK constraints (chk_agent_partners_max_calls_per_turn_bounded,
+ * chk_agent_partners_max_depth_bounded, chk_agent_partners_timeout_ms_bounded) so
+ * a malformed config is rejected at the config layer before it ever reaches the
+ * database. `allowed_channels: null` means "every channel the specialist agent
+ * itself allows" (agent_tools.allowed_channels convention) — it is NOT an
+ * escalation, since resolvePartnerEdge() still intersects with the specialist's
+ * own allowed_channels. `granted_workflow_ids` is the normalized delegated-
+ * workflow allow-list (agent_partner_workflow_grants); it is a TRAVERSAL grant
+ * only and never substitutes for the specialist's own direct workflow grant.
+ */
+export const agentPartnerEdgeSchema = z.object({
+  partner_agent_id: z.string().uuid(),
+  invocation_description: z.string().min(1).max(1000),
+  allowed_channels: z.array(z.enum(AGENT_CHANNELS)).min(1).nullable(),
+  max_calls_per_turn: z.number().int().min(1).max(10),
+  max_depth: z.number().int().min(1).max(5),
+  timeout_ms: z.number().int().min(1000).max(120000),
+  granted_workflow_ids: z.array(z.string().uuid()),
+})
+
+export type AgentPartnerEdgeInput = z.input<typeof agentPartnerEdgeSchema>
+export type AgentPartnerEdgeOutput = z.output<typeof agentPartnerEdgeSchema>
