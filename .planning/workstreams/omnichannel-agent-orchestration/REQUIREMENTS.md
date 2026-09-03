@@ -16,25 +16,25 @@ Total: **32 active requirements** across 7 delivery categories.
 
 ### Routing and Specialization
 
-- [ ] **ROUT-01**: An entry agent can delegate an ambiguous request to an authorized specialist using a structured handoff contract.
-- [ ] **ROUT-02**: A Vapi function whose intent is already explicit can invoke its mapped specialist directly, avoiding an unnecessary orchestrator model call.
-- [ ] **ROUT-03**: One specialist can invoke another authorized specialist when required, subject to channel-specific depth, call-count, time, and cost budgets.
-- [ ] **ROUT-04**: Every invocation has exactly one response owner responsible for converting specialist output into the channel response; internal monologue is never exposed.
-- [ ] **ROUT-05**: Specialist outputs use typed success, business-failure, retryable-failure, and handoff-result contracts instead of relying only on free-form prose.
+- [x] **ROUT-01**: An entry agent can delegate an ambiguous request to an authorized specialist using a structured handoff contract.
+- [x] **ROUT-02**: A Vapi function whose intent is already explicit can invoke its mapped specialist directly, avoiding an unnecessary orchestrator model call.
+- [x] **ROUT-03**: One specialist can invoke another authorized specialist when required, subject to channel-specific depth, call-count, time, and cost budgets.
+- [x] **ROUT-04**: Every invocation has exactly one response owner responsible for converting specialist output into the channel response; internal monologue is never exposed.
+- [x] **ROUT-05**: Specialist outputs use typed success, business-failure, retryable-failure, and handoff-result contracts instead of relying only on free-form prose.
 
 ### Authorization and Tenant Safety
 
-- [ ] **AUTHZ-01**: Direct tool execution permission is distinct from permission to delegate to a specialist; an orchestrator does not need the specialist's tools attached to call that specialist.
-- [ ] **AUTHZ-02**: A delegated agent can execute only the capabilities allowed by its own grants and the partner edge; delegation never expands access beyond either boundary.
-- [ ] **AUTHZ-03**: Delegation rejects cross-organization agents, cycles, inactive agents, disallowed channels, and calls beyond the configured budget before invoking a model or action.
+- [x] **AUTHZ-01**: Direct tool execution permission is distinct from permission to delegate to a specialist; an orchestrator does not need the specialist's tools attached to call that specialist.
+- [x] **AUTHZ-02**: A delegated agent can execute only the capabilities allowed by its own grants and the partner edge; delegation never expands access beyond either boundary.
+- [x] **AUTHZ-03**: Delegation rejects cross-organization agents, cycles, inactive agents, disallowed channels, and calls beyond the configured budget before invoking a model or action.
 - [x] **AUTHZ-04**: Authenticated agent configuration remains RLS-scoped, while Vapi webhook resolution uses an explicit privileged path and derives organization context from trusted assistant/call mappings.
 
 ### Knowledge and Model Routing
 
-- [ ] **KNOW-01**: Agent `kb_scope` is enforced at runtime so a specialist receives only its configured tenant knowledge, or no automatic retrieval when disabled.
-- [ ] **KNOW-02**: Structured handoffs include only the minimum approved context and reject nested role, system, instruction, secret, credential, and organization-override fields.
-- [ ] **MODEL-01**: Every generative Xphere agent, router, summarizer, and extractor invocation uses the centralized OpenRouter provider path with tenant key first and platform fallback according to policy.
-- [ ] **MODEL-02**: Direct OpenAI or Anthropic generation paths are removed or explicitly classified as non-generative embedding infrastructure with documented ownership and tests preventing provider drift.
+- [x] **KNOW-01**: Agent `kb_scope` is enforced at runtime so a specialist receives only its configured tenant knowledge, or no automatic retrieval when disabled.
+- [x] **KNOW-02**: Structured handoffs include only the minimum approved context and reject nested role, system, instruction, secret, credential, and organization-override fields.
+- [x] **MODEL-01**: Every generative Xphere agent, router, summarizer, and extractor invocation uses the centralized OpenRouter provider path with tenant key first and platform fallback according to policy.
+- [x] **MODEL-02**: Direct OpenAI or Anthropic generation paths are removed or explicitly classified as non-generative embedding infrastructure with documented ownership and tests preventing provider drift.
 
 ### Action Safety and Latency
 
@@ -90,19 +90,19 @@ Every active v3.5 requirement maps to exactly one implementation phase.
 | AIGW-02 | Phase 131 | Complete |
 | AIGW-03 | Phase 131 | Complete |
 | AIGW-04 | Phase 131 | Complete |
-| ROUT-01 | Phase 132 | Pending |
-| ROUT-02 | Phase 132 | Pending |
-| ROUT-03 | Phase 132 | Pending |
-| ROUT-04 | Phase 132 | Pending |
-| ROUT-05 | Phase 132 | Pending |
-| AUTHZ-01 | Phase 132 | Pending |
-| AUTHZ-02 | Phase 132 | Pending |
-| AUTHZ-03 | Phase 132 | Pending |
+| ROUT-01 | Phase 132 | Done |
+| ROUT-02 | Phase 132 | Done |
+| ROUT-03 | Phase 132 | Done |
+| ROUT-04 | Phase 132 | Done |
+| ROUT-05 | Phase 132 | Done |
+| AUTHZ-01 | Phase 132 | Done |
+| AUTHZ-02 | Phase 132 | Done |
+| AUTHZ-03 | Phase 132 | Done |
 | AUTHZ-04 | Phase 131 | Complete |
-| KNOW-01 | Phase 132 | Pending |
-| KNOW-02 | Phase 132 | Pending |
-| MODEL-01 | Phase 132 | Pending |
-| MODEL-02 | Phase 132 | Pending |
+| KNOW-01 | Phase 132 | Done |
+| KNOW-02 | Phase 132 | Done |
+| MODEL-01 | Phase 132 | Done |
+| MODEL-02 | Phase 132 | Done |
 | SAFE-01 | Phase 133 | Pending |
 | SAFE-02 | Phase 133 | Pending |
 | PERF-01 | Phase 133 | Pending |

@@ -11,7 +11,7 @@ This milestone extends the existing text-agent platform into a tenant-safe voice
 - Decimal phases (131.1, 131.2): Urgent insertions (marked with INSERTED)
 
 - [x] **Phase 131: Trusted Omnichannel Invocation Foundation** - Voice and widget enter the same tenant-resolved agent boundary on a repaired regression baseline.
-- [ ] **Phase 132: Authorized Specialist Orchestration** - Agents route and delegate with typed contracts, least privilege, scoped knowledge, and centralized model access.
+- [x] **Phase 132: Authorized Specialist Orchestration** - Agents route and delegate with typed contracts, least privilege, scoped knowledge, and centralized model access.
 - [ ] **Phase 133: Idempotent Action and Vapi Safety** - Voice-triggered actions stay fast, replay-safe, timeout-safe, and compatible with the always-200 Vapi contract.
 - [ ] **Phase 134: Traceability and Reversible Routing** - Operators can inspect complete invocation trees and switch each channel between legacy and specialist routing without data loss.
 - [ ] **Phase 135: Release Verification and Hardening** - Automated, timed, build, workflow, and UAT gates prove the orchestration path is safe to expose to production traffic.
@@ -46,10 +46,10 @@ This milestone extends the existing text-agent platform into a tenant-safe voice
   4. Exactly one response owner converts typed specialist success, business-failure, retryable-failure, or handoff results into the channel reply without exposing internal monologue.
   5. Each specialist receives only its configured tenant knowledge and minimum approved handoff context, while every generative router, agent, summarizer, and extractor call uses the centralized OpenRouter path with provider-drift tests guarding direct generation paths.
 **Plans**: 4 plans
-- [ ] 132-01-PLAN.md — Add allow-listed handoff and typed specialist-result contracts.
-- [ ] 132-02-PLAN.md — Add tenant-safe partner-edge capability and budget policy.
-- [ ] 132-03-PLAN.md — Activate edge authorization and enforce specialist knowledge scope.
-- [ ] 132-04-PLAN.md — Add trusted direct-specialist routing and centralize OpenRouter generation.
+- [x] 132-01-PLAN.md — Add allow-listed handoff and typed specialist-result contracts.
+- [x] 132-02-PLAN.md — Add tenant-safe partner-edge capability and budget policy.
+- [x] 132-03-PLAN.md — Activate edge authorization and enforce specialist knowledge scope.
+- [x] 132-04-PLAN.md — Add trusted direct-specialist routing and centralize OpenRouter generation.
 
 ### Phase 133: Idempotent Action and Vapi Safety
 **Goal**: Side-effecting specialist actions execute through the existing Action Engine exactly once, and the latency-sensitive Vapi route remains lean, deterministic, traceably owned, and HTTP-200-compatible under retries, multi-call payloads, timeouts, and failures.
@@ -103,7 +103,7 @@ Phases execute in numeric order: 131 → 132 → 133 → 134 → 135 → 136.
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 131. Trusted Omnichannel Invocation Foundation | 3/3 | Complete | 2026-09-03 |
-| 132. Authorized Specialist Orchestration | 0/4 | Planned | - |
+| 132. Authorized Specialist Orchestration | 4/4 | Complete | 2026-09-03 |
 | 133. Idempotent Action and Vapi Safety | 0/TBD | Not started | - |
 | 134. Traceability and Reversible Routing | 0/TBD | Not started | - |
 | 135. Release Verification and Hardening | 0/TBD | Not started | - |

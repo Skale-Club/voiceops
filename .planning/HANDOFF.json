@@ -1,14 +1,14 @@
 {
   "version": "1.0",
-  "timestamp": "2026-09-03T20:28:00.000Z",
+  "timestamp": "2026-09-03T18:45:00.000Z",
   "workstream": "omnichannel-agent-orchestration",
-  "phase": "132",
-  "phase_name": "Authorized Specialist Orchestration",
+  "phase": "133",
+  "phase_name": "Idempotent Action and Vapi Safety",
   "phase_dir": ".planning/workstreams/omnichannel-agent-orchestration/phases",
-  "plan": "132-01",
+  "plan": null,
   "task": 0,
-  "total_tasks": 9,
-  "status": "ready_to_execute",
+  "total_tasks": 0,
+  "status": "needs_planning",
   "completed_tasks": [
     {
       "id": 1,
@@ -39,44 +39,28 @@
       "name": "Generate Phase 131 detailed plans",
       "status": "done",
       "progress": "Three plans across two waves were generated locally and passed a documented manual fallback review."
+    },
+    {
+      "id": 10,
+      "name": "Execute and verify Phase 132 (all four plans)",
+      "status": "done",
+      "commit": "599118e9, 60690309, 07baabcf, 5351f00c",
+      "progress": "Waves 1-3 executed by delegated Sonnet agents. Regression gate measured against baseline 7c5b608e: identical 30-file/52-test pre-existing failure set, so zero regressions. Production build exit 0. 132-VERIFICATION.md records 8/8 focus items passing."
     }
   ],
   "remaining_tasks": [
     {
-      "id": 6,
-      "name": "Verify Phase 131 plans with gsd-plan-checker",
-      "status": "done",
-      "progress": "Checker agent produced no output and was interrupted; 131-PLAN-REVIEW.md records the manual fallback pass."
-    },
-    {
-      "id": 7,
-      "name": "Execute all Phase 131 waves",
-      "status": "done",
-      "progress": "All three Phase 131 plans committed. Combined compatibility gate passed 62/62 tests and the production build passed."
-    },
-    {
-      "id": 8,
-      "name": "Verify Phase 131 goal and update roadmap",
-      "status": "done",
-      "progress": "131-VERIFICATION.md records a 6/6 pass; requirements, roadmap, and state were updated."
-    },
-    {
       "id": 9,
-      "name": "Plan and execute Phases 132 through 136 in order",
+      "name": "Plan and execute Phases 133 through 136 in order",
       "status": "in_progress",
-      "progress": "Phase 132 has four reviewed executable plans across three waves. Wave 1 plans 132-01 and 132-02 are ready; no Phase 132 source implementation has started."
+      "progress": "Phases 131 and 132 complete and verified. Phase 133 has no context document and no plans yet."
     }
   ],
   "blockers": [
     {
-      "description": "Secondary-agent usage limit prevented Phase 131 research artifact generation.",
+      "description": "Secondary-agent quota was previously exhausted; delegation worked in this session via explicitly scoped Sonnet executors.",
       "type": "external",
-      "workaround": "Operator explicitly said continue; use 131-CONTEXT.md and ARCHITECTURE-ANALYSIS.md, or rerun research after quota reset."
-    },
-    {
-      "description": "Secondary-agent quota remains unavailable for delegated verification.",
-      "type": "external",
-      "workaround": "Continue locally with focused tests, production build, and explicit verification artifacts."
+      "workaround": "Give each delegated agent a non-overlapping file scope, forbid db push/build, and verify the combined result centrally."
     }
   ],
   "human_actions_pending": [
@@ -111,16 +95,20 @@
       "decision": "Cuts & Culture is a late isolated canary, not a platform default.",
       "rationale": "Avoids hardcoding one tenant's operating model into the product.",
       "phase": "136"
+    },
+    {
+      "decision": "Legacy non-workflow tools are never delegable and fail closed through a partner edge.",
+      "rationale": "Migration 1291 keys delegated grants to workflows, so legacy tools have no grant surface to check; inferring authority would break least privilege.",
+      "phase": "132"
+    },
+    {
+      "decision": "Trusted specialist routing resolves before invokeAgent rather than inside it.",
+      "rationale": "The gateway contract asserts that input.intent never influences trusted identity; resolving inside would break it.",
+      "phase": "132"
     }
   ],
   "uncommitted_files": [],
-  "background_processes": [
-    {
-      "name": "gsd-planner subagent",
-      "id": "/root/plan_phase_131",
-      "status": "interrupted_without_output_when_handoff_was_finalized"
-    }
-  ],
-  "next_action": "Execute Phase 132 Wave 1 plans 132-01 and 132-02. Start with tests, keep migration 1291 unapplied, create one summary and atomic commit per plan, then execute dependent 132-03 and 132-04.",
-  "context_notes": "Phase 131 is complete in commits 0844d971, 8c9db064, 0484b7d6, and 28d014c8. Phase 132 context is e74da02c and reviewed plans are in the latest docs(132) commit. Existing recursive delegation is substantial but uses ancestor tool intersection, kb_scope is loaded but ignored, handoff validation is deny-list based, and direct generative provider paths remain. The gateway is intentionally not wired to production Vapi tools. Migration 1290 is source-only and unapplied. Use --ws omnichannel-agent-orchestration for GSD commands because another workstream may be globally active. Builds need NODE_OPTIONS=--max-old-space-size=4096 on this machine."
+  "background_processes": [],
+  "next_action": "Phase 133 (Idempotent Action and Vapi Safety) needs a context document and plans. Read ROADMAP.md for its scope and the 14 still-pending requirements in REQUIREMENTS.md, write 133-CONTEXT.md, then generate and review plans before executing. Migrations 1290 and 1291 remain unapplied and /api/vapi/tools remains uncut.",
+  "context_notes": "Phase 132 shipped in 599118e9 (typed handoff contracts), 60690309 (partner-edge policy + unapplied migration 1291), 07baabcf (edge-based least privilege + kb_scope), 5351f00c (trusted specialist routing + centralized OpenRouter in src/lib/llm/openrouter.ts). Docs cac188e3 and 5dc371f9 correct the provider drift inventory and record accepted limitations - read 132-KNOWN-LIMITATIONS.md before touching knowledge retrieval or legacy tools. The full suite has 30 pre-existing failing files (52 tests) unrelated to this workstream; treat that as the baseline, do not try to fix them as part of a phase. Build needs NODE_OPTIONS=--max-old-space-size=8192 on this machine. Never junction node_modules into a git worktree - worktree remove --force follows the junction and deletes the real directory. Use --ws omnichannel-agent-orchestration for GSD commands."
 }
