@@ -61,7 +61,10 @@ This milestone extends the existing text-agent platform into a tenant-safe voice
   3. A normal voice lookup uses no more than one internal specialist model invocation before deterministic tool execution, and budget exhaustion returns a lean recoverable Vapi result.
   4. Every handled and error path in the Node.js Vapi tool webhook returns HTTP 200 with a lean payload, uses canonical `https://xphere.app` targets, and defers non-essential logging.
   5. Multi-tool Vapi payloads execute every supported call with matching result IDs or reject the unsupported shape deterministically, while timeout handling never reports completion for unowned side-effecting work still in progress.
-**Plans**: TBD
+**Plans**:
+- [ ] 133-01-PLAN.md — Derive idempotency keys from trusted ingress identity and separate replay from conflict.
+- [ ] 133-02-PLAN.md — Add a voice latency policy enforced through the shared invocation budget.
+- [ ] 133-03-PLAN.md — Harden the Vapi tool webhook: idempotent execution, multi-call results, timeout ownership, HTTP 200 contract.
 
 ### Phase 134: Traceability and Reversible Routing
 **Goal**: Operators can follow one request across every orchestration and action boundary, understand nested failures and costs, and move channels between legacy and specialist routing without destroying configuration or history.
@@ -104,7 +107,7 @@ Phases execute in numeric order: 131 → 132 → 133 → 134 → 135 → 136.
 |-------|----------------|--------|-----------|
 | 131. Trusted Omnichannel Invocation Foundation | 3/3 | Complete | 2026-09-03 |
 | 132. Authorized Specialist Orchestration | 4/4 | Complete | 2026-09-03 |
-| 133. Idempotent Action and Vapi Safety | 0/TBD | Not started | - |
+| 133. Idempotent Action and Vapi Safety | 0/3 | Planned | - |
 | 134. Traceability and Reversible Routing | 0/TBD | Not started | - |
 | 135. Release Verification and Hardening | 0/TBD | Not started | - |
 | 136. Cuts & Culture Canary Rollout | 0/TBD | Not started | - |
