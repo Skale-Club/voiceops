@@ -1,6 +1,6 @@
 ---
 phase: 132-authorized-specialist-orchestration
-status: draft_for_planner_review
+status: superseded_by_132_01_through_132_04
 created: 2026-09-03
 workstream: omnichannel-agent-orchestration
 ---

@@ -45,7 +45,11 @@ This milestone extends the existing text-agent platform into a tenant-safe voice
   3. Delegation permission is separate from direct tool permission, and a delegated action succeeds only when both the specialist's own grants and the configured partner edge allow it.
   4. Exactly one response owner converts typed specialist success, business-failure, retryable-failure, or handoff results into the channel reply without exposing internal monologue.
   5. Each specialist receives only its configured tenant knowledge and minimum approved handoff context, while every generative router, agent, summarizer, and extractor call uses the centralized OpenRouter path with provider-drift tests guarding direct generation paths.
-**Plans**: TBD
+**Plans**: 4 plans
+- [ ] 132-01-PLAN.md — Add allow-listed handoff and typed specialist-result contracts.
+- [ ] 132-02-PLAN.md — Add tenant-safe partner-edge capability and budget policy.
+- [ ] 132-03-PLAN.md — Activate edge authorization and enforce specialist knowledge scope.
+- [ ] 132-04-PLAN.md — Add trusted direct-specialist routing and centralize OpenRouter generation.
 
 ### Phase 133: Idempotent Action and Vapi Safety
 **Goal**: Side-effecting specialist actions execute through the existing Action Engine exactly once, and the latency-sensitive Vapi route remains lean, deterministic, traceably owned, and HTTP-200-compatible under retries, multi-call payloads, timeouts, and failures.
@@ -99,7 +103,7 @@ Phases execute in numeric order: 131 → 132 → 133 → 134 → 135 → 136.
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 131. Trusted Omnichannel Invocation Foundation | 3/3 | Complete | 2026-09-03 |
-| 132. Authorized Specialist Orchestration | 0/TBD | Not started | - |
+| 132. Authorized Specialist Orchestration | 0/4 | Planned | - |
 | 133. Idempotent Action and Vapi Safety | 0/TBD | Not started | - |
 | 134. Traceability and Reversible Routing | 0/TBD | Not started | - |
 | 135. Release Verification and Hardening | 0/TBD | Not started | - |
