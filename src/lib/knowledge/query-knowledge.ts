@@ -40,6 +40,21 @@ export type QueryKnowledgeOpts = {
    * Defaults to 0.5.  (Q4)
    */
   threshold?: number
+  /**
+   * Phase 132 (KNOW-01/KNOW-02): the calling agent's RESOLVED kb_scope
+   * (ResolvedAgent.kbScope, from resolveAgent() — agents.kb_scope). Callers
+   * MUST pass only resolveAgent()'s output here; never a scope derived from
+   * a handoff payload or channel/ingress metadata (132-CONTEXT.md
+   * "Knowledge scope" — trusted server-side context only).
+   *
+   *   - undefined/null: full-organization knowledge (legacy behavior).
+   *   - []             : automatic retrieval is disabled entirely for this
+   *                      agent — no embedding/search call is made at all.
+   *   - non-empty      : retrieval is filtered to chunks whose
+   *                      `knowledge_source_id` metadata is one of these
+   *                      tenant-owned knowledge_sources ids.
+   */
+  kbScope?: string[] | null
 }
 
 export async function queryKnowledge(
@@ -51,9 +66,15 @@ export async function queryKnowledge(
   const log = createLogger({ organizationId })
   const rawMode = opts?.rawMode ?? false
   const threshold = opts?.threshold ?? DEFAULT_SIMILARITY_THRESHOLD
+  const kbScope = opts?.kbScope ?? null
 
   try {
     if (!query.trim()) return FALLBACK_RESPONSE
+
+    // KNOW-01: an explicit empty scope means automatic retrieval is disabled
+    // for this agent — return the fallback without ever calling the
+    // embedding/search provider. Distinct from `null` (full-org, legacy).
+    if (kbScope !== null && kbScope.length === 0) return FALLBACK_RESPONSE
 
     // Step 1: Fetch OpenAI key for embedding
     const openaiKey = await getProviderKey('openai', organizationId, supabase)
@@ -73,13 +94,31 @@ export async function queryKnowledge(
       queryName: 'match_documents',
     })
 
+    // KNOW-02: `match_documents`'s filter uses JSONB containment (`@>`), which
+    // cannot express "one of several source ids" in a single call. When a
+    // non-empty scope is active, over-fetch org-scoped candidates and filter
+    // to tenant-owned scoped sources in-process, THEN apply the same top-5 /
+    // threshold contract as the unscoped path.
+    const scopeSet = kbScope !== null && kbScope.length > 0 ? new Set(kbScope) : null
+    const fetchCount = scopeSet ? Math.max(20, scopeSet.size * 4) : 5
+
     // Step 3: Similarity search with scores — Q4 threshold filtering (~100ms)
-    const rawResults = await vectorStore.similaritySearchWithScore(query.trim(), 5, {
+    const rawResults = await vectorStore.similaritySearchWithScore(query.trim(), fetchCount, {
       org_id: organizationId,
     })
 
-    // Q4: Discard chunks below threshold
-    const results = rawResults.filter(([, score]) => score >= threshold)
+    // KNOW-02: filter to tenant-owned scoped knowledge_sources before
+    // applying the threshold + top-5 cap, so scoping never leaks a chunk
+    // from an out-of-scope (or cross-tenant) source.
+    const scopedResults = scopeSet
+      ? rawResults.filter(([doc]) => {
+          const sourceId = (doc.metadata as Record<string, unknown> | undefined)?.knowledge_source_id
+          return typeof sourceId === 'string' && scopeSet.has(sourceId)
+        })
+      : rawResults
+
+    // Q4: Discard chunks below threshold, then cap to the top 5 (unchanged contract).
+    const results = scopedResults.filter(([, score]) => score >= threshold).slice(0, 5)
 
     if (results.length === 0) return FALLBACK_RESPONSE
 

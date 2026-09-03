@@ -199,3 +199,54 @@ export function checkCommerceWritesPerTurn(count: number, max = 3): string | nul
 
   return "I've made a few cart changes this turn — send another message and I can keep going."
 }
+
+// ---------------------------------------------------------------------------
+// Phase 132 (AUTHZ-01): shared partner-call budget across the whole
+// invocation tree.
+// ---------------------------------------------------------------------------
+// resolvePartnerEdge() enforces each individual edge's own max_calls_per_turn
+// / max_depth / timeout_ms bounds, but it needs the CALLER to supply the
+// current counters. Per 132-CONTEXT.md "A partner may call another partner
+// only through the same authorization and budget checks", the call-count and
+// elapsed-time budget must be shared by reference across the whole tree — a
+// grandchild's partner call counts against the same total as its parent's,
+// not a fresh per-node counter. This object is created once, at the root of
+// a delegation tree (buildPartnerTools' first invocation), and threaded
+// through every recursive runAgentBlocking() call via `_partnerBudget`.
+// ---------------------------------------------------------------------------
+
+export interface PartnerBudget {
+  /** Number of partner-edge traversals made anywhere in this invocation tree so far. */
+  callCount: number
+  /** Wall-clock start of the root invocation (ms since epoch). */
+  startedAt: number
+}
+
+export function createPartnerBudget(): PartnerBudget {
+  return { callCount: 0, startedAt: Date.now() }
+}
+
+/**
+ * Fails closed once the tree has been running longer than the CURRENT edge's
+ * own timeout_ms budget. Distinct from the per-turn AbortController timeout
+ * (RUNTIME-08), which bounds a single LLM call — this bounds the cumulative
+ * wall-clock cost of a delegation tree against the edge policy the traversal
+ * is about to rely on.
+ */
+export function checkPartnerBudgetTimeout(
+  budget: PartnerBudget,
+  timeoutMs: number,
+  orgId: string,
+  agentId: string,
+): string | null {
+  const elapsedMs = Date.now() - budget.startedAt
+  if (elapsedMs < timeoutMs) return null
+
+  createLogger({ orgId, agentId }).warn('guardrail_tripped', {
+    cap: 'partner_edge_timeout',
+    value: elapsedMs,
+    limit: timeoutMs,
+  })
+
+  return 'Specialist call budget timed out | answer from current agent'
+}

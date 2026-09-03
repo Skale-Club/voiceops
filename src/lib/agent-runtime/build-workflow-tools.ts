@@ -14,8 +14,9 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import type { Database, Json } from '@/types/database'
 import type { AgentChannel } from './types'
 import { createLogger } from '@/lib/obs/logger'
-import { resolveAgentTool } from './resolve-agent-tool'
+import { resolveAgentTool, resolveEffectiveToolAuthority } from './resolve-agent-tool'
 import { executeWorkflowTool } from './execute-workflow-tool'
+import type { PartnerEdgeDecision } from './resolve-partner-edge'
 import {
   deriveWorkflowInputSchema,
 } from '@/lib/workflows/derive-input-schema'
@@ -49,6 +50,14 @@ export interface BuildWorkflowToolsParams {
   toolCallsLog: Json[]
   // Counter ref | caller manages the integer; we increment via closure each call.
   getNextToolCallIndex: () => number
+  /**
+   * Phase 132 (AUTHZ-01): the trusted, already-resolved partner-edge decision
+   * for the edge traversed to reach `agentId`, or null/undefined when
+   * `agentId` was invoked directly (not through delegation). Passed straight
+   * through to resolveEffectiveToolAuthority() at call time — replaces the
+   * Phase 38 "every ancestor must own this tool" intersection model.
+   */
+  incomingEdge?: PartnerEdgeDecision | null
 }
 
 export async function buildWorkflowTools(
@@ -65,6 +74,7 @@ export async function buildWorkflowTools(
     serviceClient,
     toolCallsLog,
     getNextToolCallIndex,
+    incomingEdge,
   } = params
 
   const result: BuildResult = { toolSet: {}, summaries: [] }
@@ -155,25 +165,22 @@ export async function buildWorkflowTools(
           return 'Workflow not available to this agent on this channel.'
         }
 
-        // DELEG-07: intersection check across delegation chain (the chain
-        // must already include the current agent at the tail).
-        if (currentChain.length > 1) {
-          for (const chainAgentId of currentChain.slice(0, -1)) {
-            const chainCheck = await resolveAgentTool(chainAgentId, capturedToolName, channel)
-            if (!chainCheck) {
-              toolCallsLog.push({
-                name: capturedToolName,
-                args: JSON.parse(JSON.stringify(toolArgs)) as Json,
-                denied: true,
-                denied_reason: 'intersection_excludes_workflow',
-                chain: currentChain,
-                blocking_agent: chainAgentId,
-              })
-              createLogger({ traceId })
-                .warn('intersection_authz_denied_workflow', { tool: capturedToolName, chainAgentId, chain: currentChain })
-              return `Tool execution denied: delegation chain agent ${chainAgentId} does not have permission for ${capturedToolName}`
-            }
-          }
+        // Phase 132 (AUTHZ-01/AUTHZ-02): effective delegated authority —
+        // specialist's own direct grant (resolved, above) intersected with
+        // the current partner edge's delegated-workflow allow-list (never
+        // an ancestor-ownership intersection; see resolveEffectiveToolAuthority).
+        const authority = resolveEffectiveToolAuthority(resolved, incomingEdge)
+        if (!authority.allow) {
+          toolCallsLog.push({
+            name: capturedToolName,
+            args: JSON.parse(JSON.stringify(toolArgs)) as Json,
+            denied: true,
+            denied_reason: authority.reason === 'not_delegated' ? 'edge_does_not_delegate_workflow' : 'workflow_not_attached_to_agent',
+            chain: currentChain,
+          })
+          createLogger({ traceId })
+            .warn('edge_authz_denied_workflow', { tool: capturedToolName, reason: authority.reason, chain: currentChain })
+          return `Tool execution denied: ${capturedToolName} is not authorized for this delegation.`
         }
 
         // Idempotency | only for kind='flow' (multi-step side-effecting paths).

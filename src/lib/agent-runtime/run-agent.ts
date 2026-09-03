@@ -35,9 +35,13 @@ import {
   checkTokenCap,
   checkDailyCostCap,
   checkCommerceWritesPerTurn,
+  createPartnerBudget,
+  checkPartnerBudgetTimeout,
+  type PartnerBudget,
 } from './guardrails'
 import { resolveAgent } from './resolve-agent'
-import { resolveAgentTool } from './resolve-agent-tool'
+import { resolveAgentTool, resolveEffectiveToolAuthority } from './resolve-agent-tool'
+import { resolvePartnerEdge, type PartnerEdgeDecision } from './resolve-partner-edge'
 import {
   buildWorkflowTools,
   buildWorkflowSystemPromptSuffix,
@@ -53,6 +57,33 @@ import {
   COMMERCE_WRITE_ACTIONS,
 } from './idempotency'
 import type { AgentRunOptions, AgentRunResult } from './types'
+
+// ---------------------------------------------------------------------------
+// Phase 132 (AUTHZ-01): internal-only recursion fields.
+// ---------------------------------------------------------------------------
+// NOT part of the public AgentRunOptions contract (types.ts) — these are set
+// exclusively by buildPartnerTools()'s recursive call into runAgentBlocking()
+// below, never by an external caller. Kept local to this module rather than
+// widening the public type surface.
+interface InternalDelegationOptions {
+  /**
+   * The trusted, already-resolved partner-edge decision for the edge
+   * traversed to reach THIS invocation, or undefined when this agent was
+   * invoked directly (top-level / not through delegation). Threaded into
+   * every tool-authorization check for this turn via
+   * resolveEffectiveToolAuthority().
+   */
+  _incomingEdge?: PartnerEdgeDecision | null
+  /**
+   * Shared-by-reference call-count/timeout budget for the WHOLE delegation
+   * tree (132-CONTEXT.md: "A partner may call another partner only through
+   * the same authorization and budget checks"). Created once at the root
+   * invocation; every recursive call reuses the same object.
+   */
+  _partnerBudget?: PartnerBudget
+}
+
+type InternalAgentRunOptions = AgentRunOptions & InternalDelegationOptions
 import {
   validateHandoffInput,
   normalizeSpecialistResult,
@@ -256,10 +287,17 @@ async function buildPartnerTools(params: {
   traceId: string
   serviceClient: ReturnType<typeof createServiceRoleClient>
   emit?: (obj: object) => void
+  /**
+   * Phase 132 (AUTHZ-01): shared-by-reference call-count/timeout budget for
+   * the whole delegation tree. Callers pass the SAME object across every
+   * buildPartnerTools() invocation in a tree so a grandchild's partner call
+   * counts against the same total budget as its parent's.
+   */
+  partnerBudget: PartnerBudget
 }): Promise<Record<string, ReturnType<typeof dynamicTool>>> {
   const {
     agentId, orgId, channel, _depth, visitedAgentIds, delegationChain,
-    parentInvocationId, traceId, serviceClient, emit,
+    parentInvocationId, traceId, serviceClient, emit, partnerBudget,
   } = params
 
   // Fetch partner rows with partner agent slug + name
@@ -338,13 +376,50 @@ async function buildPartnerTools(params: {
         }
         const handoffArgs = validation.value
 
-        // DELEG-06: Visited-set check BEFORE recursing
+        // DELEG-06: Visited-set check BEFORE recursing (edge-based checks
+        // below do not, by themselves, catch an A→B→A cycle across
+        // otherwise-independent edges).
         const cycleCheck = checkVisitedSet(visitedAgentIds, capturedPartner.id, orgId)
         if (cycleCheck) return cycleCheck
 
-        // RUNTIME-04: Depth check
+        // RUNTIME-04: Global depth ceiling (defense-in-depth, independent of
+        // any single edge's own max_depth policy checked by resolvePartnerEdge below).
         const depthDenial = checkDelegationDepth(_depth + 1, orgId, capturedPartner.id)
         if (depthDenial) return depthDenial
+
+        // Phase 132 (AUTHZ-01, ROUT-03): fail-closed preflight for THIS edge —
+        // cross-org, inactive endpoints, channel policy, edge-specific
+        // depth/call-count budgets, and the normalized delegated-workflow
+        // grant list. Replaces the removed ancestor-ownership intersection
+        // model (see resolveEffectiveToolAuthority in resolve-agent-tool.ts).
+        const edgeDecision = await resolvePartnerEdge({
+          organizationId: orgId,
+          sourceAgentId: agentId,
+          partnerAgentId: capturedPartner.id,
+          channel,
+          currentDepth: _depth,
+          currentCallCount: partnerBudget.callCount,
+        })
+        if (!edgeDecision.allow) {
+          createLogger({ traceId, orgId }).warn('partner_edge_traversal_denied', {
+            reason: edgeDecision.reason,
+            partnerSlug: capturedPartner.slug,
+          })
+          return specialistResultToToolMessage({
+            outcome: 'business_failure',
+            reason: 'Specialist is not authorized for this request.',
+          })
+        }
+
+        // Shared tree-wide timeout budget, measured against THIS edge's own
+        // timeout_ms policy (132-CONTEXT.md: partner-to-partner calls go
+        // through the same authorization AND budget checks).
+        const timeoutDenial = checkPartnerBudgetTimeout(partnerBudget, edgeDecision.timeoutMs, orgId, capturedPartner.id)
+        if (timeoutDenial) return timeoutDenial
+
+        // A call actually traverses the edge now — count it against the
+        // shared tree-wide budget before recursing.
+        partnerBudget.callCount += 1
 
         const updatedVisited = new Set([...visitedAgentIds, agentId])
         const updatedChain = [...delegationChain, agentId]
@@ -380,6 +455,8 @@ async function buildPartnerTools(params: {
             parentInvocationId,
             _visitedAgentIds: updatedVisited,
             _delegationChain: updatedChain,
+            _incomingEdge: edgeDecision,
+            _partnerBudget: partnerBudget,
           })
           specialistResult = normalizeSpecialistResult(partnerResult)
         } catch (err) {
@@ -420,7 +497,7 @@ export function runAgent(opts: AgentRunOptions): ReadableStream<Uint8Array> | Pr
 // runAgentBlocking | blocking path (generateText) | Phase 34, unchanged
 // ---------------------------------------------------------------------------
 
-async function runAgentBlocking(opts: AgentRunOptions): Promise<AgentRunResult> {
+async function runAgentBlocking(opts: InternalAgentRunOptions): Promise<AgentRunResult> {
   const {
     orgId,
     channel,
@@ -433,11 +510,18 @@ async function runAgentBlocking(opts: AgentRunOptions): Promise<AgentRunResult> 
     parentInvocationId,
     _visitedAgentIds,
     _delegationChain,
+    _incomingEdge,
+    _partnerBudget,
   } = opts
 
   // Phase 38: Initialize visited set and delegation chain (DELEG-06, DELEG-07)
   const visitedAgentIds = _visitedAgentIds ?? new Set<string>()
   const delegationChain = _delegationChain ?? []
+  // Phase 132 (AUTHZ-01): the edge that authorized reaching THIS invocation
+  // (undefined at the root of a tree, i.e. a directly-invoked agent), and the
+  // tree-wide shared budget — created once, here, if this IS the root.
+  const incomingEdge: PartnerEdgeDecision | null = _incomingEdge ?? null
+  const partnerBudget: PartnerBudget = _partnerBudget ?? createPartnerBudget()
 
   // Resolve agentId from agent_channel_defaults when not explicitly provided (D-35-06)
   let resolvedAgentId = opts.agentId
@@ -560,14 +644,16 @@ async function runAgentBlocking(opts: AgentRunOptions): Promise<AgentRunResult> 
   }
 
   // Step 7b: KB injection | ALWAYS query knowledge (null kbScope = full org KB, matching legacy stream.ts)
-  // D-35-02: unconditional call before LLM | kbScope field preserved on ResolvedAgent for future Phase 37 use
+  // D-35-02: unconditional call before LLM.
   // Q5: rawMode=true injects full chunk text + citations so the agent LLM has
   // rich context rather than a pre-synthesised summary.
+  // Phase 132 (KNOW-01/KNOW-02): kbScope comes ONLY from resolveAgent()'s
+  // output — never from a handoff payload or channel/ingress metadata.
   let systemPrompt = resolvedAgent.systemPrompt
   const FALLBACK_KB_RESPONSE = "I don't have information about that in my knowledge base."
   try {
     const kbClient = createServiceRoleClient()
-    const kbContext = await queryKnowledge(userMessage, orgId, kbClient, { rawMode: true })
+    const kbContext = await queryKnowledge(userMessage, orgId, kbClient, { rawMode: true, kbScope: resolvedAgent.kbScope })
     if (kbContext && kbContext !== FALLBACK_KB_RESPONSE) {
       systemPrompt = `${systemPrompt}\n\nRelevant knowledge base content:\n${kbContext}`
     }
@@ -727,29 +813,27 @@ async function runAgentBlocking(opts: AgentRunOptions): Promise<AgentRunResult> 
               return 'Tool not available to this agent'
             }
 
-            // DELEG-07: Intersection authorization | verify ALL agents in delegation chain
-            // have this tool attached before allowing execution
-            if (currentChain.length > 1) {
-              for (const chainAgentId of currentChain.slice(0, -1)) {
-                const chainToolCheck = await resolveAgentTool(chainAgentId, capturedToolName, channel)
-                if (!chainToolCheck) {
-                  const denialEntry = {
-                    name: capturedToolName,
-                    args: JSON.parse(JSON.stringify(toolArgs)) as Json,
-                    denied: true,
-                    denied_reason: 'intersection_excludes_tool',
-                    chain: currentChain,
-                    blocking_agent: chainAgentId,
-                  }
-                  toolCallsLog.push(denialEntry)
-                  createLogger({ traceId, orgId }).warn('intersection_authz_denied', {
-                    tool: capturedToolName,
-                    chainAgentId,
-                    chain: currentChain,
-                  })
-                  return `Tool execution denied: delegation chain agent ${chainAgentId} does not have permission for ${capturedToolName}`
-                }
+            // Phase 132 (AUTHZ-01/AUTHZ-02): effective delegated authority —
+            // replaces the "every ancestor must own this tool" intersection
+            // model. Legacy (non-workflow) tools have no per-edge grant
+            // surface at all, so they are never delegated authority through
+            // an edge (see resolveEffectiveToolAuthority).
+            const legacyAuthority = resolveEffectiveToolAuthority(resolvedTool, incomingEdge)
+            if (!legacyAuthority.allow) {
+              const denialEntry = {
+                name: capturedToolName,
+                args: JSON.parse(JSON.stringify(toolArgs)) as Json,
+                denied: true,
+                denied_reason: legacyAuthority.reason === 'not_delegated' ? 'edge_does_not_delegate_tool' : 'tool_not_attached_to_agent',
+                chain: currentChain,
               }
+              toolCallsLog.push(denialEntry)
+              createLogger({ traceId, orgId }).warn('edge_authz_denied', {
+                tool: capturedToolName,
+                reason: legacyAuthority.reason,
+                chain: currentChain,
+              })
+              return `Tool execution denied: ${capturedToolName} is not authorized for this delegation.`
             }
 
             // Decrypt credentials if present
@@ -874,6 +958,7 @@ async function runAgentBlocking(opts: AgentRunOptions): Promise<AgentRunResult> 
         serviceClient,
         toolCallsLog,
         getNextToolCallIndex: () => toolCallIndex++,
+        incomingEdge,
       })
       Object.assign(toolSet, workflowToolsResult.toolSet)
 
@@ -895,6 +980,7 @@ async function runAgentBlocking(opts: AgentRunOptions): Promise<AgentRunResult> 
         traceId,
         serviceClient,
         // No emit in blocking path | SSE events only in streaming path
+        partnerBudget,
       })
       Object.assign(toolSet, partnerTools)
 
@@ -1033,6 +1119,13 @@ function runAgentStreaming(
   // Phase 38: Initialize visited set and delegation chain (DELEG-06, DELEG-07)
   const visitedAgentIds = _visitedAgentIds ?? new Set<string>()
   const delegationChain = _delegationChain ?? []
+  // Phase 132 (AUTHZ-01): streaming is always the ROOT of a delegation tree
+  // (partner sub-calls always recurse through the blocking path — see
+  // buildPartnerTools' "DELEG-03: Recursive invocation | always blocking"),
+  // so there is never an incoming edge here, and a fresh shared budget is
+  // created once per streamed turn.
+  const incomingEdge: PartnerEdgeDecision | null = null
+  const partnerBudget: PartnerBudget = createPartnerBudget()
 
   return new ReadableStream<Uint8Array>({
     async start(controller) {
@@ -1132,11 +1225,13 @@ function runAgentStreaming(
 
         // KB injection | UNCONDITIONAL (GATE-01: matches legacy stream.ts behavior)
         // Q5: rawMode=true — inject full chunks with citations for richer LLM context.
+        // Phase 132 (KNOW-01/KNOW-02): kbScope comes ONLY from resolveAgent()'s
+        // output — never from a handoff payload or channel/ingress metadata.
         let systemPrompt = resolvedAgent.systemPrompt
         const FALLBACK_KB_RESPONSE = "I don't have information about that in my knowledge base."
         try {
           const kbClient = createServiceRoleClient()
-          const kbContext = await queryKnowledge(userMessage, orgId, kbClient, { rawMode: true })
+          const kbContext = await queryKnowledge(userMessage, orgId, kbClient, { rawMode: true, kbScope: resolvedAgent.kbScope })
           if (kbContext && kbContext !== FALLBACK_KB_RESPONSE) {
             systemPrompt = `${systemPrompt}\n\nRelevant knowledge base content:\n${kbContext}`
           }
@@ -1244,16 +1339,13 @@ function runAgentStreaming(
                   toolCallsLog.push({ name: capturedToolName, args: JSON.parse(JSON.stringify(toolArgs)) as Json, denied: true, denied_reason: 'tool_not_attached_to_agent' })
                   return 'Tool not available to this agent'
                 }
-                // DELEG-07: Intersection authorization
-                if (currentChain.length > 1) {
-                  for (const chainAgentId of currentChain.slice(0, -1)) {
-                    const chainToolCheck = await resolveAgentTool(chainAgentId, capturedToolName, channel)
-                    if (!chainToolCheck) {
-                      toolCallsLog.push({ name: capturedToolName, args: JSON.parse(JSON.stringify(toolArgs)) as Json, denied: true, denied_reason: 'intersection_excludes_tool', chain: currentChain, blocking_agent: chainAgentId })
-                      createLogger({ traceId, orgId }).warn('intersection_authz_denied', { tool: capturedToolName, chainAgentId, chain: currentChain })
-                      return `Tool execution denied: delegation chain agent ${chainAgentId} does not have permission for ${capturedToolName}`
-                    }
-                  }
+                // Phase 132 (AUTHZ-01/AUTHZ-02): effective delegated authority
+                // (replaces the ancestor-ownership intersection model).
+                const legacyAuthority = resolveEffectiveToolAuthority(resolvedTool, incomingEdge)
+                if (!legacyAuthority.allow) {
+                  toolCallsLog.push({ name: capturedToolName, args: JSON.parse(JSON.stringify(toolArgs)) as Json, denied: true, denied_reason: legacyAuthority.reason === 'not_delegated' ? 'edge_does_not_delegate_tool' : 'tool_not_attached_to_agent', chain: currentChain })
+                  createLogger({ traceId, orgId }).warn('edge_authz_denied', { tool: capturedToolName, reason: legacyAuthority.reason, chain: currentChain })
+                  return `Tool execution denied: ${capturedToolName} is not authorized for this delegation.`
                 }
                 let apiKey = ''
                 let locationId = ''
@@ -1330,6 +1422,7 @@ function runAgentStreaming(
             serviceClient,
             toolCallsLog,
             getNextToolCallIndex: () => toolCallIndex++,
+            incomingEdge,
           })
           Object.assign(toolSet, workflowToolsStream.toolSet)
           if (workflowToolsStream.summaries.length > 0) {
@@ -1348,6 +1441,7 @@ function runAgentStreaming(
             traceId,
             serviceClient,
             emit: delegationVisible ? emit : undefined,
+            partnerBudget,
           })
           Object.assign(toolSet, partnerToolsStream)
 
