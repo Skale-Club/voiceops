@@ -2,6 +2,23 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { Database } from '@/types/database'
 
+// execute-action imports the complete executor catalog, including Medusa modules
+// that import the Redis singleton. Keep this unit suite hermetic: it verifies
+// dispatcher wiring, not Redis connectivity.
+vi.mock('@/lib/redis', () => ({
+  default: {
+    isReady: false,
+    on: vi.fn(),
+    connect: vi.fn(),
+  },
+}))
+
+// Route observability is covered separately. Avoid background event-log network
+// attempts leaking into the focused Vapi contract tests.
+vi.mock('@/lib/logger', () => ({
+  log: vi.fn().mockResolvedValue(undefined),
+}))
+
 // ---- Helpers for building mock Vapi webhook payloads ----
 function makeVapiPayload(overrides: Record<string, unknown> = {}) {
   return {
@@ -30,7 +47,10 @@ function makeSingleChain(result: { data: unknown; error: unknown }) {
     eq: vi.fn().mockReturnThis(),
     is: vi.fn().mockReturnThis(),
     or: vi.fn().mockReturnThis(),
+    order: vi.fn().mockReturnThis(),
+    limit: vi.fn().mockReturnThis(),
     single: vi.fn().mockResolvedValue(result),
+    maybeSingle: vi.fn().mockResolvedValue(result),
   }
   return chain
 }

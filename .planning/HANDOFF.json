@@ -6,7 +6,7 @@
   "phase_name": "Trusted Omnichannel Invocation Foundation",
   "phase_dir": ".planning/workstreams/omnichannel-agent-orchestration/phases/131-trusted-omnichannel-invocation-foundation",
   "plan": "131-01",
-  "task": 1,
+  "task": 3,
   "total_tasks": 7,
   "status": "ready_to_execute",
   "completed_tasks": [
@@ -51,7 +51,8 @@
     {
       "id": 7,
       "name": "Execute all Phase 131 waves",
-      "status": "not_started"
+      "status": "in_progress",
+      "progress": "Plan 131-01 complete: deterministic baseline restored, 39/39 focused tests passing. Plan 131-02 is next."
     },
     {
       "id": 8,
@@ -121,6 +122,6 @@
       "status": "interrupted_without_output_when_handoff_was_finalized"
     }
   ],
-  "next_action": "Execute Wave 1 plans 131-01 and 131-02, create summaries, then execute dependent plan 131-03.",
+  "next_action": "Execute plan 131-02: migration 1290, database types, voice channel registry, and binding tests; then commit its summary.",
   "context_notes": "Specialization must not create a voice model-call waterfall. Phase order is foundation, authorized routing, action/Vapi safety, trace/rollback, release gates, then Cuts canary. No production source code has been changed yet."
 }
