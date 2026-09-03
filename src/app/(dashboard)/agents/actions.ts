@@ -73,6 +73,7 @@ export async function getChannelDefaults(): Promise<
   Record<AgentChannel, string | null>
 > {
   const empty: Record<AgentChannel, string | null> = {
+    voice: null,
     web_widget: null,
     sms: null,
     whatsapp: null,

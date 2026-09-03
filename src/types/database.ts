@@ -149,7 +149,7 @@ export type ConversationChannel =
 export type MetaChannelType = 'messenger' | 'instagram'
 
 // v2.0 (Phase 33) | agent runtime enums
-export type AgentChannel = 'web_widget' | 'whatsapp' | 'messenger' | 'instagram' | 'manychat' | 'telegram' | 'sms' | 'zernio' | 'workflow'
+export type AgentChannel = 'web_widget' | 'whatsapp' | 'messenger' | 'instagram' | 'manychat' | 'telegram' | 'sms' | 'zernio' | 'voice' | 'workflow'
 export type AgentInvocationStatus = 'success' | 'error' | 'aborted' | 'skipped' | 'denied' | 'running'
 export type AgentInvocationMode = 'production' | 'playground'
 
@@ -1182,6 +1182,7 @@ export interface Database {
       }
       assistant_mappings: {
         Row: {
+          entry_agent_id: string | null
           id: string
           organization_id: string
           vapi_assistant_id: string
@@ -1191,6 +1192,7 @@ export interface Database {
           updated_at: string
         }
         Insert: {
+          entry_agent_id?: string | null
           id?: string
           organization_id: string
           vapi_assistant_id: string
@@ -1200,12 +1202,20 @@ export interface Database {
           updated_at?: string
         }
         Update: {
+          entry_agent_id?: string | null
           vapi_assistant_id?: string
           name?: string | null
           is_active?: boolean
           updated_at?: string
         }
         Relationships: [
+          {
+            foreignKeyName: 'assistant_mappings_entry_agent_same_org_fkey'
+            columns: ['organization_id', 'entry_agent_id']
+            isOneToOne: false
+            referencedRelation: 'agents'
+            referencedColumns: ['organization_id', 'id']
+          },
           {
             foreignKeyName: 'assistant_mappings_organization_id_fkey'
             columns: ['organization_id']

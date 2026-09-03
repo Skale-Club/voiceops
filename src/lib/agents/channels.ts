@@ -11,6 +11,7 @@ export const PUBLIC_AGENT_CHANNELS = [
   'manychat',
   'telegram',
   'zernio',
+  'voice',
 ] as const
 
 // Full channel domain. 'workflow' is server-initiated (a flow agent node), NOT a
@@ -29,5 +30,6 @@ export const AGENT_CHANNEL_LABELS: Record<AgentChannel, string> = {
   manychat: 'ManyChat',
   telegram: 'Telegram',
   zernio: 'Zernio',
+  voice: 'Voice (Vapi)',
   workflow: 'Workflow',
 }

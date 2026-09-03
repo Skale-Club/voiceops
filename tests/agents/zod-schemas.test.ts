@@ -44,6 +44,7 @@ describe('AGENT_CHANNELS', () => {
     expect(AGENT_CHANNELS).toContain('web_widget')
     expect(AGENT_CHANNELS).toContain('whatsapp')
     expect(AGENT_CHANNELS).toContain('zernio')
+    expect(PUBLIC_AGENT_CHANNELS).toContain('voice')
     expect(PUBLIC_AGENT_CHANNELS).not.toContain('workflow')
   })
   it('has a label for every channel', () => {
@@ -69,6 +70,20 @@ describe('agentSchema', () => {
   it('rejects empty allowed_channels', () => {
     const r = agentSchema.safeParse({ ...validPayload, allowed_channels: [] })
     expect(r.success).toBe(false)
+  })
+  it('accepts voice with a voice-specific channel override', () => {
+    const r = agentSchema.safeParse({
+      ...validPayload,
+      allowed_channels: ['voice'],
+      channel_overrides: {
+        voice: {
+          system_prompt_suffix: 'Keep spoken answers concise.',
+          model: 'anthropic/claude-haiku-4-5',
+          max_history: 6,
+        },
+      },
+    })
+    expect(r.success).toBe(true)
   })
 })
 
