@@ -2,9 +2,21 @@
 // Node.js Route Handler | receives Vapi tool-call webhooks during live calls.
 // Vercel Hobby-friendly: no Edge Runtime dependency, but still must respond fast.
 // MUST always return HTTP 200.
+//
+// Phase 133 Plan 03 (SAFE-02, OBS-03, PERF-02, PERF-03):
+//   - Side-effecting tool calls are guarded by the ingress-scoped idempotency
+//     key from src/lib/agent-runtime/idempotency.ts, keyed on the trusted
+//     call.id + toolCall.id from the ALREADY-VERIFIED webhook payload — never
+//     on tool arguments or model output. Reads never pay for the guard.
+//   - Every tool call in a multi-call payload gets its own result with a
+//     matching toolCallId; one call's failure never suppresses the others.
+//   - A timeout/abort on a side-effecting call records abandoned ownership
+//     before the fallback message is returned, so a retry cannot treat the
+//     slot as free.
 
 import { after } from 'next/server'
-import { VapiToolCallMessageSchema, getToolArguments } from '@/types/vapi'
+import type { SupabaseClient } from '@supabase/supabase-js'
+import { VapiToolCallMessageSchema, getToolArguments, type VapiToolCall } from '@/types/vapi'
 import { resolveOrgForCall } from '@/lib/vapi/end-of-call'
 import { resolveTool } from '@/lib/action-engine/resolve-tool'
 import { executeAction } from '@/lib/action-engine/execute-action'
@@ -13,10 +25,46 @@ import { decrypt } from '@/lib/crypto'
 import { verifyVapiSecret } from '@/lib/vapi/verify-signature'
 import { createServiceRoleClient } from '@/lib/supabase/admin'
 import { createLogger } from '@/lib/obs/logger'
+import {
+  requiresIdempotency,
+  checkIdempotency,
+  recordIdempotency,
+  recordAbandonedIdempotency,
+  deriveIngressIdempotencyKey,
+  hashToolArgs,
+} from '@/lib/agent-runtime/idempotency'
+import type { Database } from '@/types/database'
 
 export const runtime = 'nodejs'
 
 const obs = createLogger({ route: 'api/vapi/tools' })
+
+const IDEMPOTENCY_CONFLICT_RESULT =
+  'That request conflicts with an earlier one from this call. Please repeat the details again.'
+const IDEMPOTENCY_ABANDONED_RESULT =
+  'I could not confirm the previous attempt completed. Please try again in a moment.'
+
+interface ToolCallResult {
+  toolCallId: string
+  result: string
+}
+
+/** Minimal shape this route needs from message.call — see VapiToolCallMessageSchema. */
+interface VapiCallShape {
+  id: string
+  assistantId: string
+  phoneNumberId?: string
+  customer?: { number?: string; name?: string }
+}
+
+// The shared idempotency helpers persist rows keyed to an agent invocation
+// (agent_invocation_id is a nullable FK to agent_invocations). This route has
+// no agent invocation — it calls executeAction directly — so there is no
+// valid id to supply. Passing `undefined` (rather than an empty string or a
+// made-up id) means the field is dropped from the upsert payload entirely and
+// the nullable column is written as NULL, instead of failing the FK/format
+// check with a fabricated value that isn't a real invocation.
+const NO_AGENT_INVOCATION = undefined as unknown as string
 
 export async function POST(request: Request): Promise<Response> {
   const startTime = Date.now()
@@ -43,8 +91,7 @@ export async function POST(request: Request): Promise<Response> {
     }
 
     const { call, toolCallList } = parsed.data.message
-    const toolCall = toolCallList[0]
-    if (!toolCall) {
+    if (!toolCallList || toolCallList.length === 0) {
       return Response.json({ results: [] }, { status: 200 })
     }
 
@@ -61,19 +108,83 @@ export async function POST(request: Request): Promise<Response> {
     )
     if (!orgId) {
       return Response.json({
-        results: [{ toolCallId: toolCall.id, result: 'Service unavailable.' }]
+        results: toolCallList.map((tc) => ({ toolCallId: tc.id, result: 'Service unavailable.' })),
       }, { status: 200 })
     }
 
-    // 4. Resolve tool config (with nested integration credentials)
+    // 4/5/6. Execute every tool call, isolated from each other — one failing
+    // call must never suppress or delay the others' results.
+    const results = await Promise.all(
+      toolCallList.map((toolCall) =>
+        executeOneToolCall({ call, toolCall, orgId, supabase, startTime })
+      )
+    )
+
+    // 7. Return to Vapi | always HTTP 200, one result per requested call.
+    return Response.json({ results }, { status: 200 })
+
+  } catch (outerErr) {
+    // Truly unexpected error | still return 200 so Vapi doesn't go silent
+    obs.error('vapi_tools_unexpected_error', { error: outerErr })
+    return Response.json({
+      results: [{ toolCallId: 'unknown', result: 'Service unavailable.' }]
+    }, { status: 200 })
+  }
+}
+
+async function executeOneToolCall(params: {
+  call: VapiCallShape
+  toolCall: VapiToolCall
+  orgId: string
+  supabase: SupabaseClient<Database>
+  startTime: number
+}): Promise<ToolCallResult> {
+  const { call, toolCall, orgId, supabase, startTime } = params
+
+  try {
+    // Resolve tool config (with nested integration credentials)
     const toolConfig = await resolveTool(orgId, toolCall.name, supabase)
     if (!toolConfig) {
-      return Response.json({
-        results: [{ toolCallId: toolCall.id, result: 'Tool not configured.' }]
-      }, { status: 200 })
+      return { toolCallId: toolCall.id, result: 'Tool not configured.' }
     }
 
-    // 5. Decrypt API key + build credentials
+    const args = getToolArguments(toolCall)
+
+    // SAFE-02: guard side-effecting executions only — a read must not pay
+    // for the check or be blocked by it.
+    const idempotencyNeeded = requiresIdempotency(toolConfig.action_type, toolConfig.config)
+    let idempotencyKey = ''
+    let requestHash = ''
+
+    if (idempotencyNeeded) {
+      // Keyed on the trusted, already-verified call.id + toolCall.id — never
+      // on tool arguments or anything the model produced.
+      idempotencyKey = deriveIngressIdempotencyKey({
+        channel: 'voice',
+        externalCallId: call.id,
+        externalToolCallId: toolCall.id,
+      })
+      requestHash = hashToolArgs(args)
+
+      const outcome = await checkIdempotency(orgId, idempotencyKey, requestHash)
+      if (outcome.status === 'replay') {
+        // Cache hit | return the original result without re-executing.
+        return { toolCallId: toolCall.id, result: outcome.response }
+      }
+      if (outcome.status === 'conflict') {
+        // Same key, different arguments — never answer with the original
+        // response. Distinct message from `abandoned` below.
+        return { toolCallId: toolCall.id, result: IDEMPOTENCY_CONFLICT_RESULT }
+      }
+      if (outcome.status === 'abandoned') {
+        // A prior attempt was killed mid-flight with unresolved ownership.
+        // Not a free slot (would risk double-executing an in-flight
+        // mutation) and not a success.
+        return { toolCallId: toolCall.id, result: IDEMPOTENCY_ABANDONED_RESULT }
+      }
+      // status === 'fresh' — fall through to execute.
+    }
+
     let result: string
     let status: 'success' | 'error' | 'timeout' = 'success'
     let errorDetail: string | null = null
@@ -86,7 +197,6 @@ export async function POST(request: Request): Promise<Response> {
       const credentials = integration
         ? { apiKey: await decrypt(integration.encrypted_api_key), locationId: integration.location_id ?? '' }
         : { apiKey: '', locationId: '' }
-      const args = getToolArguments(toolCall)
       result = await executeAction(toolConfig.action_type, args, credentials, {
         organizationId: orgId,
         supabase,
@@ -94,17 +204,43 @@ export async function POST(request: Request): Promise<Response> {
         integrationProvider: integration?.provider,
         callerNumber: call.customer?.number,
       })
+
+      if (idempotencyNeeded && idempotencyKey) {
+        await recordIdempotency({
+          organizationId: orgId,
+          agentInvocationId: NO_AGENT_INVOCATION,
+          idempotencyKey,
+          toolName: toolCall.name,
+          requestHash,
+          response: result,
+        })
+      }
     } catch (err) {
       // GHL executor threw (error, timeout, or unsupported action type)
       const isTimeout = err instanceof Error && err.name === 'AbortError'
       status = isTimeout ? 'timeout' : 'error'
       errorDetail = err instanceof Error ? err.message : String(err)
       result = toolConfig.fallback_message
+
+      // PERF-03: a timeout on a side-effecting action may have left the
+      // provider mutation in flight. Record abandoned ownership BEFORE
+      // returning the fallback so a later retry sees `abandoned`, not a
+      // free slot.
+      if (isTimeout && idempotencyNeeded && idempotencyKey) {
+        await recordAbandonedIdempotency({
+          organizationId: orgId,
+          agentInvocationId: NO_AGENT_INVOCATION,
+          idempotencyKey,
+          toolName: toolCall.name,
+          requestHash,
+          reason: 'vapi_tool_timeout',
+        })
+      }
     }
 
     const executionMs = Date.now() - startTime
 
-    // 6. Log execution async | does NOT block Vapi response
+    // Log execution async | does NOT block Vapi response
     // workflow_runs (kind='tool') via logToolRun — feeds the call-detail
     // timeline and the Workflow logs page (workflow_tool_logs view).
     after(async () => {
@@ -116,22 +252,17 @@ export async function POST(request: Request): Promise<Response> {
         vapiCallId: call.id,
         status,
         executionMs,
-        requestPayload: getToolArguments(toolCall),
+        requestPayload: args,
         responsePayload: { result },
         errorDetail,
       }, supabase)
     })
 
-    // 7. Return to Vapi | always HTTP 200
-    return Response.json({
-      results: [{ toolCallId: toolCall.id, result }]
-    }, { status: 200 })
-
-  } catch (outerErr) {
-    // Truly unexpected error | still return 200 so Vapi doesn't go silent
-    obs.error('vapi_tools_unexpected_error', { error: outerErr })
-    return Response.json({
-      results: [{ toolCallId: 'unknown', result: 'Service unavailable.' }]
-    }, { status: 200 })
+    return { toolCallId: toolCall.id, result }
+  } catch (err) {
+    // Per-call isolation: this call's own unexpected failure must never
+    // suppress or drop the results of the other calls in the payload.
+    obs.error('vapi_tool_call_failed', { toolCallId: toolCall.id, error: err })
+    return { toolCallId: toolCall.id, result: 'Service unavailable.' }
   }
 }
