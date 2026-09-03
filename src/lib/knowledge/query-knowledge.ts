@@ -1,6 +1,7 @@
 // src/lib/knowledge/query-knowledge.ts
 // Hot path: LangChain SupabaseVectorStore similarity search → synthesize answer
-// AI provider resolved via shared resolver (OpenRouter first, Anthropic fallback).
+// AI provider resolved via shared resolver (Phase 132 MODEL-01/02: OpenRouter
+// only — org key first, platform key second; no direct-Anthropic fallback).
 // Budget: ~50ms embed + ~50ms search + ~200ms synthesis = ~300ms (within 500ms Vapi limit)
 //
 // Q4: Similarity threshold (default 0.5) — low-quality chunks are filtered out
@@ -10,15 +11,18 @@
 //     run-agent.ts) should set rawMode:true so the agent LLM has full context.
 //     Voice/tool paths that return the KB answer directly (execute-action.ts)
 //     keep rawMode:false (default) for synthesized brevity.
+//
+// NOTE: the embedding client below (OpenAIEmbeddings) is a separate, sanctioned
+// exception (132-PROVIDER-DRIFT-INVENTORY.md) — it talks to a real embeddings
+// endpoint and its model/vector contract is intentionally left unchanged.
 
-import OpenAI from 'openai'
-import Anthropic from '@anthropic-ai/sdk'
 import { SupabaseVectorStore } from '@langchain/community/vectorstores/supabase'
 import { OpenAIEmbeddings } from '@langchain/openai'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { Database } from '@/types/database'
 import { getProviderKey } from '@/lib/integrations/get-provider-key'
 import { resolveCopilotProvider } from '@/lib/copilot/resolve-provider'
+import { createOpenRouterClient } from '@/lib/llm/openrouter'
 import { createLogger } from '@/lib/obs/logger'
 
 const FALLBACK_RESPONSE = "I don't have information about that in my knowledge base."
@@ -133,7 +137,8 @@ export async function queryKnowledge(
       return chunks.join('\n\n---\n\n')
     }
 
-    // Step 4: Synthesize answer | resolver picks OpenRouter first, Anthropic last (~200ms)
+    // Step 4: Synthesize answer | OpenRouter only, org key first / platform
+    // key second (Phase 132 MODEL-01/02 — no direct-Anthropic fallback) (~200ms)
     const context = results.map(([doc]) => doc.pageContent).join('\n\n---\n\n')
 
     const synthesisPrompt = `Answer the following question using ONLY the provided context. Be concise | 2-3 sentences maximum. If the context does not contain the answer, say you don't have that information.\n\nContext:\n${context}\n\nQuestion: ${query}`
@@ -141,32 +146,16 @@ export async function queryKnowledge(
     // Hot path: prefer Haiku for sub-500ms latency.
     const provider = await resolveCopilotProvider(organizationId, {
       openrouterModel: 'anthropic/claude-haiku-4-5',
-      anthropicModel: 'claude-haiku-4-5-20251001',
     })
     if (!provider) return FALLBACK_RESPONSE
 
-    if (provider.kind === 'openrouter') {
-      const client = new OpenAI({
-        apiKey: provider.apiKey,
-        baseURL: 'https://openrouter.ai/api/v1',
-      })
-      const completion = await client.chat.completions.create({
-        model: provider.model,
-        max_tokens: 256,
-        messages: [{ role: 'user', content: synthesisPrompt }],
-      })
-      return completion.choices[0]?.message?.content ?? FALLBACK_RESPONSE
-    }
-
-    const anthropicClient = new Anthropic({ apiKey: provider.apiKey })
-    const message = await anthropicClient.messages.create({
+    const client = createOpenRouterClient(provider.apiKey)
+    const completion = await client.chat.completions.create({
       model: provider.model,
       max_tokens: 256,
       messages: [{ role: 'user', content: synthesisPrompt }],
     })
-
-    const textBlock = message.content.find((b) => b.type === 'text')
-    return textBlock?.text ?? FALLBACK_RESPONSE
+    return completion.choices[0]?.message?.content ?? FALLBACK_RESPONSE
 
   } catch (err) {
     log.error('query_knowledge_failed', { error: (err as Error).message })

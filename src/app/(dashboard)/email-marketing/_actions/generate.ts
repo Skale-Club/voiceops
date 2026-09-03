@@ -9,18 +9,11 @@
 // no org used the legacy system. Do not build new features against this.
 // See .planning/workstreams/email-builder-hardening/PLAN.md Phase 5.
 
-import Anthropic from '@anthropic-ai/sdk'
 import { createClient, getUser } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
 import { EMAIL_SYSTEM_PROMPT, parseGeneratedEmail } from '@/lib/email-marketing/ai-prompt'
-import { resolveCopilotProvider, type ProviderChoice } from '@/lib/copilot/resolve-provider'
-
-function makeClient(provider: ProviderChoice): Anthropic {
-  return new Anthropic({
-    apiKey: provider.apiKey,
-    ...(provider.kind === 'openrouter' ? { baseURL: 'https://openrouter.ai/api/v1' } : {}),
-  })
-}
+import { resolveCopilotProvider } from '@/lib/copilot/resolve-provider'
+import { createOpenRouterClient } from '@/lib/llm/openrouter'
 
 type ActionResult<T = void> = { ok: true; data: T } | { ok: false; error: string }
 
@@ -43,18 +36,20 @@ export async function generateEmailFromPrompt(input: {
   const provider = await resolveCopilotProvider(orgId as string)
   if (!provider) return { ok: false, error: 'ai_not_configured' }
 
-  // ── Call AI provider (OpenRouter or Anthropic via Anthropic-compat endpoint) ─
+  // ── Call AI provider (OpenRouter, tenant key first / platform key second) ──
   let generated
   try {
-    const client = makeClient(provider)
-    const message = await client.messages.create({
+    const client = createOpenRouterClient(provider.apiKey)
+    const completion = await client.chat.completions.create({
       model: provider.model,
       max_tokens: 8192,
-      system: EMAIL_SYSTEM_PROMPT,
-      messages: [{ role: 'user', content: input.prompt }],
+      messages: [
+        { role: 'system', content: EMAIL_SYSTEM_PROMPT },
+        { role: 'user', content: input.prompt },
+      ],
     })
 
-    const text = message.content.find((b) => b.type === 'text')?.text ?? ''
+    const text = completion.choices[0]?.message?.content ?? ''
     generated = parseGeneratedEmail(text)
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
@@ -126,19 +121,22 @@ export async function regenerateSection(input: {
 
   let html = ''
   try {
-    const client = makeClient(provider)
-    const message = await client.messages.create({
+    const client = createOpenRouterClient(provider.apiKey)
+    const completion = await client.chat.completions.create({
       model: provider.model,
       max_tokens: 4096,
-      system: `${EMAIL_SYSTEM_PROMPT}\n\nYou are regenerating a SINGLE email section. Return ONLY the HTML fragment for that section | no JSON wrapper, no code fences.`,
       messages: [
+        {
+          role: 'system',
+          content: `${EMAIL_SYSTEM_PROMPT}\n\nYou are regenerating a SINGLE email section. Return ONLY the HTML fragment for that section | no JSON wrapper, no code fences.`,
+        },
         {
           role: 'user',
           content: `${sectionContext}\n\nGenerate new HTML for this section:\n${input.prompt}`,
         },
       ],
     })
-    html = message.content.find((b) => b.type === 'text')?.text?.trim() ?? ''
+    html = completion.choices[0]?.message?.content?.trim() ?? ''
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     return { ok: false, error: `ai_error: ${msg}` }

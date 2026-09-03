@@ -6,8 +6,9 @@
  * NOT by the editor UI directly.
  *
  * Auth: requires a signed-in user with an active org (Supabase session).
- * Provider: resolves via resolveCopilotProvider (org-stored OpenRouter →
- * org-stored Anthropic → env ANTHROPIC_API_KEY).
+ * Provider: resolves via resolveCopilotProvider (org-stored OpenRouter key
+ * first, platform OpenRouter key second — Phase 132 MODEL-01/02, no direct
+ * Anthropic path).
  *
  * Request body:
  *   {
@@ -24,9 +25,9 @@
  *   { ok: false, error: string }
  */
 
-import Anthropic from '@anthropic-ai/sdk'
 import { createClient, getUser } from '@/lib/supabase/server'
 import { resolveCopilotProvider } from '@/lib/copilot/resolve-provider'
+import { createOpenRouterClient } from '@/lib/llm/openrouter'
 import { renderTemplate, type EmailDocument } from '@/lib/email/render-template'
 import { sanitizeEmailDocument } from '@/lib/email/sanitize'
 
@@ -167,30 +168,30 @@ export async function POST(request: Request) {
       )
     }
 
-    // Call Claude (Anthropic SDK works for both Anthropic direct + OpenRouter via baseURL).
-    const client = new Anthropic({
-      apiKey: provider.apiKey,
-      ...(provider.kind === 'openrouter' ? { baseURL: 'https://openrouter.ai/api/v1' } : {}),
-    })
+    // Phase 132 (MODEL-01/02): OpenRouter only — tenant key first, platform
+    // key second (resolved above by resolveCopilotProvider).
+    const client = createOpenRouterClient(provider.apiKey)
 
-    const completion = await client.messages.create({
+    const completion = await client.chat.completions.create({
       model: provider.model,
       max_tokens: 4096,
-      system: SCHEMA_SPEC,
-      messages: [{ role: 'user', content: makeUserPrompt(body) }],
+      messages: [
+        { role: 'system', content: SCHEMA_SPEC },
+        { role: 'user', content: makeUserPrompt(body) },
+      ],
     })
 
-    const textPart = completion.content.find((p) => p.type === 'text')
-    if (!textPart || textPart.type !== 'text') {
+    const text = completion.choices[0]?.message?.content
+    if (!text) {
       return Response.json({ ok: false, error: 'ai_returned_no_text' }, { status: 502 })
     }
 
     let parsed: unknown
     try {
-      parsed = extractJson(textPart.text)
+      parsed = extractJson(text)
     } catch (e) {
       return Response.json(
-        { ok: false, error: 'ai_returned_invalid_json', raw: textPart.text },
+        { ok: false, error: 'ai_returned_invalid_json', raw: text },
         { status: 502 },
       )
     }
@@ -235,8 +236,8 @@ export async function POST(request: Request) {
       document,
       savedTemplateId,
       usage: {
-        input_tokens: completion.usage.input_tokens,
-        output_tokens: completion.usage.output_tokens,
+        input_tokens: completion.usage?.prompt_tokens ?? 0,
+        output_tokens: completion.usage?.completion_tokens ?? 0,
         model: provider.model,
       },
     })

@@ -1,9 +1,9 @@
 'use server'
 
-import OpenAI from 'openai'
-import Anthropic from '@anthropic-ai/sdk'
+import type OpenAI from 'openai'
 import { createClient, getUser } from '@/lib/supabase/server'
-import { resolveCopilotProvider, type ProviderChoice } from '@/lib/copilot/resolve-provider'
+import { resolveCopilotProvider } from '@/lib/copilot/resolve-provider'
+import { createOpenRouterClient } from '@/lib/llm/openrouter'
 import { FlowDefinition } from '@/lib/flows/schema'
 import { AI_BUILDER_TOOLS, dispatchTool } from '@/lib/flows/ai-tools'
 
@@ -58,7 +58,7 @@ async function buildViaOpenRouter(
   userPrompt: string,
   workingDef: FlowDefinition,
 ): Promise<{ summary: string }> {
-  const client = new OpenAI({ apiKey, baseURL: 'https://openrouter.ai/api/v1' })
+  const client = createOpenRouterClient(apiKey)
 
   type Msg = OpenAI.ChatCompletionMessageParam
   const messages: Msg[] = [
@@ -116,68 +116,6 @@ async function buildViaOpenRouter(
   return { summary }
 }
 
-// ─── Anthropic path (native tool-use) ────────────────────────────────────────
-
-async function buildViaAnthropic(
-  apiKey: string,
-  model: string,
-  userPrompt: string,
-  workingDef: FlowDefinition,
-): Promise<{ summary: string }> {
-  const client = new Anthropic({ apiKey })
-
-  type ChatMsg = Anthropic.MessageParam
-  const messages: ChatMsg[] = [{ role: 'user', content: userPrompt }]
-  let summary = ''
-  const MAX_TURNS = 10
-
-  for (let turn = 0; turn < MAX_TURNS; turn++) {
-    const response = await client.messages.create({
-      model,
-      max_tokens: 4096,
-      system: SYSTEM_PROMPT,
-      tools: AI_BUILDER_TOOLS,
-      messages,
-    })
-
-    const textParts: string[] = []
-    const toolUses: Array<{ id: string; name: string; input: Record<string, unknown> }> = []
-    for (const block of response.content) {
-      if (block.type === 'text') textParts.push(block.text)
-      if (block.type === 'tool_use') {
-        toolUses.push({
-          id: block.id,
-          name: block.name,
-          input: (block.input as Record<string, unknown>) ?? {},
-        })
-      }
-    }
-
-    if (textParts.length > 0) summary += textParts.join('\n')
-    if (toolUses.length === 0) break
-
-    messages.push({ role: 'assistant', content: response.content })
-    messages.push({
-      role: 'user',
-      content: toolUses.map((tu) => {
-        const dispatch = dispatchTool(tu.name, tu.input, workingDef)
-        return {
-          type: 'tool_result' as const,
-          tool_use_id: tu.id,
-          content: dispatch.success
-            ? JSON.stringify({ ok: true, data: dispatch.data })
-            : JSON.stringify({ ok: false, error: dispatch.error }),
-          is_error: !dispatch.success,
-        }
-      }),
-    })
-
-    if (response.stop_reason === 'end_turn') break
-  }
-
-  return { summary }
-}
-
 // ─── Public action ───────────────────────────────────────────────────────────
 
 export async function aiBuildFlow(input: {
@@ -191,21 +129,22 @@ export async function aiBuildFlow(input: {
   const { data: orgId } = await supabase.rpc('get_current_org_id')
   if (!orgId) return { ok: false, error: 'no_active_org' }
 
+  // Phase 132 (MODEL-01/02): every generative call goes through OpenRouter —
+  // tenant key first, platform key second. resolveCopilotProvider() only
+  // ever returns 'openrouter' | null now (the direct-Anthropic fallback was
+  // removed there); the ternary this used to require is gone.
   const provider = await resolveCopilotProvider(orgId as string)
   if (!provider) {
     return {
       ok: false,
-      error: 'ai_not_configured: connect OpenRouter or Anthropic under Integrations',
+      error: 'ai_not_configured: connect OpenRouter under Integrations',
     }
   }
 
   const workingDef: FlowDefinition = JSON.parse(JSON.stringify(input.currentDefinition))
 
   try {
-    const { summary } =
-      provider.kind === 'openrouter'
-        ? await buildViaOpenRouter(provider.apiKey, provider.model, input.prompt, workingDef)
-        : await buildViaAnthropic(provider.apiKey, provider.model, input.prompt, workingDef)
+    const { summary } = await buildViaOpenRouter(provider.apiKey, provider.model, input.prompt, workingDef)
 
     return {
       ok: true,

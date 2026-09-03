@@ -1,16 +1,21 @@
 import { NextRequest } from 'next/server'
-import Anthropic from '@anthropic-ai/sdk'
 import { z } from 'zod'
 
 import { captureApiError } from '@/lib/api-error'
 import { createClient, getUser } from '@/lib/supabase/server'
 import { createMemory } from '@/lib/ads/journey-db'
 import type { AdsMemoryType } from '@/lib/ads/journey-db'
+import { resolveOpenRouterCredential, createOpenRouterClient } from '@/lib/llm/openrouter'
 
 export const runtime = 'nodejs'
 
-/** Extraction is a cheap background summarisation — override per deployment. */
-const MEMORY_EXTRACTION_MODEL = process.env.ADS_MEMORY_MODEL ?? 'claude-haiku-4-5-20251001'
+/**
+ * Extraction is a cheap background summarisation — override per deployment.
+ * Model id is OpenRouter's vendor-prefixed form (Phase 132 MODEL-01/02: every
+ * generative call goes through OpenRouter, tenant key first, platform key
+ * second — no direct Anthropic path).
+ */
+const MEMORY_EXTRACTION_MODEL = process.env.ADS_MEMORY_MODEL ?? 'anthropic/claude-haiku-4.5'
 
 const MEMORY_TYPES = ['insight', 'decision', 'plan', 'risk', 'observation', 'result', 'goal'] as const
 
@@ -53,8 +58,6 @@ export async function POST(request: NextRequest): Promise<Response> {
     .map((m) => `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.content}`)
     .join('\n\n')
 
-  const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
-
   let extracted: Array<{
     type: string
     title: string
@@ -64,41 +67,47 @@ export async function POST(request: NextRequest): Promise<Response> {
   }> = []
 
   try {
+    const credential = await resolveOpenRouterCredential(orgId as string, supabase)
+    const client = createOpenRouterClient(credential.apiKey)
+
     // Structured tool use rather than "return only JSON" plus a regex: the
     // schema is enforced by the API, so a stray sentence before the object,
     // a code fence, or a nested brace can't silently produce zero memories
     // (the old `/\{[\s\S]*\}/` match was greedy and would swallow prose too).
-    const response = await anthropic.messages.create({
+    const response = await client.chat.completions.create({
       model: MEMORY_EXTRACTION_MODEL,
       max_tokens: 1024,
       tools: [
         {
-          name: 'record_memories',
-          description: 'Record the memories worth keeping from this conversation.',
-          input_schema: {
-            type: 'object',
-            properties: {
-              memories: {
-                type: 'array',
-                maxItems: 3,
-                items: {
-                  type: 'object',
-                  properties: {
-                    type: { type: 'string', enum: MEMORY_TYPES },
-                    title: { type: 'string', description: 'Short title, max 80 characters' },
-                    content: { type: 'string', description: 'Concise description, max 300 characters' },
-                    campaign_name: { type: 'string', description: 'Only when the memory is about one specific campaign' },
-                    confidence: { type: 'integer', minimum: 1, maximum: 5 },
+          type: 'function',
+          function: {
+            name: 'record_memories',
+            description: 'Record the memories worth keeping from this conversation.',
+            parameters: {
+              type: 'object',
+              properties: {
+                memories: {
+                  type: 'array',
+                  maxItems: 3,
+                  items: {
+                    type: 'object',
+                    properties: {
+                      type: { type: 'string', enum: MEMORY_TYPES },
+                      title: { type: 'string', description: 'Short title, max 80 characters' },
+                      content: { type: 'string', description: 'Concise description, max 300 characters' },
+                      campaign_name: { type: 'string', description: 'Only when the memory is about one specific campaign' },
+                      confidence: { type: 'integer', minimum: 1, maximum: 5 },
+                    },
+                    required: ['type', 'title', 'content', 'confidence'],
                   },
-                  required: ['type', 'title', 'content', 'confidence'],
                 },
               },
+              required: ['memories'],
             },
-            required: ['memories'],
           },
         },
       ],
-      tool_choice: { type: 'tool', name: 'record_memories' },
+      tool_choice: { type: 'function', function: { name: 'record_memories' } },
       messages: [
         {
           role: 'user',
@@ -112,11 +121,17 @@ ${conversationText.slice(0, 6000)}`,
       ],
     })
 
-    const toolUse = response.content.find((b) => b.type === 'tool_use')
-    if (toolUse && toolUse.type === 'tool_use') {
-      const input = toolUse.input as { memories?: unknown[] }
-      if (Array.isArray(input.memories)) {
-        extracted = input.memories.slice(0, 3) as typeof extracted
+    const toolCall = response.choices[0]?.message?.tool_calls?.find(
+      (tc): tc is Extract<typeof tc, { type: 'function' }> => tc.type === 'function',
+    )
+    if (toolCall) {
+      try {
+        const input = JSON.parse(toolCall.function.arguments) as { memories?: unknown[] }
+        if (Array.isArray(input.memories)) {
+          extracted = input.memories.slice(0, 3) as typeof extracted
+        }
+      } catch {
+        // Malformed tool-call JSON — treat as zero extracted memories.
       }
     }
   } catch (e) {

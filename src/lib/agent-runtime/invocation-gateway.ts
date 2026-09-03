@@ -1,5 +1,7 @@
 import { runAgent } from './run-agent'
+import { resolveSpecialistRoute } from './resolve-specialist-route'
 import type {
+  AgentChannel,
   AgentInvocationEnvelope,
   AgentInvocationResult,
   AgentRunOptions,
@@ -8,6 +10,7 @@ import type {
 } from './types'
 
 export type { AgentInvocationEnvelope, AgentInvocationResult, TrustedAgentRoute } from './types'
+export type { SpecialistRouteResult } from './resolve-specialist-route'
 
 type StreamingEnvelope = AgentInvocationEnvelope & { stream: true }
 type BlockingEnvelope = AgentInvocationEnvelope & { stream?: false }
@@ -71,4 +74,59 @@ export function invokeAgent(
     ...invocationMetadata,
     result,
   }))
+}
+
+export interface TrustedIntentRouteParams {
+  /** Trusted org id of the current invocation. Never payload-derived. */
+  organizationId: string
+  /** Trusted invocation channel. Never payload-derived. */
+  channel: AgentChannel
+  /** Organization's already-configured entry/orchestrator agent for this channel. */
+  entryAgentId: string
+  /**
+   * Trusted explicit intent/function name the channel adapter chose from its
+   * own fixed, configured set (e.g. a tool/function name). Never free text
+   * extracted from a user message or a model's own output — this is NOT the
+   * same value as `AgentInvocationEnvelope.input.intent`, which remains
+   * untrusted conversation data and is never used to select an agent.
+   */
+  intent?: string | null
+}
+
+export interface TrustedIntentRouteResult {
+  /** The agentId a caller should pass as `route.agentId` to invokeAgent(). */
+  agentId: string
+  /** true when `intent` matched an active same-org specialist directly. */
+  specialistMatched: boolean
+}
+
+/**
+ * Resolves the trusted agentId a channel adapter should use for this turn,
+ * given a trusted explicit intent.
+ *
+ * When `intent` identifies an active same-organization specialist allowed on
+ * this channel, that specialist is returned directly — NO router or
+ * orchestrator model call is made to pick it. Any ambiguity (missing intent,
+ * no match, inactive specialist, or a channel the specialist doesn't allow)
+ * falls back to `entryAgentId`, the caller's already-configured entry
+ * orchestrator agent. Channel-neutral: this function has no knowledge of
+ * Vapi, ManyChat, or any tenant-specific agent.
+ *
+ * This does not change invokeAgent()'s own trusted-identity contract —
+ * callers resolve the route first, then pass the result as `route.agentId`.
+ */
+export async function resolveTrustedAgentRoute(
+  params: TrustedIntentRouteParams
+): Promise<TrustedIntentRouteResult> {
+  const decision = await resolveSpecialistRoute({
+    organizationId: params.organizationId,
+    channel: params.channel,
+    intent: params.intent,
+  })
+
+  if (decision.matched) {
+    return { agentId: decision.agentId, specialistMatched: true }
+  }
+
+  return { agentId: params.entryAgentId, specialistMatched: false }
 }

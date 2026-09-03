@@ -2,12 +2,13 @@
 // log persistence (copilot_runs + copilot_tool_calls) and message persistence
 // to copilot_messages using the parts-jsonb pattern.
 
-import OpenAI from 'openai'
-import Anthropic from '@anthropic-ai/sdk'
+import type OpenAI from 'openai'
+import type Anthropic from '@anthropic-ai/sdk'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { Database } from '@/types/database'
 
 import { resolveCopilotProvider, estimateCostUsd, type ProviderChoice } from './resolve-provider'
+import { createOpenRouterClient } from '@/lib/llm/openrouter'
 import { getActiveTools } from './tools'
 import { dispatchCopilotTool } from './dispatch'
 import { buildSystemPrompt } from './system-prompt'
@@ -61,7 +62,7 @@ interface RunTurnInput {
 export async function runCopilotTurn(input: RunTurnInput): Promise<RunTurnResult> {
   const provider = await resolveCopilotProvider(input.orgId, input.modelOverrides)
   if (!provider) {
-    throw new Error('ai_not_configured: connect OpenRouter or Anthropic under Integrations')
+    throw new Error('ai_not_configured: connect OpenRouter under Integrations')
   }
 
   // Open the audit run record up front so we can fill it in as we go.
@@ -112,9 +113,10 @@ export async function runCopilotTurn(input: RunTurnInput): Promise<RunTurnResult
       parts,
       onPart: input.onPart,
     }
-    const usage = provider.kind === 'openrouter'
-      ? await loopOpenRouter(loopArgs)
-      : await loopAnthropic(loopArgs)
+    // Phase 132 (MODEL-01/02): OpenRouter only — resolveCopilotProvider()
+    // never returns 'anthropic' anymore, so the loopAnthropic() fallback
+    // branch this used to dispatch to has been removed.
+    const usage = await loopOpenRouter(loopArgs)
     inputTokens = usage.inputTokens
     outputTokens = usage.outputTokens
 
@@ -240,7 +242,7 @@ function historyToOpenAiMessages(
 }
 
 async function loopOpenRouter(args: LoopArgs): Promise<{ inputTokens: number; outputTokens: number }> {
-  const client = new OpenAI({ apiKey: args.provider.apiKey, baseURL: 'https://openrouter.ai/api/v1' })
+  const client = createOpenRouterClient(args.provider.apiKey)
 
   // Build the first user message. If images are attached, use multipart content.
   const firstUserContent: OpenAI.ChatCompletionContentPart[] = [
@@ -331,133 +333,6 @@ async function loopOpenRouter(args: LoopArgs): Promise<{ inputTokens: number; ou
     }
 
     if (choice.finish_reason === 'stop') break
-  }
-
-  return { inputTokens, outputTokens }
-}
-
-// ─── Anthropic path ──────────────────────────────────────────────────────────
-
-function historyToAnthropicMessages(
-  history: Array<{ role: 'user' | 'assistant'; parts: MessagePart[] }>,
-): Anthropic.MessageParam[] {
-  const msgs: Anthropic.MessageParam[] = []
-  for (const m of history) {
-    const text = partsToHistoryText(m.parts)
-    if (text) msgs.push({ role: m.role, content: text })
-  }
-  return msgs
-}
-
-async function loopAnthropic(args: LoopArgs): Promise<{ inputTokens: number; outputTokens: number }> {
-  const client = new Anthropic({ apiKey: args.provider.apiKey })
-
-  // Prompt caching: the system prompt + tool definitions are identical across
-  // every iteration of this loop (and across turns in a conversation), so mark
-  // them as cache breakpoints. Cache reads are ~90% cheaper than fresh input.
-  const system: Anthropic.TextBlockParam[] = [
-    { type: 'text', text: args.system, cache_control: { type: 'ephemeral' } },
-  ]
-  const tools: Anthropic.Tool[] = args.toolDefs.map((t, i) =>
-    i === args.toolDefs.length - 1 ? { ...t, cache_control: { type: 'ephemeral' } } : t,
-  )
-
-  const firstUserContent: Anthropic.ContentBlockParam[] = [
-    { type: 'text', text: args.userMessage },
-    ...(args.images ?? []).map((dataUrl): Anthropic.ContentBlockParam => {
-      const [meta, data] = dataUrl.split(',')
-      const mediaType = (meta.split(';')[0].split(':')[1] ?? 'image/jpeg') as
-        | 'image/jpeg'
-        | 'image/png'
-        | 'image/gif'
-        | 'image/webp'
-      return { type: 'image', source: { type: 'base64', media_type: mediaType, data: data ?? '' } }
-    }),
-  ]
-
-  const messages: Anthropic.MessageParam[] = [
-    ...historyToAnthropicMessages(args.history),
-    { role: 'user', content: firstUserContent.length === 1 ? args.userMessage : firstUserContent },
-  ]
-
-  let inputTokens = 0
-  let outputTokens = 0
-
-  for (let turn = 0; turn < MAX_TURNS; turn++) {
-    const response = await client.messages.create({
-      model: args.provider.model,
-      max_tokens: 4096,
-      system,
-      tools,
-      messages,
-    })
-
-    // Fold cache activity into the input-token count at its effective price
-    // ratio (writes bill at 1.25×, reads at 0.1×) so estimateCostUsd stays a
-    // single input/output formula while still reflecting caching savings.
-    const u = response.usage
-    inputTokens += Math.round(
-      (u?.input_tokens ?? 0) +
-      1.25 * (u?.cache_creation_input_tokens ?? 0) +
-      0.1 * (u?.cache_read_input_tokens ?? 0),
-    )
-    outputTokens += u?.output_tokens ?? 0
-
-    const textParts: string[] = []
-    const toolUses: Array<{ id: string; name: string; input: Record<string, unknown> }> = []
-    for (const block of response.content) {
-      if (block.type === 'text') textParts.push(block.text)
-      if (block.type === 'tool_use') {
-        toolUses.push({
-          id: block.id,
-          name: block.name,
-          input: (block.input as Record<string, unknown>) ?? {},
-        })
-      }
-    }
-
-    if (textParts.length > 0) {
-      emitPart(args, { type: 'text', text: textParts.join('\n') })
-    }
-    if (toolUses.length === 0) break
-
-    messages.push({ role: 'assistant', content: response.content })
-
-    const toolResults: Anthropic.ToolResultBlockParam[] = []
-    for (const tu of toolUses) {
-      const { result, durationMs } = await dispatchCopilotTool(tu.name, tu.input, args.toolCtx)
-
-      emitPart(args, {
-        type: 'tool_call',
-        tool_name: tu.name,
-        input: tu.input,
-        output: result.data,
-        error: result.error,
-        success: result.success,
-      })
-
-      await args.supabase.from('copilot_tool_calls').insert({
-        run_id: args.runId,
-        tool_name: tu.name,
-        input: tu.input,
-        output: (result.data ?? null) as Record<string, unknown> | null,
-        error: result.error ?? null,
-        status: result.success ? ('succeeded' as const) : ('failed' as const),
-        duration_ms: durationMs,
-      })
-
-      toolResults.push({
-        type: 'tool_result',
-        tool_use_id: tu.id,
-        content: JSON.stringify(result.success
-          ? { ok: true, data: result.data }
-          : { ok: false, error: result.error }),
-        is_error: !result.success,
-      })
-    }
-    messages.push({ role: 'user', content: toolResults })
-
-    if (response.stop_reason === 'end_turn') break
   }
 
   return { inputTokens, outputTokens }
