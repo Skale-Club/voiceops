@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v3.5
 milestone_name: milestone
-status: executing
-stopped_at: Phase 134 complete and verified; Phases 135 and 136 planned and executing
-last_updated: "2026-09-03T23:40:00.000Z"
+status: built_awaiting_human_gate
+stopped_at: All six phases built and verified to their gates; remaining work is human-only
+last_updated: "2026-09-04T00:15:00.000Z"
 last_activity: 2026-09-03
 progress:
   total_phases: 6
-  completed_phases: 4
-  total_plans: 20
-  completed_plans: 13
-  percent: 67
+  completed_phases: 6
+  total_plans: 19
+  completed_plans: 19
+  percent: 100
 ---
 
 # Project State
@@ -21,12 +21,12 @@ progress:
 See: `.planning/PROJECT.md` (last updated 2026-07-03)
 
 **Core value:** Voice and text must reach the correct tenant-scoped specialist and execute business actions through the Action Engine quickly, safely, and observably.
-**Current focus:** Phases 135 and 136 — planned, executing
+**Current focus:** Human gate — see docs/agents/canary-activation-runbook.md
 
 ## Current Position
 
-Phase: 134 (traceability-and-reversible-routing) — COMPLETE (3 of 3 plans, verified)
-Next: Phases 135 and 136 — both planned, plans executing
+Phase: 136 (cuts-and-culture-canary-rollout) — BUILT, verified to the human gate
+Next: nothing autonomous remains. 31 of 32 requirements done; ROLL-03 needs a live canary.
 **Milestone:** v3.5 Omnichannel Agent Orchestration
 **Phase:** 132 of 136 (2 of 6) — Authorized Specialist Orchestration
 **Plan:** 0 of 4 in current phase
