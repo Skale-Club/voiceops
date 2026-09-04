@@ -14,16 +14,20 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { ChannelDefaultsCard } from "@/components/agents/channel-defaults-card";
+import { ChannelRoutingModesCard } from "@/components/agents/channel-routing-modes-card";
 import { AGENT_CHANNELS, type AgentChannel } from "@/lib/agents/channels";
+import type { ChannelRoutingMode } from "@/lib/agents/zod-schemas";
 
 interface AgentSettingsButtonProps {
   defaults: Record<AgentChannel, string | null>;
   agents: Array<{ id: string; name: string; slug: string }>;
+  modes: Record<AgentChannel, ChannelRoutingMode>;
 }
 
 export function AgentSettingsButton({
   defaults,
   agents,
+  modes,
 }: AgentSettingsButtonProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -75,6 +79,10 @@ export function AgentSettingsButton({
           surface="plain"
           focusChannel={focusChannel}
         />
+
+        <div className="border-t pt-4">
+          <ChannelRoutingModesCard modes={modes} surface="plain" />
+        </div>
       </DialogContent>
     </Dialog>
   );
