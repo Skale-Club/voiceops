@@ -32,7 +32,11 @@
       "name": "Get quote",
       "description": "Real total and breakdown for one or more services.",
       "input_schema": {
-        "service_ids": { "type": "array", "description": "Service ids to quote.", "required": true }
+        "service_ids": {
+          "type": "array",
+          "description": "Service ids to quote.",
+          "required": true
+        }
       }
     },
     {
@@ -43,9 +47,21 @@
       "name": "Check availability",
       "description": "Open times for a set of services on a given date. Pinning a staff id materially speeds up the lookup.",
       "input_schema": {
-        "service_ids": { "type": "array", "description": "Service ids to check.", "required": true },
-        "date": { "type": "string", "description": "Resolved date, YYYY-MM-DD.", "required": true },
-        "staff_id": { "type": "string", "description": "Pin a specific staff member to speed up the lookup.", "required": false }
+        "service_ids": {
+          "type": "array",
+          "description": "Service ids to check.",
+          "required": true
+        },
+        "date": {
+          "type": "string",
+          "description": "Resolved date, YYYY-MM-DD.",
+          "required": true
+        },
+        "staff_id": {
+          "type": "string",
+          "description": "Pin a specific staff member to speed up the lookup.",
+          "required": false
+        }
       }
     },
     {
@@ -56,7 +72,11 @@
       "name": "Lookup customer",
       "description": "Identify a returning customer by phone number and retrieve their upcoming bookings and booking ids.",
       "input_schema": {
-        "phone": { "type": "string", "description": "Customer phone number.", "required": true }
+        "phone": {
+          "type": "string",
+          "description": "Customer phone number.",
+          "required": true
+        }
       }
     },
     {
@@ -67,12 +87,36 @@
       "name": "Book appointment",
       "description": "Create a new appointment. Requires service, date, time, customer name and phone.",
       "input_schema": {
-        "service_id": { "type": "string", "description": "Service id to book.", "required": true },
-        "date": { "type": "string", "description": "Date, YYYY-MM-DD.", "required": true },
-        "time": { "type": "string", "description": "Time, HH:MM.", "required": true },
-        "customer_name": { "type": "string", "description": "Customer's full name.", "required": true },
-        "customer_phone": { "type": "string", "description": "Customer's phone number.", "required": true },
-        "notes": { "type": "string", "description": "Anything the customer asked for, in their own words.", "required": false }
+        "service_id": {
+          "type": "string",
+          "description": "Service id to book.",
+          "required": true
+        },
+        "date": {
+          "type": "string",
+          "description": "Date, YYYY-MM-DD.",
+          "required": true
+        },
+        "time": {
+          "type": "string",
+          "description": "Time, HH:MM.",
+          "required": true
+        },
+        "customer_name": {
+          "type": "string",
+          "description": "Customer's full name.",
+          "required": true
+        },
+        "customer_phone": {
+          "type": "string",
+          "description": "Customer's phone number.",
+          "required": true
+        },
+        "notes": {
+          "type": "string",
+          "description": "Anything the customer asked for, in their own words.",
+          "required": false
+        }
       }
     },
     {
@@ -83,9 +127,21 @@
       "name": "Reschedule appointment",
       "description": "Move an existing appointment to a new date/time. Requires the booking id.",
       "input_schema": {
-        "booking_id": { "type": "string", "description": "Existing booking id, from lookup_customer.", "required": true },
-        "date": { "type": "string", "description": "New date, YYYY-MM-DD.", "required": true },
-        "time": { "type": "string", "description": "New time, HH:MM.", "required": true }
+        "booking_id": {
+          "type": "string",
+          "description": "Existing booking id, from lookup_customer.",
+          "required": true
+        },
+        "date": {
+          "type": "string",
+          "description": "New date, YYYY-MM-DD.",
+          "required": true
+        },
+        "time": {
+          "type": "string",
+          "description": "New time, HH:MM.",
+          "required": true
+        }
       }
     },
     {
@@ -96,7 +152,11 @@
       "name": "Cancel appointment",
       "description": "Cancel an existing appointment. Requires the booking id.",
       "input_schema": {
-        "booking_id": { "type": "string", "description": "Existing booking id, from lookup_customer.", "required": true }
+        "booking_id": {
+          "type": "string",
+          "description": "Existing booking id, from lookup_customer.",
+          "required": true
+        }
       }
     }
   ],
@@ -109,7 +169,10 @@
       "description": "Front desk orchestrator. Delegates to specialists; holds no direct tool of its own.",
       "model": "anthropic/claude-sonnet-4.6",
       "temperature": 0.3,
-      "allowed_channels": ["voice", "web_widget"],
+      "allowed_channels": [
+        "voice",
+        "web_widget"
+      ],
       "direct_tools": [],
       "system_prompt": "You are the front desk at Cuts & Culture Barbershop, 212 Newbury Street, Boston. You do not answer questions yourself and you do not call booking tools. You work out what the caller or visitor needs and hand it to the right specialist, then relay their answer in your own voice.\n\nWho to hand to:\n- Services: what we offer, how long it takes, who performs it, address, hours, cancellation and no-show policy.\n- Pricing: what something costs, totals for more than one service.\n- Availability: open times on a given day. Resolve a relative day ('tomorrow', 'this Friday') to a real date BEFORE handing over.\n- Customer: someone who says they have been here before, or asks about 'my appointment'.\n- Booking: creating, moving or cancelling an appointment. Only ever after the customer has confirmed service, day, time, name and phone.\n\nRules:\n- Never state a service, price, opening hour or available time yourself. Those come from a specialist, who gets them from a tool.\n- Hand over once. Do not chain specialists to answer one simple question.\n- If the specialist could not do it, say so plainly and offer to take a message. Never say an appointment is booked unless Booking confirmed it.\n- You own the reply to the customer. Never expose that specialists exist, and never repeat their internal wording verbatim if it reads like a system message.\n\nOn a phone call: short sentences, no lists read aloud, no markdown. On the widget: you may use short structured text."
     },
@@ -121,9 +184,16 @@
       "description": "Answers what the shop offers and how it operates: catalogue, hours, policies.",
       "model": "anthropic/claude-haiku-4.5",
       "temperature": 0.2,
-      "allowed_channels": ["voice", "web_widget"],
-      "direct_tools": ["list_services", "business_info"],
-      "system_prompt": "You are the Services specialist for Cuts & Culture Barbershop. You answer what the shop offers and how it operates.\n\nUse list_services for the catalogue: service names, ids, duration, starting price and which staff perform each one. Use business_info for address, opening hours, and cancellation or no-show policy.\n\nNever state a service, duration, price or policy the tool did not return. If business_info comes back without a policy, say the policy is not published and the shop should be asked directly.\n\nWhen a service is mentioned, always include its numeric id in your answer - the caller's other specialists need it. Keep answers to what was asked; do not read the whole catalogue unless asked for it."
+      "allowed_channels": [
+        "voice",
+        "web_widget"
+      ],
+      "direct_tools": [
+        "list_services",
+        "business_info"
+      ],
+      "system_prompt": "You are the Services specialist for Cuts & Culture Barbershop.\n\nANSWER FORMAT - this is not optional:\n- One or two spoken sentences. No lists, no bullet points, no markdown, no asterisks. Your answer is read aloud by a phone system.\n- Name at most three services unless you were explicitly asked for the full catalogue.\n- Always include a service's numeric id in parentheses the first time you name it, e.g. \"the Signature Haircut (333)\". Other specialists need that id.\n\nTOOLS:\n- list_services: the catalogue - names, ids, duration, starting price, which staff perform each.\n- business_info: address, opening hours, cancellation and no-show policy.\n\nHARD RULES:\n- Never state a service, duration, price or policy the tool did not return. A starting price is not a quote; say \"from $38\" only if the tool said so.\n- If business_info returns no policy, say the policy is not published and the shop should be asked directly.\n- You cannot book, move or cancel anything.",
+      "max_tokens": 200
     },
     {
       "key": "pricing",
@@ -133,9 +203,15 @@
       "description": "Gives real totals from get_quote, never estimates.",
       "model": "anthropic/claude-haiku-4.5",
       "temperature": 0.2,
-      "allowed_channels": ["voice", "web_widget"],
-      "direct_tools": ["get_quote"],
-      "system_prompt": "You are the Pricing specialist for Cuts & Culture Barbershop. You give real totals, never estimates.\n\nUse get_quote with the service ids you were given. State only the total and the breakdown the tool returns. Never add, round, discount or infer a price, and never quote from memory of a starting price - 'from $38' is not a quote.\n\nIf you were not given service ids, say which service you need identified rather than guessing. You cannot create, change or cancel a booking."
+      "allowed_channels": [
+        "voice",
+        "web_widget"
+      ],
+      "direct_tools": [
+        "get_quote"
+      ],
+      "system_prompt": "You are the Pricing specialist for Cuts & Culture Barbershop.\n\nANSWER FORMAT - this is not optional:\n- One spoken sentence with the total. No lists, no markdown, no asterisks. Your answer is read aloud.\n- Give the total first, then the breakdown only if more than one service was quoted.\n\nTOOL: get_quote, using the service ids you were given.\n\nHARD RULES:\n- State only the total the tool returned. Never add, round, discount, estimate or infer a price, and never quote from a remembered starting price.\n- If you were not given service ids, say in one sentence which service needs identifying. Do not guess an id.\n- You cannot book, move or cancel anything.",
+      "max_tokens": 200
     },
     {
       "key": "availability",
@@ -145,9 +221,15 @@
       "description": "Finds open times via check_availability, pinning staff id when named to cut latency.",
       "model": "anthropic/claude-haiku-4.5",
       "temperature": 0.2,
-      "allowed_channels": ["voice", "web_widget"],
-      "direct_tools": ["check_availability"],
-      "system_prompt": "You are the Availability specialist for Cuts & Culture Barbershop. You find open times.\n\nUse check_availability. It needs service ids and a date - it cannot work from a service name. Pass a specific staff id when the customer named a barber: pinning staff makes the lookup meaningfully faster, because otherwise the shop's calendar is computed across every staff member who can perform the service.\n\nOffer at most three times, and on a phone call phrase them the way a person speaks them: 'two fifteen, three o'clock, or four thirty'. Never invent a slot, never present a time the tool did not return, and never promise to hold a time - you cannot book.\n\nIf the day is full, say so and offer the next day the tool reports."
+      "allowed_channels": [
+        "voice",
+        "web_widget"
+      ],
+      "direct_tools": [
+        "check_availability"
+      ],
+      "system_prompt": "You are the Availability specialist for Cuts & Culture Barbershop.\n\nANSWER FORMAT - this is not optional:\n- One spoken sentence. No lists, no markdown, no asterisks. Your answer is read aloud by a phone system.\n- Offer AT MOST THREE times, spoken the way a person says them: \"two fifteen, three o'clock, or four thirty\" - never \"14:15\".\n\nTOOL: check_availability. It needs service ids and a date; it cannot work from a service name.\n\nSPEED - this matters on a phone call:\n- Always pass staffId when the caller named a barber. The lookup is materially faster with one staff member than across everyone who can perform the service.\n\nHARD RULES:\n- Never invent a slot or present a time the tool did not return.\n- If the day is full, say so in one sentence and offer the next day the tool reported.\n- You cannot book or hold anything. Never promise to hold a time.",
+      "max_tokens": 200
     },
     {
       "key": "customer",
@@ -157,9 +239,15 @@
       "description": "Identifies returning customers and their existing booking ids via lookup_customer.",
       "model": "anthropic/claude-haiku-4.5",
       "temperature": 0.2,
-      "allowed_channels": ["voice", "web_widget"],
-      "direct_tools": ["lookup_customer"],
-      "system_prompt": "You are the Customer specialist for Cuts & Culture Barbershop. You identify returning customers and find their existing appointments.\n\nUse lookup_customer with the phone number. It returns their upcoming bookings and, importantly, the booking ids that any change or cancellation will need. Always include those ids in your answer.\n\nIf you have no phone number, say that you need it. Never guess a booking id, never invent an appointment, and never state that someone is a customer when the tool found nobody. You cannot create, change or cancel a booking."
+      "allowed_channels": [
+        "voice",
+        "web_widget"
+      ],
+      "direct_tools": [
+        "lookup_customer"
+      ],
+      "system_prompt": "You are the Customer specialist for Cuts & Culture Barbershop.\n\nANSWER FORMAT - this is not optional:\n- One or two spoken sentences. No lists, no markdown, no asterisks. Your answer is read aloud.\n- Always include any booking id the tool returned - the Booking specialist cannot act without it.\n\nTOOL: lookup_customer, by phone number.\n\nHARD RULES:\n- If you have no phone number, say in one sentence that you need it.\n- Never guess a booking id, never invent an appointment, and never say someone is a customer when the tool found nobody.\n- You cannot book, move or cancel anything.",
+      "max_tokens": 200
     },
     {
       "key": "booking",
@@ -169,18 +257,133 @@
       "description": "The only agent that writes to the calendar: book, reschedule, cancel.",
       "model": "anthropic/claude-sonnet-4.6",
       "temperature": 0.2,
-      "allowed_channels": ["voice", "web_widget"],
-      "direct_tools": ["book_appointment", "reschedule_appointment", "cancel_appointment"],
+      "allowed_channels": [
+        "voice",
+        "web_widget"
+      ],
+      "direct_tools": [
+        "book_appointment",
+        "reschedule_appointment",
+        "cancel_appointment"
+      ],
       "system_prompt": "You are the Booking specialist for Cuts & Culture Barbershop. You are the only agent in this shop that can change the calendar, so you are deliberate.\n\nBefore book_appointment you must have: service id, date, time, the customer's full name and their phone number. If any one of those is missing, do not book - say precisely which one you need.\n\nreschedule_appointment and cancel_appointment need a booking id. Never guess one; it comes from the Customer specialist's lookup. Cancelling or moving the wrong person's appointment is worse than asking again.\n\nPut anything the customer asked for into the booking notes, in their own words.\n\nNever say an appointment is booked, moved or cancelled unless the tool confirmed it. If the tool fails or times out, say plainly that you could not complete it and that it should be confirmed by phone - do not retry on your own, and never assume it went through."
     }
   ],
   "partner_edges": [
-    { "key": "entry-to-services", "agent_key": "entry", "partner_agent_key": "services", "allowed_channels": ["voice", "web_widget"], "max_calls_per_turn": 3, "max_depth": 2, "timeout_ms": 20000, "workflow_grants": ["list_services", "business_info"], "invocation_description": "Ask what the shop offers, how long it takes, who performs it, or its hours and policies." },
-    { "key": "entry-to-pricing", "agent_key": "entry", "partner_agent_key": "pricing", "allowed_channels": ["voice", "web_widget"], "max_calls_per_turn": 3, "max_depth": 2, "timeout_ms": 20000, "workflow_grants": ["get_quote"], "invocation_description": "Get a real total for one or more services. Pass the service ids." },
-    { "key": "entry-to-availability", "agent_key": "entry", "partner_agent_key": "availability", "allowed_channels": ["voice", "web_widget"], "max_calls_per_turn": 3, "max_depth": 2, "timeout_ms": 25000, "workflow_grants": ["check_availability"], "invocation_description": "Find open times. Pass service ids and a resolved YYYY-MM-DD date, and a staff id when the customer named a barber." },
-    { "key": "entry-to-customer", "agent_key": "entry", "partner_agent_key": "customer", "allowed_channels": ["voice", "web_widget"], "max_calls_per_turn": 3, "max_depth": 2, "timeout_ms": 20000, "workflow_grants": ["lookup_customer"], "invocation_description": "Identify a returning customer by phone number and retrieve their bookings and booking ids." },
-    { "key": "entry-to-booking", "agent_key": "entry", "partner_agent_key": "booking", "allowed_channels": ["voice", "web_widget"], "max_calls_per_turn": 2, "max_depth": 2, "timeout_ms": 25000, "workflow_grants": ["book_appointment", "reschedule_appointment", "cancel_appointment"], "invocation_description": "Create, move or cancel an appointment, only after the customer confirmed every detail." },
-    { "key": "booking-to-customer", "agent_key": "booking", "partner_agent_key": "customer", "allowed_channels": ["voice", "web_widget"], "max_calls_per_turn": 1, "max_depth": 2, "timeout_ms": 20000, "workflow_grants": ["lookup_customer"], "invocation_description": "Look up a booking id when the customer needs an existing appointment changed and no id was supplied." },
-    { "key": "booking-to-availability", "agent_key": "booking", "partner_agent_key": "availability", "allowed_channels": ["voice", "web_widget"], "max_calls_per_turn": 1, "max_depth": 2, "timeout_ms": 25000, "workflow_grants": ["check_availability"], "invocation_description": "Confirm the requested slot is still open immediately before writing it." }
+    {
+      "key": "entry-to-services",
+      "agent_key": "entry",
+      "partner_agent_key": "services",
+      "allowed_channels": [
+        "voice",
+        "web_widget"
+      ],
+      "max_calls_per_turn": 3,
+      "max_depth": 2,
+      "timeout_ms": 20000,
+      "workflow_grants": [
+        "list_services",
+        "business_info"
+      ],
+      "invocation_description": "Ask what the shop offers, how long it takes, who performs it, or its hours and policies."
+    },
+    {
+      "key": "entry-to-pricing",
+      "agent_key": "entry",
+      "partner_agent_key": "pricing",
+      "allowed_channels": [
+        "voice",
+        "web_widget"
+      ],
+      "max_calls_per_turn": 3,
+      "max_depth": 2,
+      "timeout_ms": 20000,
+      "workflow_grants": [
+        "get_quote"
+      ],
+      "invocation_description": "Get a real total for one or more services. Pass the service ids."
+    },
+    {
+      "key": "entry-to-availability",
+      "agent_key": "entry",
+      "partner_agent_key": "availability",
+      "allowed_channels": [
+        "voice",
+        "web_widget"
+      ],
+      "max_calls_per_turn": 3,
+      "max_depth": 2,
+      "timeout_ms": 25000,
+      "workflow_grants": [
+        "check_availability"
+      ],
+      "invocation_description": "Find open times. Pass service ids and a resolved YYYY-MM-DD date, and a staff id when the customer named a barber."
+    },
+    {
+      "key": "entry-to-customer",
+      "agent_key": "entry",
+      "partner_agent_key": "customer",
+      "allowed_channels": [
+        "voice",
+        "web_widget"
+      ],
+      "max_calls_per_turn": 3,
+      "max_depth": 2,
+      "timeout_ms": 20000,
+      "workflow_grants": [
+        "lookup_customer"
+      ],
+      "invocation_description": "Identify a returning customer by phone number and retrieve their bookings and booking ids."
+    },
+    {
+      "key": "entry-to-booking",
+      "agent_key": "entry",
+      "partner_agent_key": "booking",
+      "allowed_channels": [
+        "voice",
+        "web_widget"
+      ],
+      "max_calls_per_turn": 2,
+      "max_depth": 2,
+      "timeout_ms": 25000,
+      "workflow_grants": [
+        "book_appointment",
+        "reschedule_appointment",
+        "cancel_appointment"
+      ],
+      "invocation_description": "Create, move or cancel an appointment, only after the customer confirmed every detail."
+    },
+    {
+      "key": "booking-to-customer",
+      "agent_key": "booking",
+      "partner_agent_key": "customer",
+      "allowed_channels": [
+        "voice",
+        "web_widget"
+      ],
+      "max_calls_per_turn": 1,
+      "max_depth": 2,
+      "timeout_ms": 20000,
+      "workflow_grants": [
+        "lookup_customer"
+      ],
+      "invocation_description": "Look up a booking id when the customer needs an existing appointment changed and no id was supplied."
+    },
+    {
+      "key": "booking-to-availability",
+      "agent_key": "booking",
+      "partner_agent_key": "availability",
+      "allowed_channels": [
+        "voice",
+        "web_widget"
+      ],
+      "max_calls_per_turn": 1,
+      "max_depth": 2,
+      "timeout_ms": 25000,
+      "workflow_grants": [
+        "check_availability"
+      ],
+      "invocation_description": "Confirm the requested slot is still open immediately before writing it."
+    }
   ]
 }
