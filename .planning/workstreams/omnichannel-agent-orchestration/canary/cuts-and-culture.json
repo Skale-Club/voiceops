@@ -112,6 +112,11 @@
           "description": "Customer's phone number.",
           "required": true
         },
+        "customerAddress": {
+          "type": "string",
+          "description": "Customer's service address. Collected only when the organization's service_location_mode requires it (at_customer or either) — never asked for otherwise.",
+          "required": false
+        },
         "notes": {
           "type": "string",
           "description": "Anything the customer asked for, in their own words.",
