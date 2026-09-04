@@ -12,7 +12,7 @@ This milestone extends the existing text-agent platform into a tenant-safe voice
 
 - [x] **Phase 131: Trusted Omnichannel Invocation Foundation** - Voice and widget enter the same tenant-resolved agent boundary on a repaired regression baseline.
 - [x] **Phase 132: Authorized Specialist Orchestration** - Agents route and delegate with typed contracts, least privilege, scoped knowledge, and centralized model access.
-- [ ] **Phase 133: Idempotent Action and Vapi Safety** - Voice-triggered actions stay fast, replay-safe, timeout-safe, and compatible with the always-200 Vapi contract.
+- [x] **Phase 133: Idempotent Action and Vapi Safety** - Voice-triggered actions stay fast, replay-safe, timeout-safe, and compatible with the always-200 Vapi contract.
 - [ ] **Phase 134: Traceability and Reversible Routing** - Operators can inspect complete invocation trees and switch each channel between legacy and specialist routing without data loss.
 - [ ] **Phase 135: Release Verification and Hardening** - Automated, timed, build, workflow, and UAT gates prove the orchestration path is safe to expose to production traffic.
 - [ ] **Phase 136: Cuts & Culture Canary Rollout** - The specialist graph is enabled and proven for one tenant without becoming platform-default behavior.
@@ -62,9 +62,9 @@ This milestone extends the existing text-agent platform into a tenant-safe voice
   4. Every handled and error path in the Node.js Vapi tool webhook returns HTTP 200 with a lean payload, uses canonical `https://xphere.app` targets, and defers non-essential logging.
   5. Multi-tool Vapi payloads execute every supported call with matching result IDs or reject the unsupported shape deterministically, while timeout handling never reports completion for unowned side-effecting work still in progress.
 **Plans**:
-- [ ] 133-01-PLAN.md — Derive idempotency keys from trusted ingress identity and separate replay from conflict.
-- [ ] 133-02-PLAN.md — Add a voice latency policy enforced through the shared invocation budget.
-- [ ] 133-03-PLAN.md — Harden the Vapi tool webhook: idempotent execution, multi-call results, timeout ownership, HTTP 200 contract.
+- [x] 133-01-PLAN.md — Derive idempotency keys from trusted ingress identity and separate replay from conflict.
+- [x] 133-02-PLAN.md — Add a voice latency policy enforced through the shared invocation budget.
+- [x] 133-03-PLAN.md — Harden the Vapi tool webhook: idempotent execution, multi-call results, timeout ownership, HTTP 200 contract.
 
 ### Phase 134: Traceability and Reversible Routing
 **Goal**: Operators can follow one request across every orchestration and action boundary, understand nested failures and costs, and move channels between legacy and specialist routing without destroying configuration or history.
@@ -107,7 +107,7 @@ Phases execute in numeric order: 131 → 132 → 133 → 134 → 135 → 136.
 |-------|----------------|--------|-----------|
 | 131. Trusted Omnichannel Invocation Foundation | 3/3 | Complete | 2026-09-03 |
 | 132. Authorized Specialist Orchestration | 4/4 | Complete | 2026-09-03 |
-| 133. Idempotent Action and Vapi Safety | 0/3 | Planned | - |
+| 133. Idempotent Action and Vapi Safety | 3/3 | Complete | 2026-09-03 |
 | 134. Traceability and Reversible Routing | 0/TBD | Not started | - |
 | 135. Release Verification and Hardening | 0/TBD | Not started | - |
 | 136. Cuts & Culture Canary Rollout | 0/TBD | Not started | - |

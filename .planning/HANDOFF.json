@@ -1,9 +1,9 @@
 {
   "version": "1.0",
-  "timestamp": "2026-09-03T18:45:00.000Z",
+  "timestamp": "2026-09-03T20:45:00.000Z",
   "workstream": "omnichannel-agent-orchestration",
-  "phase": "133",
-  "phase_name": "Idempotent Action and Vapi Safety",
+  "phase": "134",
+  "phase_name": "Traceability and Reversible Routing",
   "phase_dir": ".planning/workstreams/omnichannel-agent-orchestration/phases",
   "plan": null,
   "task": 0,
@@ -46,14 +46,21 @@
       "status": "done",
       "commit": "599118e9, 60690309, 07baabcf, 5351f00c",
       "progress": "Waves 1-3 executed by delegated Sonnet agents. Regression gate measured against baseline 7c5b608e: identical 30-file/52-test pre-existing failure set, so zero regressions. Production build exit 0. 132-VERIFICATION.md records 8/8 focus items passing."
+    },
+    {
+      "id": 11,
+      "name": "Plan, execute and verify Phase 133",
+      "status": "done",
+      "commit": "29ad98aa, 7b399031, e007da1c, c31368fb, 3cc836aa, b6ad9f63, 519ce698",
+      "progress": "Three plans in two waves. Two defects the plans did not anticipate were found and fixed: the channel ceiling was inert in the run-agent recursion, and the idempotency preflight masked both success and the tenant fallback message on every side-effecting voice call. Build exit 0."
     }
   ],
   "remaining_tasks": [
     {
       "id": 9,
-      "name": "Plan and execute Phases 133 through 136 in order",
+      "name": "Plan and execute Phases 134 through 136 in order",
       "status": "in_progress",
-      "progress": "Phases 131 and 132 complete and verified. Phase 133 has no context document and no plans yet."
+      "progress": "Phases 131, 132 and 133 complete and verified. Phase 134 has no context document and no plans yet."
     }
   ],
   "blockers": [
@@ -105,10 +112,20 @@
       "decision": "Trusted specialist routing resolves before invokeAgent rather than inside it.",
       "rationale": "The gateway contract asserts that input.intent never influences trusted identity; resolving inside would break it.",
       "phase": "132"
+    },
+    {
+      "decision": "The idempotency preflight fails closed on infrastructure error.",
+      "rationale": "A lookup that could not complete means we do not know whether a prior attempt already mutated the provider; executing anyway is the double-booking the phase exists to prevent.",
+      "phase": "133"
+    },
+    {
+      "decision": "A failure to persist the idempotency receipt never downgrades a completed mutation to an error.",
+      "rationale": "The caller would hear a failure for work that landed, and the real result would be lost.",
+      "phase": "133"
     }
   ],
   "uncommitted_files": [],
   "background_processes": [],
-  "next_action": "Phase 133 (Idempotent Action and Vapi Safety) needs a context document and plans. Read ROADMAP.md for its scope and the 14 still-pending requirements in REQUIREMENTS.md, write 133-CONTEXT.md, then generate and review plans before executing. Migrations 1290 and 1291 remain unapplied and /api/vapi/tools remains uncut.",
-  "context_notes": "Phase 132 shipped in 599118e9 (typed handoff contracts), 60690309 (partner-edge policy + unapplied migration 1291), 07baabcf (edge-based least privilege + kb_scope), 5351f00c (trusted specialist routing + centralized OpenRouter in src/lib/llm/openrouter.ts). Docs cac188e3 and 5dc371f9 correct the provider drift inventory and record accepted limitations - read 132-KNOWN-LIMITATIONS.md before touching knowledge retrieval or legacy tools. The full suite has 30 pre-existing failing files (52 tests) unrelated to this workstream; treat that as the baseline, do not try to fix them as part of a phase. Build needs NODE_OPTIONS=--max-old-space-size=8192 on this machine. Never junction node_modules into a git worktree - worktree remove --force follows the junction and deletes the real directory. Use --ws omnichannel-agent-orchestration for GSD commands."
+  "next_action": "Phase 134 (Traceability and Reversible Routing) needs a context document and plans. Requirements OBS-01, OBS-02, ROLL-02. Read ROADMAP.md for scope, verify every claimed gap against current source before writing the context (the planning-time inventories in this workstream have been wrong twice), then generate and review plans before executing.",
+  "context_notes": "Phase 133 shipped in 7b399031 (ingress-scoped idempotency key, replay/conflict/abandoned outcome), e007da1c + c31368fb (voice latency ceiling on the Phase 132 shared budget, including the run-agent recursion wiring the plan left open), and 3cc836aa + b6ad9f63 + 519ce698 (Vapi webhook made idempotent and multi-call safe, then hardened after it regressed the pre-existing action-engine suite). Read 133-VERIFICATION.md before touching the Vapi route. Full-suite baseline is now 30-32 failing files / 52-53 failing tests; the over-baseline members shift between runs and pass in isolation (Postgres deadlock in calendar-rls, vitest SSR module-cycle in demo-readonly) - measure, do not assume. Build needs NODE_OPTIONS=--max-old-space-size=8192. Never junction node_modules into a git worktree. Use --ws omnichannel-agent-orchestration for GSD commands."
 }
