@@ -100,3 +100,26 @@ export const agentPartnerEdgeSchema = z.object({
 
 export type AgentPartnerEdgeInput = z.input<typeof agentPartnerEdgeSchema>
 export type AgentPartnerEdgeOutput = z.output<typeof agentPartnerEdgeSchema>
+
+/**
+ * Phase 134 (ROLL-02): per (organization, channel) routing-mode payload.
+ * Mirrors migration 1293's CHECK (mode IN ('legacy','specialist')) so a
+ * malformed value is rejected at the config layer before it ever reaches the
+ * database. This is a DISTINCT concept from the unrelated calls
+ * `routing_mode` (browser/phone_forward/sip) in
+ * src/app/(dashboard)/calls/settings-actions.ts and routing-actions.ts — do
+ * not confuse or merge the two. `mode` has no default here on purpose: the
+ * safe "legacy" default is expressed by the ABSENCE of a row (see
+ * src/lib/agent-runtime/routing-mode.ts), never by this schema silently
+ * filling one in.
+ */
+export const CHANNEL_ROUTING_MODES = ['legacy', 'specialist'] as const
+export type ChannelRoutingMode = (typeof CHANNEL_ROUTING_MODES)[number]
+
+export const channelRoutingModeSchema = z.object({
+  channel: z.enum(AGENT_CHANNELS),
+  mode: z.enum(CHANNEL_ROUTING_MODES),
+})
+
+export type ChannelRoutingModeInput = z.input<typeof channelRoutingModeSchema>
+export type ChannelRoutingModeOutput = z.output<typeof channelRoutingModeSchema>

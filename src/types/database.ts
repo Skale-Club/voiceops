@@ -1852,6 +1852,38 @@ export interface Database {
           }
         ]
       }
+      // Phase 134 (ROLL-02): per (organization, channel) legacy/specialist routing switch.
+      agent_channel_routing_modes: {
+        Row: {
+          id: string
+          organization_id: string
+          channel: AgentChannel
+          mode: string
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          organization_id: string
+          channel: AgentChannel
+          mode?: string
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          mode?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: 'agent_channel_routing_modes_organization_id_fkey'
+            columns: ['organization_id']
+            isOneToOne: false
+            referencedRelation: 'organizations'
+            referencedColumns: ['id']
+          }
+        ]
+      }
       // Q7 — Project 2: agent quality feedback signals
       agent_feedback: {
         Row: {
@@ -6661,6 +6693,9 @@ export interface Database {
           tool_name: string | null
           vapi_call_id: string | null
           execution_ms: number | null
+          // Migration 1292 (OBS-01): trace + agent invocation linkage
+          trace_id: string | null
+          agent_invocation_id: string | null
         }
         Insert: {
           id?: string
@@ -6680,6 +6715,8 @@ export interface Database {
           tool_name?: string | null
           vapi_call_id?: string | null
           execution_ms?: number | null
+          trace_id?: string | null
+          agent_invocation_id?: string | null
         }
         Update: {
           id?: string
@@ -6699,8 +6736,18 @@ export interface Database {
           tool_name?: string | null
           vapi_call_id?: string | null
           execution_ms?: number | null
+          trace_id?: string | null
+          agent_invocation_id?: string | null
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: 'workflow_runs_agent_invocation_same_org_fkey'
+            columns: ['org_id', 'agent_invocation_id']
+            isOneToOne: false
+            referencedRelation: 'agent_invocations'
+            referencedColumns: ['organization_id', 'id']
+          }
+        ]
       }
       // Migration 1249: unified tool-execution log surface.
       // workflow_runs (kind='tool') UNION legacy action_logs, projected into
