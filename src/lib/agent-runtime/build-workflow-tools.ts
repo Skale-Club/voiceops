@@ -24,6 +24,7 @@ import {
   deriveIdempotencyKey,
   checkIdempotency,
   recordIdempotency,
+  recordAbandonedIdempotency,
   hashToolArgs,
 } from './idempotency'
 
@@ -254,6 +255,27 @@ export async function buildWorkflowTools(
           typeof dispatched.result === 'string'
             ? dispatched.result
             : JSON.stringify(dispatched)
+
+        // PERF-03: a dispatch that timed out may have left the provider
+        // mutation in flight. Record abandoned ownership so a later retry sees
+        // `abandoned` rather than a free slot. This path signals a timeout with
+        // a flag rather than by throwing, so it needs its own check.
+        if (
+          dispatched.timed_out &&
+          idempotencyKey &&
+          invocationId &&
+          invocationId !== '' &&
+          invocationId !== 'insert-failed'
+        ) {
+          await recordAbandonedIdempotency({
+            organizationId: orgId,
+            agentInvocationId: invocationId,
+            idempotencyKey,
+            toolName: capturedToolName,
+            requestHash: hashToolArgs(toolArgs),
+            reason: 'workflow_tool_timeout',
+          })
+        }
 
         if (
           dispatched.ok &&

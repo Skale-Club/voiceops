@@ -54,6 +54,8 @@ import {
   requiresIdempotency,
   checkIdempotency,
   recordIdempotency,
+  recordAbandonedIdempotency,
+  isAbortLikeError,
   hashToolArgs,
   COMMERCE_WRITE_ACTIONS,
 } from './idempotency'
@@ -1110,6 +1112,21 @@ async function runAgentBlocking(opts: InternalAgentRunOptions): Promise<AgentRun
               }
             } catch (err) {
               result = 'Tool execution failed'
+              // PERF-03: an abort/timeout may have left the provider mutation in
+              // flight. Record abandoned ownership so a later retry sees
+              // `abandoned` rather than a free slot. Without this the guard is
+              // built but never reached on the agent-driven paths — only the
+              // Vapi webhook recorded it.
+              if (isAbortLikeError(err) && idempotencyNeeded && idempotencyKey && invocationId && invocationId !== 'insert-failed') {
+                await recordAbandonedIdempotency({
+                  organizationId: orgId,
+                  agentInvocationId: invocationId,
+                  idempotencyKey,
+                  toolName: capturedToolName,
+                  requestHash: hashToolArgs(toolArgs),
+                  reason: 'agent_tool_timeout',
+                })
+              }
               createLogger({ traceId, orgId }).error('tool_execute_failed', {
                 toolName: capturedToolName,
                 agentId: resolvedAgentId,
@@ -1605,7 +1622,20 @@ function runAgentStreaming(
                   if (idempotencyNeededStream && idempotencyKeyStream && invocationId && invocationId !== 'insert-failed') {
                     await recordIdempotency({ organizationId: orgId, agentInvocationId: invocationId, idempotencyKey: idempotencyKeyStream, toolName: capturedToolName, requestHash: hashToolArgs(toolArgs), response: result })
                   }
-                } catch { result = 'Tool execution failed' }
+                } catch (errStream) {
+                  result = 'Tool execution failed'
+                  // PERF-03, streaming path — same reasoning as the blocking loop.
+                  if (isAbortLikeError(errStream) && idempotencyNeededStream && idempotencyKeyStream && invocationId && invocationId !== 'insert-failed') {
+                    await recordAbandonedIdempotency({
+                      organizationId: orgId,
+                      agentInvocationId: invocationId,
+                      idempotencyKey: idempotencyKeyStream,
+                      toolName: capturedToolName,
+                      requestHash: hashToolArgs(toolArgs),
+                      reason: 'agent_tool_timeout',
+                    })
+                  }
+                }
                 toolCallsLog.push({ name: capturedToolName, args: JSON.parse(JSON.stringify(toolArgs)) as Json, result, denied: false, tool_call_index: currentToolCallIndex })
                 return result
               },

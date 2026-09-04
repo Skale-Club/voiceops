@@ -100,6 +100,15 @@ export const SIDE_EFFECTING_ACTIONS = new Set([
 
 export const COMMERCE_WRITE_ACTIONS = new Set(['medusa_add_to_cart', 'medusa_update_cart_item'])
 
+// PERF-03: recognising an abort/timeout is the trigger for recording
+// abandoned ownership. Kept here beside the recorder so every call site
+// classifies a timeout the same way instead of each inventing its own check.
+export function isAbortLikeError(err: unknown): boolean {
+  if (!(err instanceof Error)) return false
+  if (err.name === 'AbortError' || err.name === 'TimeoutError') return true
+  return /abort|timed out|timedout|timeout/i.test(err.message)
+}
+
 export function requiresIdempotency(actionType: string, toolConfig?: unknown): boolean {
   if (!SIDE_EFFECTING_ACTIONS.has(actionType)) return false
   // For custom_webhook: only wrap non-GET requests
