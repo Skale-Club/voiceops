@@ -66,6 +66,19 @@ interface VapiCallShape {
 // handling, which would silently drop the receipt and disable the guard.
 const NO_AGENT_INVOCATION = null
 
+// Phase 134 (OBS-01): logToolRun() now also accepts a trace_id
+// (src/lib/workflows/log-tool-run.ts, migration 1292). This route has no
+// agent invocation and therefore no agent trace to attach either — voice
+// calls that go through an entry agent are a separate, not-yet-wired path
+// (a later wave). call.id is deliberately NOT reused as the trace here: it
+// is stored elsewhere as vapi_call_id in a TEXT column precisely because it
+// is not guaranteed UUID-shaped (see the workflow_runs.vapi_call_id
+// convention for pseudo-ids like `manychat:<eventId>`), while trace_id is a
+// UUID column shared with agent_invocations.trace_id. Passing it here would
+// risk failing the insert on a malformed value and silently dropping the
+// whole run row, not just the trace linkage.
+const NO_AGENT_TRACE = null
+
 export async function POST(request: Request): Promise<Response> {
   const startTime = Date.now()
 
@@ -286,6 +299,8 @@ async function executeOneToolCall(params: {
         requestPayload: args,
         responsePayload: { result },
         errorDetail,
+        traceId: NO_AGENT_TRACE,
+        agentInvocationId: NO_AGENT_INVOCATION,
       }, supabase)
     })
 

@@ -30,6 +30,19 @@ export interface ToolRunLogInput {
   requestPayload: Record<string, unknown>
   responsePayload: Record<string, unknown>
   errorDetail?: string | null
+  /**
+   * Phase 134 (OBS-01): cross-table trace correlation — same trace_id as the
+   * causing agent_invocations row. Optional so every existing caller keeps
+   * compiling and behaving identically (columns stay null). Migration 1292.
+   */
+  traceId?: string | null
+  /**
+   * Phase 134 (OBS-01): back-reference to the agent_invocations row that
+   * caused this run. Optional/nullable for the same reason as traceId —
+   * cron, campaign, manual, and legacy direct-workflow runs have none.
+   * Migration 1292.
+   */
+  agentInvocationId?: string | null
 }
 
 const STATUS_MAP: Record<ToolRunLogInput['status'], string> = {
@@ -62,6 +75,8 @@ export async function logToolRun(
         started_at: startedAt.toISOString(),
         ended_at: endedAt.toISOString(),
         error: input.errorDetail ?? null,
+        trace_id: input.traceId ?? null,
+        agent_invocation_id: input.agentInvocationId ?? null,
       })
       .select('id')
       .single()
