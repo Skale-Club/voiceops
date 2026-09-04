@@ -1,6 +1,6 @@
 {
   "version": "1.0",
-  "timestamp": "2026-09-04T00:05:00.000Z",
+  "timestamp": "2026-09-04T10:45:00.000Z",
   "workstream": "omnichannel-agent-orchestration",
   "phase": "136",
   "phase_name": "Cuts & Culture Canary Rollout",
@@ -79,9 +79,9 @@
   ],
   "human_actions_pending": [
     {
-      "action": "Apply migrations 1290-1295 with npx supabase db push",
-      "context": "1295 is a SECURITY fix independent of the canary - it closes a cross-org member/email/phone leak in get_org_member_profiles and should be applied regardless. Afterwards, re-add tests/security-secdef-isolation.test.ts to GATE_MEMBERS in scripts/release-gate.ts.",
-      "blocking": true
+      "action": "DONE 2026-09-04: migrations 1290-1295 applied via npx supabase db push",
+      "context": "1295 closed the cross-org leak in get_org_member_profiles; the suite is green and back in GATE_MEMBERS. Applying it revealed the repo had drifted from production on that function - one function reconciled, nothing else audited (FINDINGS-OUTSIDE-SCOPE.md item 3).",
+      "blocking": false
     },
     {
       "action": "Change an ingress route to call invokeAgentWithChannelRouting() instead of runAgent/executeAction",
@@ -101,6 +101,11 @@
     {
       "action": "Decide what to do about the 24 unclassified write action types",
       "context": "See FINDINGS-OUTSIDE-SCOPE.md item 2. send_whatsapp_message, send_email, the pipeline surface and others bypass the idempotency guard the way the Xkedule mutations did. Deliberately not fixed autonomously: the change spans most of the integration surface and the guard fails closed.",
+      "blocking": false
+    },
+    {
+      "action": "Decide whether to audit the rest of the schema for drift",
+      "context": "get_org_member_profiles had been changed in production with no migration in the repo. It surfaced only because migration 1295 collided with it. Other objects may have drifted the same way and would only surface the same way.",
       "blocking": false
     }
   ],
@@ -153,6 +158,6 @@
   ],
   "uncommitted_files": [],
   "background_processes": [],
-  "next_action": "The milestone is built. Everything remaining is on the human gate in docs/agents/canary-activation-runbook.md. Start with migration 1295 - it is a security fix independent of the canary.",
+  "next_action": "Migrations are applied. Everything else remains on the human gate in docs/agents/canary-activation-runbook.md - start at step 2 (the provisioning dry run). Step 5.0, rewiring an ingress route to invokeAgentWithChannelRouting, is the one that makes the routing switch mean anything.",
   "context_notes": "All 6 phases (131-136) built and verified. What is LIVE today: everything phases 132-134 put inside runAgent and /api/vapi/tools - edge-based least privilege, kb_scope, partner_calls, denial recording, redaction before persistence, and the idempotency guard. The widget route calls runAgent directly so it inherits these. What is NOT live: the Phase 131 gateway, Phase 132 specialist routing and the Phase 134 channel switch - invokeAgent has zero production callers. Release gate: npm run release-gate (8 suites, 206 tests + 33 workflow validations), CI at .github/workflows/release-gate.yml. Full-suite baseline is ~30 failing files for live-DB and module-resolution reasons - but note that one of those was a real security leak, so audit newcomers rather than assuming noise. Build needs NODE_OPTIONS=--max-old-space-size=8192; a local Redis on localhost:6379 being down makes static generation slow and flaky but it passes on retry. Never junction node_modules into a git worktree."
 }

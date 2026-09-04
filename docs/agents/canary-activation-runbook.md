@@ -1,5 +1,13 @@
 # Canary Activation Runbook — Cuts & Culture (ROLL-03)
 
+> **Update 2026-09-04 — Step 1 is already done.** Migrations 1290-1295 were applied with
+> `npx supabase db push`. Migration 1295 (the cross-organization leak in
+> `get_org_member_profiles`) is live, `tests/security-secdef-isolation.test.ts` is green, and
+> that suite is a gate member again. Applying 1295 also revealed that the deployed function
+> had drifted from this repository; one function was reconciled and nothing else was audited
+> — see `FINDINGS-OUTSIDE-SCOPE.md` item 3. Every other step below is still unperformed.
+
+
 **Every step in this document requires a human with production access. No
 agent — Claude Code or otherwise — has performed any of them.** This file
 was written by an autonomous run of Phase 136 Plan 03, but writing the
