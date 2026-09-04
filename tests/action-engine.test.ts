@@ -366,6 +366,18 @@ describe('POST /api/vapi/tools — webhook route', () => {
     vi.doMock('@/lib/action-engine/execute-action', () => ({
       executeAction: vi.fn().mockResolvedValue('Contact created. ID: cid_123'),
     }))
+    // Phase 133: the route now guards side-effecting calls with the shared
+    // idempotency helpers, which build their OWN service-role client rather
+    // than the one mocked above. Stub the module so these tests keep asserting
+    // what they were written for — the route's action-dispatch contract — while
+    // the guard's own behavior is covered by tests/vapi-tools-idempotency.test.ts
+    // and tests/idempotency-ingress-key.test.ts.
+    vi.doMock('@/lib/agent-runtime/idempotency', async (importOriginal) => ({
+      ...(await importOriginal<typeof import('@/lib/agent-runtime/idempotency')>()),
+      checkIdempotency: vi.fn().mockResolvedValue({ status: 'fresh' }),
+      recordIdempotency: vi.fn().mockResolvedValue(undefined),
+      recordAbandonedIdempotency: vi.fn().mockResolvedValue(undefined),
+    }))
     vi.doMock('@/lib/workflows/log-tool-run', () => ({
       logToolRun: vi.fn().mockResolvedValue(null),
     }))
@@ -456,6 +468,18 @@ describe('POST /api/vapi/tools — webhook route', () => {
     vi.doMock('@/lib/action-engine/execute-action', () => ({
       executeAction: vi.fn().mockRejectedValue(new Error('GHL API error 500')),
     }))
+    // Phase 133: the route now guards side-effecting calls with the shared
+    // idempotency helpers, which build their OWN service-role client rather
+    // than the one mocked above. Stub the module so these tests keep asserting
+    // what they were written for — the route's action-dispatch contract — while
+    // the guard's own behavior is covered by tests/vapi-tools-idempotency.test.ts
+    // and tests/idempotency-ingress-key.test.ts.
+    vi.doMock('@/lib/agent-runtime/idempotency', async (importOriginal) => ({
+      ...(await importOriginal<typeof import('@/lib/agent-runtime/idempotency')>()),
+      checkIdempotency: vi.fn().mockResolvedValue({ status: 'fresh' }),
+      recordIdempotency: vi.fn().mockResolvedValue(undefined),
+      recordAbandonedIdempotency: vi.fn().mockResolvedValue(undefined),
+    }))
     vi.doMock('@/lib/workflows/log-tool-run', () => ({
       logToolRun: vi.fn().mockResolvedValue(null),
     }))
@@ -511,6 +535,18 @@ describe('POST /api/vapi/tools — webhook route', () => {
     }))
     vi.doMock('@/lib/action-engine/execute-action', () => ({
       executeAction: vi.fn().mockResolvedValue('Contact created.'),
+    }))
+    // Phase 133: the route now guards side-effecting calls with the shared
+    // idempotency helpers, which build their OWN service-role client rather
+    // than the one mocked above. Stub the module so these tests keep asserting
+    // what they were written for — the route's action-dispatch contract — while
+    // the guard's own behavior is covered by tests/vapi-tools-idempotency.test.ts
+    // and tests/idempotency-ingress-key.test.ts.
+    vi.doMock('@/lib/agent-runtime/idempotency', async (importOriginal) => ({
+      ...(await importOriginal<typeof import('@/lib/agent-runtime/idempotency')>()),
+      checkIdempotency: vi.fn().mockResolvedValue({ status: 'fresh' }),
+      recordIdempotency: vi.fn().mockResolvedValue(undefined),
+      recordAbandonedIdempotency: vi.fn().mockResolvedValue(undefined),
     }))
     vi.doMock('@/lib/workflows/log-tool-run', () => ({
       logToolRun: logToolRunMock,

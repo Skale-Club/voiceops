@@ -43,6 +43,8 @@ const IDEMPOTENCY_CONFLICT_RESULT =
   'That request conflicts with an earlier one from this call. Please repeat the details again.'
 const IDEMPOTENCY_ABANDONED_RESULT =
   'I could not confirm the previous attempt completed. Please try again in a moment.'
+const IDEMPOTENCY_UNAVAILABLE_RESULT =
+  'I could not verify that request right now. Please try again in a moment.'
 
 interface ToolCallResult {
   toolCallId: string
@@ -166,7 +168,26 @@ async function executeOneToolCall(params: {
       })
       requestHash = hashToolArgs(args)
 
-      const outcome = await checkIdempotency(orgId, idempotencyKey, requestHash)
+      // The preflight is a database read and can fail transiently. It must
+      // fail on its own terms: swallowing it into the per-call catch below
+      // would turn every side-effecting voice call into a generic "Service
+      // unavailable." the moment the lookup blips, masking both success and
+      // the tenant's own fallback message. Fail closed — a lookup we could
+      // not complete means we do not know whether a prior attempt already
+      // mutated the provider, and executing anyway is the double-booking this
+      // phase exists to prevent.
+      let outcome: Awaited<ReturnType<typeof checkIdempotency>>
+      try {
+        outcome = await checkIdempotency(orgId, idempotencyKey, requestHash)
+      } catch (preflightErr) {
+        obs.error('vapi_idempotency_preflight_failed', {
+          toolCallId: toolCall.id,
+          toolName: toolCall.name,
+          error: preflightErr,
+        })
+        return { toolCallId: toolCall.id, result: IDEMPOTENCY_UNAVAILABLE_RESULT }
+      }
+
       if (outcome.status === 'replay') {
         // Cache hit | return the original result without re-executing.
         return { toolCallId: toolCall.id, result: outcome.response }
@@ -206,14 +227,26 @@ async function executeOneToolCall(params: {
       })
 
       if (idempotencyNeeded && idempotencyKey) {
-        await recordIdempotency({
-          organizationId: orgId,
-          agentInvocationId: NO_AGENT_INVOCATION,
-          idempotencyKey,
-          toolName: toolCall.name,
-          requestHash,
-          response: result,
-        })
+        // The mutation already succeeded. Failing to persist the receipt must
+        // not convert that success into the tenant's failure message — the
+        // caller would hear an error for work that actually landed, and the
+        // real result would be lost. Log it and return the truth.
+        try {
+          await recordIdempotency({
+            organizationId: orgId,
+            agentInvocationId: NO_AGENT_INVOCATION,
+            idempotencyKey,
+            toolName: toolCall.name,
+            requestHash,
+            response: result,
+          })
+        } catch (recordErr) {
+          obs.error('vapi_idempotency_record_failed', {
+            toolCallId: toolCall.id,
+            toolName: toolCall.name,
+            error: recordErr,
+          })
+        }
       }
     } catch (err) {
       // GHL executor threw (error, timeout, or unsupported action type)

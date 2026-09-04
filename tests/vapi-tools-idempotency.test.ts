@@ -212,4 +212,42 @@ describe('vapi tools webhook — idempotency guard (SAFE-02)', () => {
     expect(recordIdempotencyMock).not.toHaveBeenCalled()
     expect(executeActionMock).toHaveBeenCalledTimes(1)
   })
+  // -------------------------------------------------------------------------
+  // Infrastructure failure of the guard itself. Found by tests/action-engine.
+  // test.ts regressing: an unguarded preflight throw fell into the per-call
+  // catch and turned BOTH a successful call and the tenant's own fallback
+  // message into a generic "Service unavailable."
+  // -------------------------------------------------------------------------
+
+  it('preflight failure fails closed with its own message, not the generic per-call error', async () => {
+    resolveToolMock.mockResolvedValue(SIDE_EFFECTING_TOOL_CONFIG)
+    checkIdempotencyMock.mockRejectedValue(new Error('connection reset'))
+    executeActionMock.mockResolvedValue('Booked for 3pm.')
+
+    const res = await POST(buildRequest([{ id: 'tool-call-1', name: 'book_appointment', arguments: { time: '3pm' } }]))
+    const body = await res.json() as { results: Array<{ toolCallId: string; result: string }> }
+
+    expect(res.status).toBe(200)
+    // Fail closed: we cannot know whether a prior attempt already mutated.
+    expect(executeActionMock).not.toHaveBeenCalled()
+    // Distinct from the generic catch-all, so the failure is diagnosable.
+    expect(body.results[0].result).not.toBe('Service unavailable.')
+    expect(body.results[0].toolCallId).toBe('tool-call-1')
+  })
+
+  it('a failure to persist the receipt does not convert a completed mutation into an error', async () => {
+    resolveToolMock.mockResolvedValue(SIDE_EFFECTING_TOOL_CONFIG)
+    checkIdempotencyMock.mockResolvedValue({ status: 'fresh' })
+    executeActionMock.mockResolvedValue('Booked for 3pm.')
+    recordIdempotencyMock.mockRejectedValue(new Error('write failed'))
+
+    const res = await POST(buildRequest([{ id: 'tool-call-1', name: 'book_appointment', arguments: { time: '3pm' } }]))
+    const body = await res.json() as { results: Array<{ toolCallId: string; result: string }> }
+
+    expect(res.status).toBe(200)
+    expect(executeActionMock).toHaveBeenCalledTimes(1)
+    // The booking landed. Reporting the tenant fallback here would tell the
+    // caller it failed and lose the real result.
+    expect(body.results[0].result).toBe('Booked for 3pm.')
+  })
 })
