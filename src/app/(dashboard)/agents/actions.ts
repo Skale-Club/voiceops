@@ -3,8 +3,9 @@
 import { revalidatePath } from 'next/cache'
 import { createClient, getUser } from '@/lib/supabase/server'
 import type { Database } from '@/types/database'
-import type { AgentChannel } from '@/lib/agents/channels'
+import { PUBLIC_AGENT_CHANNELS, type AgentChannel } from '@/lib/agents/channels'
 import type { AgentFormOutput, AgentSettingsOutput } from '@/lib/agents/zod-schemas'
+import { CHANNEL_ROUTING_MODES, type ChannelRoutingMode } from '@/lib/agents/zod-schemas'
 import { slugify } from '@/lib/agents/slug'
 import { DEFAULT_MODEL } from '@/lib/agents/models'
 import { setAgentTools, getToolPickerData } from './_actions/tools'
@@ -126,6 +127,71 @@ export async function setChannelDefault(
       )
     if (error) return { error: error.message }
   }
+  revalidatePath('/agents')
+}
+
+// ─── Channel routing modes ────────────────────────────────────────────────────
+//
+// Phase 139 Plan 03 (TMPL-04): the Phase 134 legacy/specialist switch,
+// finally reachable from Settings instead of a raw SQL UPDATE. This never
+// touches an agent, a mapping, a workflow, or an invocation row — it writes
+// exactly one row in `agent_channel_routing_modes`, matching that table's
+// own doc comment: flipping this switch changes which path READS
+// configuration, never the configuration itself (see routing-mode.ts).
+
+function isChannelRoutingMode(value: unknown): value is ChannelRoutingMode {
+  return typeof value === 'string' && (CHANNEL_ROUTING_MODES as readonly string[]).includes(value)
+}
+
+/**
+ * Returns every public channel's current routing mode. A channel with no row
+ * in `agent_channel_routing_modes` defaults to 'legacy', matching that
+ * table's own default and routing-mode.ts's fail-closed contract.
+ */
+export async function getChannelRoutingModes(): Promise<
+  Record<AgentChannel, ChannelRoutingMode>
+> {
+  const empty = Object.fromEntries(
+    PUBLIC_AGENT_CHANNELS.map((ch) => [ch, 'legacy' as ChannelRoutingMode])
+  ) as Record<AgentChannel, ChannelRoutingMode>
+
+  const user = await getUser()
+  if (!user) return empty
+
+  const supabase = await createClient()
+  const { data } = await supabase.from('agent_channel_routing_modes').select('channel, mode')
+  if (!data) return empty
+
+  const result = { ...empty }
+  for (const row of data) {
+    if (isChannelRoutingMode(row.mode)) {
+      result[row.channel as AgentChannel] = row.mode
+    }
+  }
+  return result
+}
+
+/**
+ * UPSERTs the routing mode for one (organization, channel) pair.
+ */
+export async function setChannelRoutingMode(
+  channel: AgentChannel,
+  mode: ChannelRoutingMode
+): Promise<{ error?: string } | void> {
+  const user = await getUser()
+  if (!user) return { error: 'Not authenticated.' }
+  const supabase = await createClient()
+  const { data: orgId } = await supabase.rpc('get_current_org_id')
+  if (!orgId) return { error: 'No organization found.' }
+
+  const { error } = await supabase
+    .from('agent_channel_routing_modes')
+    .upsert(
+      { organization_id: orgId, channel, mode },
+      { onConflict: 'organization_id,channel' }
+    )
+  if (error) return { error: error.message }
+
   revalidatePath('/agents')
 }
 
