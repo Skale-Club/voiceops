@@ -14,6 +14,12 @@ export default defineConfig({
     setupFiles: ['tests/setup/load-env.ts'],
     reporters: ['verbose'],
     testTimeout: 30000,
+    // Hooks default to 10s, which is tight for the suites whose beforeAll/afterAll
+    // create and clean up rows in the live database. Under parallel load that
+    // cleanup has timed out and failed the release gate on a suite whose own
+    // assertions all passed. A gate that flakes is a gate people learn to ignore,
+    // so give hooks the same budget as tests.
+    hookTimeout: 30000,
     // Allow one retry for real-DB invariant tests — fixture-creating suites race
     // by design, and the structural fixture-name regex on the invariant tests
     // already filters out transient orgs. One retry covers transient inserts
