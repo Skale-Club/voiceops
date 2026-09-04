@@ -72,6 +72,16 @@ export interface CanaryAgentDef {
   system_prompt: string
   allowed_channels: string[]
   model: string
+  temperature?: number
+  // Tool names (== CanaryWorkflowDef.key) this agent is authorized to call
+  // ITSELF, provisioned into the agent_tools junction (095_agent_workflow_tools.sql).
+  // This is a separate authority surface from partner_edges[].workflow_grants:
+  // resolveEffectiveToolAuthority() (src/lib/agent-runtime/resolve-agent-tool.ts)
+  // denies unconditionally when an agent has no direct grant of its own
+  // (AUTHZ-02, "never widen") -- an edge's delegated-workflow grant can only
+  // narrow an existing direct grant, it can never substitute for one. The
+  // orchestrator holds none: it delegates, it never calls a workflow itself.
+  direct_tools: string[]
 }
 
 export interface CanaryWorkflowInputField {
@@ -127,6 +137,17 @@ export function assertOnlyBookingHoldsWriteGrants(graph: CanaryGraph): void {
       )
     }
   }
+  // Direct ownership (agent_tools) is a second, independent authority surface
+  // -- an agent's own grant, not a delegated one. The same locked decision
+  // applies to it: only "booking" may directly own a write-access workflow.
+  for (const agent of graph.agents) {
+    const ownsWrite = agent.direct_tools.some((k) => writeKeys.has(k))
+    if (ownsWrite && agent.key !== 'booking') {
+      throw new Error(
+        `Agent "${agent.key}" directly owns a write-access workflow -- only "booking" may hold an Xkedule write grant.`,
+      )
+    }
+  }
 }
 
 // ── CLI arg parsing ──────────────────────────────────────────────────────────
@@ -166,6 +187,9 @@ export interface ProvisionResult {
   agentIds: Record<string, string>
   workflowIds: Record<string, string>
   edgeIds: Record<string, string>
+  // agentToolIds keyed by "<agent_key>:<tool_name>" -- the direct-ownership
+  // grant (agent_tools) provisioned in step 3, independent of edgeIds.
+  agentToolIds: Record<string, string>
 }
 
 export interface ProvisionOptions {
@@ -210,7 +234,7 @@ export async function provisionCanaryGraph(options: ProvisionOptions): Promise<P
   if (!apply) {
     console.log('\n--dry-run: organization verified, no writes performed. Would provision:')
     printPlan(graph)
-    return { dryRun: true, organizationId, agentIds: {}, workflowIds: {}, edgeIds: {} }
+    return { dryRun: true, organizationId, agentIds: {}, workflowIds: {}, edgeIds: {}, agentToolIds: {} }
   }
 
   // 1. Agents -- idempotent on (organization_id, slug): 034_agents.sql.
@@ -227,6 +251,7 @@ export async function provisionCanaryGraph(options: ProvisionOptions): Promise<P
           system_prompt: agent.system_prompt,
           allowed_channels: agent.allowed_channels as Database['public']['Tables']['agents']['Insert']['allowed_channels'],
           model: agent.model,
+          ...(agent.temperature === undefined ? {} : { temperature: agent.temperature }),
         },
         { onConflict: 'organization_id,slug' },
       )
@@ -276,7 +301,48 @@ export async function provisionCanaryGraph(options: ProvisionOptions): Promise<P
     workflowIds[workflow.key] = created.id
   }
 
-  // 3. Partner edges -- idempotent on (agent_id, partner_agent_id):
+  // 3. Direct tool ownership (agent_tools) -- a specialist's own grant,
+  // independent of any partner-edge delegation grant (see the comment on
+  // CanaryAgentDef.direct_tools above). Idempotent on (agent_id, workflow_id):
+  // the partial unique index agent_tools_workflow_unique (095_agent_workflow_tools.sql,
+  // `WHERE workflow_id IS NOT NULL`) cannot be an upsert-onConflict target
+  // from supabase-js (same limitation as the workflows table above), so this
+  // uses the same explicit select-then-insert pattern.
+  const agentToolIds: Record<string, string> = {}
+  for (const agent of graph.agents) {
+    const agentId = agentIds[agent.key]
+    for (const toolName of agent.direct_tools) {
+      const workflowId = workflowIds[toolName]
+      if (!workflowId) throw new Error(`Agent "${agent.key}" declares direct_tools unknown workflow key "${toolName}".`)
+
+      const { data: existing, error: selectError } = await supabase
+        .from('agent_tools')
+        .select('id')
+        .eq('agent_id', agentId)
+        .eq('workflow_id', workflowId)
+        .maybeSingle()
+      if (selectError) {
+        throw new Error(`Failed to look up agent_tools grant "${agent.key}" -> "${toolName}": ${selectError.message}`)
+      }
+
+      if (existing) {
+        agentToolIds[`${agent.key}:${toolName}`] = existing.id
+        continue
+      }
+
+      const { data: created, error: insertError } = await supabase
+        .from('agent_tools')
+        .insert({ organization_id: organizationId, agent_id: agentId, workflow_id: workflowId })
+        .select('id')
+        .single()
+      if (insertError || !created) {
+        throw new Error(`Failed to grant direct tool "${toolName}" to agent "${agent.key}": ${insertError?.message}`)
+      }
+      agentToolIds[`${agent.key}:${toolName}`] = created.id
+    }
+  }
+
+  // 4. Partner edges -- idempotent on (agent_id, partner_agent_id):
   // 034_agents.sql's uniq_agent_partners_pair.
   const edgeIds: Record<string, string> = {}
   for (const edge of graph.partner_edges) {
@@ -306,7 +372,7 @@ export async function provisionCanaryGraph(options: ProvisionOptions): Promise<P
     edgeIds[edge.key] = data.id
   }
 
-  // 4. Delegated workflow grants -- idempotent on (partner_edge_id,
+  // 5. Delegated workflow grants -- idempotent on (partner_edge_id,
   // workflow_id): 1291_authorized_agent_partner_edges.sql's
   // uniq_agent_partner_workflow_grants.
   for (const edge of graph.partner_edges) {
@@ -325,14 +391,19 @@ export async function provisionCanaryGraph(options: ProvisionOptions): Promise<P
   }
 
   console.log('\nProvisioned:')
-  console.log(`  ${graph.agents.length} agent(s), ${graph.workflows.length} workflow(s), ${graph.partner_edges.length} edge(s).`)
+  console.log(
+    `  ${graph.agents.length} agent(s), ${graph.workflows.length} workflow(s), ${graph.partner_edges.length} edge(s), ${Object.keys(agentToolIds).length} direct tool grant(s).`,
+  )
 
-  return { dryRun: false, organizationId, agentIds, workflowIds, edgeIds }
+  return { dryRun: false, organizationId, agentIds, workflowIds, edgeIds, agentToolIds }
 }
 
 function printPlan(graph: CanaryGraph): void {
   for (const agent of graph.agents) console.log(`  agent      upsert  ${agent.slug} (${agent.role})`)
   for (const wf of graph.workflows) console.log(`  workflow   resolve ${wf.tool_name} (${wf.access})`)
+  for (const agent of graph.agents) {
+    for (const toolName of agent.direct_tools) console.log(`  direct     upsert  ${agent.key} owns -> ${toolName}`)
+  }
   for (const edge of graph.partner_edges) {
     console.log(`  edge       upsert  ${edge.agent_key} -> ${edge.partner_agent_key} [${edge.allowed_channels.join(',')}]`)
     for (const grantKey of edge.workflow_grants) console.log(`    grant    upsert  -> ${grantKey}`)

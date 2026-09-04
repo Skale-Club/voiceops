@@ -1,9 +1,14 @@
-// Phase 136 Plan 02 (ROLL-01): proves the shape of the Cuts & Culture canary
-// specialist graph and the safety/idempotency of its provisioning script --
-// by test, not by reading the JSON and trusting it.
+// Phase 137 Plan 01 (MESH-01/MESH-03): proves the shape of the Cuts & Culture
+// canary specialist mesh and the safety/idempotency of its provisioning
+// script -- by test, not by reading the JSON and trusting it.
 //
 // This suite NEVER touches a real organization. scripts/provision-canary-graph.ts
 // is exercised only against the in-memory FakeSupabase defined below.
+//
+// The graph was rewritten against the tenant's REAL workflow tool names
+// (137-CONTEXT.md "Tenant reality") and conforms to the CanaryGraph /
+// CanaryAgentDef / CanaryWorkflowDef / CanaryEdgeDef interfaces declared in
+// scripts/provision-canary-graph.ts.
 
 import { describe, it, expect, beforeEach } from 'vitest'
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
@@ -23,16 +28,36 @@ const SEEDS_WORKFLOWS_DIR = join(REPO_ROOT, 'supabase', 'seeds', 'workflows')
 
 const SPECIALIST_KEYS = ['services', 'pricing', 'availability', 'customer', 'booking'] as const
 
+// The eight REAL tool names for this tenant, verified from the live database
+// on 2026-09-04 (137-CONTEXT.md "Tenant reality"). An earlier revision of
+// this graph invented five tool names that do not exist for this org.
+const REAL_TOOL_NAMES = [
+  'list_services',
+  'business_info',
+  'get_quote',
+  'check_availability',
+  'lookup_customer',
+  'book_appointment',
+  'reschedule_appointment',
+  'cancel_appointment',
+] as const
+
+const WRITE_TOOL_NAMES = ['book_appointment', 'reschedule_appointment', 'cancel_appointment'] as const
+
 // ─────────────────────────────────────────────────────────────────────────
 // Task 1: the graph as tenant-scoped data
 // ─────────────────────────────────────────────────────────────────────────
 
-describe('ROLL-01: Cuts & Culture canary graph shape', () => {
+describe('MESH-01: Cuts & Culture canary graph shape', () => {
   const graph = loadCanaryGraph()
 
   it('is declared outside the platform seed path', () => {
     expect(GRAPH_PATH).not.toContain(join('supabase', 'seeds', 'workflows'))
     expect(existsSync(GRAPH_PATH)).toBe(true)
+  })
+
+  it('targets the real tenant slug, not a placeholder', () => {
+    expect(graph.organization.slug).toBe('cuts-culture-barbershop')
   })
 
   it('has exactly one entry orchestrator plus the five named specialists', () => {
@@ -49,12 +74,39 @@ describe('ROLL-01: Cuts & Culture canary graph shape', () => {
     expect(new Set(keys).size).toBe(keys.length)
   })
 
-  it('has exactly one partner edge from entry to each specialist, and no others', () => {
-    expect(graph.partner_edges).toHaveLength(5)
-    for (const edge of graph.partner_edges) {
-      expect(edge.agent_key).toBe('entry')
+  it('the orchestrator holds no direct tool of its own', () => {
+    const entry = graph.agents.find((a) => a.key === 'entry')!
+    expect(entry.direct_tools).toEqual([])
+  })
+
+  it('every specialist directly owns exactly the tools it needs, using only real tool names', () => {
+    const byKey = new Map(graph.agents.map((a) => [a.key, a]))
+    expect(byKey.get('services')!.direct_tools.sort()).toEqual(['business_info', 'list_services'].sort())
+    expect(byKey.get('pricing')!.direct_tools).toEqual(['get_quote'])
+    expect(byKey.get('availability')!.direct_tools).toEqual(['check_availability'])
+    expect(byKey.get('customer')!.direct_tools).toEqual(['lookup_customer'])
+    expect(byKey.get('booking')!.direct_tools.sort()).toEqual(
+      ['book_appointment', 'reschedule_appointment', 'cancel_appointment'].sort(),
+    )
+    for (const agent of graph.agents) {
+      for (const toolName of agent.direct_tools) {
+        expect(REAL_TOOL_NAMES).toContain(toolName)
+      }
     }
-    expect(graph.partner_edges.map((e) => e.partner_agent_key).sort()).toEqual([...SPECIALIST_KEYS].sort())
+  })
+
+  it('has exactly one edge from entry to each specialist, plus the two authorized specialist-to-specialist edges -- not a star topology', () => {
+    expect(graph.partner_edges).toHaveLength(7)
+
+    const fromEntry = graph.partner_edges.filter((e) => e.agent_key === 'entry')
+    expect(fromEntry).toHaveLength(5)
+    expect(fromEntry.map((e) => e.partner_agent_key).sort()).toEqual([...SPECIALIST_KEYS].sort())
+
+    const specialistToSpecialist = graph.partner_edges.filter((e) => e.agent_key !== 'entry')
+    expect(specialistToSpecialist).toHaveLength(2)
+    expect(
+      specialistToSpecialist.map((e) => `${e.agent_key}->${e.partner_agent_key}`).sort(),
+    ).toEqual(['booking->availability', 'booking->customer'].sort())
   })
 
   it('every agent and every edge covers both the voice and web_widget channels', () => {
@@ -66,33 +118,33 @@ describe('ROLL-01: Cuts & Culture canary graph shape', () => {
     }
   })
 
-  it('voice and widget resolve to the SAME Availability specialist -- one agent, one edge, by id', () => {
+  it('voice and widget resolve to the SAME Availability specialist -- one agent row, reachable by two edges, by id', () => {
     const availabilityAgents = graph.agents.filter((a) => a.key === 'availability')
     const availabilityEdges = graph.partner_edges.filter((e) => e.partner_agent_key === 'availability')
     expect(availabilityAgents).toHaveLength(1)
-    expect(availabilityEdges).toHaveLength(1)
-    // The single edge covers both channels rather than there being two
-    // channel-specific copies of the specialist.
-    expect(availabilityEdges[0].allowed_channels).toEqual(expect.arrayContaining(['voice', 'web_widget']))
+    // Reachable both from the entry orchestrator (voice/widget explicit or
+    // ambiguous intent) and from Booking (confirm-before-write) -- always
+    // the same specialist row, never a per-caller copy.
+    expect(availabilityEdges).toHaveLength(2)
+    expect(new Set(availabilityEdges.map((e) => e.partner_agent_key))).toEqual(new Set(['availability']))
+    for (const edge of availabilityEdges) {
+      expect(edge.allowed_channels).toEqual(expect.arrayContaining(['voice', 'web_widget']))
+    }
     expect(availabilityAgents[0].allowed_channels).toEqual(expect.arrayContaining(['voice', 'web_widget']))
   })
 
-  it('declares both read and write Xkedule workflows, matching the 8 execute-action.ts xkedule_* cases', () => {
+  it('declares exactly the eight real tool names for this tenant -- an earlier revision invented five that do not exist', () => {
     const toolNames = graph.workflows.map((w) => w.tool_name).sort()
-    expect(toolNames).toEqual(
-      [
-        'xkedule_business_info',
-        'xkedule_cancel_booking',
-        'xkedule_check_availability',
-        'xkedule_create_booking',
-        'xkedule_get_services',
-        'xkedule_lookup_customer',
-        'xkedule_quote',
-        'xkedule_reschedule_booking',
-      ].sort(),
-    )
+    expect(toolNames).toEqual([...REAL_TOOL_NAMES].sort())
+
     const writeTools = graph.workflows.filter((w) => w.access === 'write').map((w) => w.tool_name).sort()
-    expect(writeTools).toEqual(['xkedule_cancel_booking', 'xkedule_create_booking', 'xkedule_reschedule_booking'].sort())
+    expect(writeTools).toEqual([...WRITE_TOOL_NAMES].sort())
+  })
+
+  it('workflow key equals tool_name -- edges and direct_tools grant by the real tool name directly', () => {
+    for (const wf of graph.workflows) {
+      expect(wf.key).toBe(wf.tool_name)
+    }
   })
 
   it('only the edge to Booking grants a write-access workflow -- proven against the grant data, not the label', () => {
@@ -103,17 +155,34 @@ describe('ROLL-01: Cuts & Culture canary graph shape', () => {
     expect(edgesGrantingWrite).toHaveLength(1)
     expect(edgesGrantingWrite[0].partner_agent_key).toBe('booking')
 
-    // Every non-booking edge holds zero write-access grants.
+    // Every non-booking-destination edge holds zero write-access grants,
+    // including the booking->customer and booking->availability edges --
+    // Booking is the one agent with write authority, not every edge it sits on.
     for (const edge of graph.partner_edges) {
       if (edge.partner_agent_key === 'booking') continue
       expect(edge.workflow_grants.every((k) => !writeKeys.has(k))).toBe(true)
     }
   })
 
-  it('assertOnlyBookingHoldsWriteGrants rejects a graph that drifts from the locked decision', () => {
+  it('only Booking directly owns a write-access workflow', () => {
+    const writeKeys = new Set(graph.workflows.filter((w) => w.access === 'write').map((w) => w.key))
+    for (const agent of graph.agents) {
+      const ownsWrite = agent.direct_tools.some((k) => writeKeys.has(k))
+      expect(ownsWrite).toBe(agent.key === 'booking')
+    }
+  })
+
+  it('assertOnlyBookingHoldsWriteGrants rejects a graph whose edge drifts from the locked decision', () => {
     const corrupted: CanaryGraph = JSON.parse(JSON.stringify(graph))
     const servicesEdge = corrupted.partner_edges.find((e) => e.partner_agent_key === 'services')!
-    servicesEdge.workflow_grants.push('create_booking')
+    servicesEdge.workflow_grants.push('book_appointment')
+    expect(() => assertOnlyBookingHoldsWriteGrants(corrupted)).toThrow(/only "booking" may hold an Xkedule write grant/)
+  })
+
+  it('assertOnlyBookingHoldsWriteGrants rejects a graph whose direct ownership drifts from the locked decision', () => {
+    const corrupted: CanaryGraph = JSON.parse(JSON.stringify(graph))
+    const servicesAgent = corrupted.agents.find((a) => a.key === 'services')!
+    servicesAgent.direct_tools.push('cancel_appointment')
     expect(() => assertOnlyBookingHoldsWriteGrants(corrupted)).toThrow(/only "booking" may hold an Xkedule write grant/)
   })
 
@@ -122,6 +191,15 @@ describe('ROLL-01: Cuts & Culture canary graph shape', () => {
     for (const edge of graph.partner_edges) {
       for (const grant of edge.workflow_grants) {
         expect(workflowKeys.has(grant)).toBe(true)
+      }
+    }
+  })
+
+  it('every agent direct_tools key resolves to a declared workflow', () => {
+    const workflowKeys = new Set(graph.workflows.map((w) => w.key))
+    for (const agent of graph.agents) {
+      for (const toolName of agent.direct_tools) {
+        expect(workflowKeys.has(toolName)).toBe(true)
       }
     }
   })
@@ -146,7 +224,9 @@ describe('ROLL-01: Cuts & Culture canary graph shape', () => {
         if (statSync(full).isDirectory()) walk(full)
         else if (entry.endsWith('.yaml') || entry.endsWith('.yml')) {
           const content = readFileSync(full, 'utf8')
-          if (/cuts.{0,3}(&|and).{0,3}culture/i.test(content)) offenders.push(full)
+          if (/cuts.{0,3}(&|and|-).{0,3}culture/i.test(content) || content.includes('cuts-culture-barbershop')) {
+            offenders.push(full)
+          }
         }
       }
     }
@@ -266,18 +346,28 @@ class FakeSupabase {
 }
 
 const TARGET_ORG_ID = '11111111-1111-4111-8111-111111111111'
+const TARGET_ORG_SLUG = 'cuts-culture-barbershop'
 
-function freshClient(orgSlug = 'cuts-and-culture'): FakeSupabase {
+function freshClient(orgSlug = TARGET_ORG_SLUG): FakeSupabase {
   const client = new FakeSupabase()
   client.seed('organizations', [{ id: TARGET_ORG_ID, slug: orgSlug }])
   return client
 }
 
+// Total per-edge delegated-workflow grants: entry->services(2) + entry->pricing(1)
+// + entry->availability(1) + entry->customer(1) + entry->booking(3)
+// + booking->customer(1) + booking->availability(1) = 10.
+const EXPECTED_EDGE_GRANT_COUNT = 10
+// Total direct-ownership (agent_tools) grants: services(2) + pricing(1)
+// + availability(1) + customer(1) + booking(3) = 8. Entry holds none.
+const EXPECTED_DIRECT_TOOL_COUNT = 8
+
 // ─────────────────────────────────────────────────────────────────────────
-// Task 2: safe, idempotent, dry-run-by-default provisioning
+// Task 2/3: safe, idempotent, dry-run-by-default provisioning that reuses
+// the tenant's existing workflow rows instead of creating duplicates
 // ─────────────────────────────────────────────────────────────────────────
 
-describe('ROLL-01: provision-canary-graph.ts safety and idempotency', () => {
+describe('MESH-03: provision-canary-graph.ts safety and idempotency', () => {
   let graph: CanaryGraph
 
   beforeEach(() => {
@@ -314,7 +404,7 @@ describe('ROLL-01: provision-canary-graph.ts safety and idempotency', () => {
     })
     expect(result.dryRun).toBe(true)
     expect(client.writeLog).toHaveLength(0)
-    for (const table of ['agents', 'workflows', 'agent_partners', 'agent_partner_workflow_grants']) {
+    for (const table of ['agents', 'workflows', 'agent_tools', 'agent_partners', 'agent_partner_workflow_grants']) {
       expect(client.tables[table] ?? []).toHaveLength(0)
     }
   })
@@ -347,10 +437,11 @@ describe('ROLL-01: provision-canary-graph.ts safety and idempotency', () => {
     expect(result.dryRun).toBe(false)
     expect(client.tables.agents).toHaveLength(6)
     expect(client.tables.workflows).toHaveLength(8)
-    expect(client.tables.agent_partners).toHaveLength(5)
-    expect(client.tables.agent_partner_workflow_grants).toHaveLength(8) // 1+1+1+2+3
+    expect(client.tables.agent_tools).toHaveLength(EXPECTED_DIRECT_TOOL_COUNT)
+    expect(client.tables.agent_partners).toHaveLength(7)
+    expect(client.tables.agent_partner_workflow_grants).toHaveLength(EXPECTED_EDGE_GRANT_COUNT)
 
-    for (const table of ['agents', 'workflows', 'agent_partners', 'agent_partner_workflow_grants']) {
+    for (const table of ['agents', 'workflows', 'agent_tools', 'agent_partners', 'agent_partner_workflow_grants']) {
       for (const row of client.tables[table]) {
         const orgField = (row.organization_id ?? row.org_id) as string
         expect(orgField).toBe(TARGET_ORG_ID)
@@ -364,6 +455,7 @@ describe('ROLL-01: provision-canary-graph.ts safety and idempotency', () => {
     const countsAfterFirst = {
       agents: client.tables.agents.length,
       workflows: client.tables.workflows.length,
+      agentTools: client.tables.agent_tools.length,
       agent_partners: client.tables.agent_partners.length,
       grants: client.tables.agent_partner_workflow_grants.length,
     }
@@ -372,6 +464,7 @@ describe('ROLL-01: provision-canary-graph.ts safety and idempotency', () => {
 
     expect(client.tables.agents).toHaveLength(countsAfterFirst.agents)
     expect(client.tables.workflows).toHaveLength(countsAfterFirst.workflows)
+    expect(client.tables.agent_tools).toHaveLength(countsAfterFirst.agentTools)
     expect(client.tables.agent_partners).toHaveLength(countsAfterFirst.agent_partners)
     expect(client.tables.agent_partner_workflow_grants).toHaveLength(countsAfterFirst.grants)
 
@@ -379,9 +472,76 @@ describe('ROLL-01: provision-canary-graph.ts safety and idempotency', () => {
     expect(second.agentIds).toEqual(first.agentIds)
     expect(second.workflowIds).toEqual(first.workflowIds)
     expect(second.edgeIds).toEqual(first.edgeIds)
+    expect(second.agentToolIds).toEqual(first.agentToolIds)
   })
 
-  it('only Booking ends up with an Xkedule write grant -- proven against the written grant rows, not the JSON', async () => {
+  it('MESH-03: a provisioning run against an organization that already has all eight workflows creates zero new workflow rows', async () => {
+    const client = freshClient()
+    // Pre-seed the eight workflows as if they were the tenant's real,
+    // already-existing rows (137-CONTEXT.md "Tenant reality") -- created
+    // through some other path, at ids the graph does not know in advance.
+    client.seed(
+      'workflows',
+      graph.workflows.map((wf, i) => ({
+        id: `preexisting-workflow-${i}`,
+        org_id: TARGET_ORG_ID,
+        tool_name: wf.tool_name,
+        kind: 'tool',
+      })),
+    )
+
+    const result = await provisionCanaryGraph({
+      supabase: client as never,
+      graph,
+      organizationId: TARGET_ORG_ID,
+      apply: true,
+    })
+
+    // Still exactly 8 rows -- none created, none duplicated.
+    expect(client.tables.workflows).toHaveLength(8)
+    expect(client.writeLog.filter((w) => w.table === 'workflows' && w.op === 'insert')).toHaveLength(0)
+
+    // The resolved workflow ids are the PRE-EXISTING ids, not fresh ones --
+    // proof the script bound to them rather than creating a parallel set.
+    for (const wf of graph.workflows) {
+      expect(result.workflowIds[wf.key]).toBe(
+        client.tables.workflows.find((w) => w.tool_name === wf.tool_name)!.id,
+      )
+    }
+
+    // Grants and direct tool ownership still get created correctly against
+    // the pre-existing workflow ids.
+    expect(client.tables.agent_partner_workflow_grants).toHaveLength(EXPECTED_EDGE_GRANT_COUNT)
+    expect(client.tables.agent_tools).toHaveLength(EXPECTED_DIRECT_TOOL_COUNT)
+    for (const grant of client.tables.agent_partner_workflow_grants) {
+      expect(client.tables.workflows.some((w) => w.id === grant.workflow_id)).toBe(true)
+    }
+    for (const grant of client.tables.agent_tools) {
+      expect(client.tables.workflows.some((w) => w.id === grant.workflow_id)).toBe(true)
+    }
+  })
+
+  it('re-running against an organization with pre-existing workflows is still a no-op on a second apply', async () => {
+    const client = freshClient()
+    client.seed(
+      'workflows',
+      graph.workflows.map((wf, i) => ({
+        id: `preexisting-workflow-${i}`,
+        org_id: TARGET_ORG_ID,
+        tool_name: wf.tool_name,
+        kind: 'tool',
+      })),
+    )
+
+    await provisionCanaryGraph({ supabase: client as never, graph, organizationId: TARGET_ORG_ID, apply: true })
+    await provisionCanaryGraph({ supabase: client as never, graph, organizationId: TARGET_ORG_ID, apply: true })
+
+    expect(client.tables.workflows).toHaveLength(8)
+    expect(client.tables.agent_tools).toHaveLength(EXPECTED_DIRECT_TOOL_COUNT)
+    expect(client.tables.agent_partner_workflow_grants).toHaveLength(EXPECTED_EDGE_GRANT_COUNT)
+  })
+
+  it('only Booking ends up with a delegated Xkedule write grant -- proven against the written grant rows, not the JSON', async () => {
     const client = freshClient()
     await provisionCanaryGraph({ supabase: client as never, graph, organizationId: TARGET_ORG_ID, apply: true })
 
@@ -389,7 +549,7 @@ describe('ROLL-01: provision-canary-graph.ts safety and idempotency', () => {
     const edgesById = new Map(client.tables.agent_partners.map((e) => [e.id as string, e]))
     const workflowsById = new Map(client.tables.workflows.map((w) => [w.id as string, w]))
 
-    const writeToolNames = new Set(['xkedule_create_booking', 'xkedule_cancel_booking', 'xkedule_reschedule_booking'])
+    const writeToolNames = new Set<string>(WRITE_TOOL_NAMES)
 
     let writeGrantCount = 0
     for (const grant of client.tables.agent_partner_workflow_grants) {
@@ -399,25 +559,47 @@ describe('ROLL-01: provision-canary-graph.ts safety and idempotency', () => {
       const partnerAgent = agentsById.get(edge.partner_agent_id as string)!
       if (isWrite) {
         writeGrantCount += 1
-        expect(partnerAgent.slug).toBe('cuts-and-culture-booking')
+        expect(partnerAgent.slug).toBe('cc-booking-specialist')
       } else {
-        expect(partnerAgent.slug).not.toBe('cuts-and-culture-booking')
+        expect(partnerAgent.slug).not.toBe('cc-booking-specialist')
       }
     }
     expect(writeGrantCount).toBe(3)
+  })
+
+  it('only Booking directly owns a write-access workflow -- proven against the written agent_tools rows', async () => {
+    const client = freshClient()
+    await provisionCanaryGraph({ supabase: client as never, graph, organizationId: TARGET_ORG_ID, apply: true })
+
+    const agentsById = new Map(client.tables.agents.map((a) => [a.id as string, a]))
+    const workflowsById = new Map(client.tables.workflows.map((w) => [w.id as string, w]))
+    const writeToolNames = new Set<string>(WRITE_TOOL_NAMES)
+
+    let writeOwnerCount = 0
+    for (const grant of client.tables.agent_tools) {
+      const workflow = workflowsById.get(grant.workflow_id as string)!
+      if (!writeToolNames.has(workflow.tool_name as string)) continue
+      writeOwnerCount += 1
+      const owner = agentsById.get(grant.agent_id as string)!
+      expect(owner.slug).toBe('cc-booking-specialist')
+    }
+    expect(writeOwnerCount).toBe(3)
   })
 
   it('voice and widget resolve to the same Availability specialist row in the provisioned data, by id', async () => {
     const client = freshClient()
     await provisionCanaryGraph({ supabase: client as never, graph, organizationId: TARGET_ORG_ID, apply: true })
 
-    const availabilityAgents = client.tables.agents.filter((a) => a.slug === 'cuts-and-culture-availability')
+    const availabilityAgents = client.tables.agents.filter((a) => a.slug === 'cc-availability-specialist')
     expect(availabilityAgents).toHaveLength(1)
     const availabilityId = availabilityAgents[0].id
 
     const availabilityEdges = client.tables.agent_partners.filter((e) => e.partner_agent_id === availabilityId)
-    expect(availabilityEdges).toHaveLength(1)
-    expect(availabilityEdges[0].allowed_channels).toEqual(expect.arrayContaining(['voice', 'web_widget']))
+    // Reachable from both entry (voice/widget) and booking (pre-write confirm).
+    expect(availabilityEdges).toHaveLength(2)
+    for (const edge of availabilityEdges) {
+      expect(edge.allowed_channels).toEqual(expect.arrayContaining(['voice', 'web_widget']))
+    }
   })
 
   it('never writes to any other organization', async () => {
@@ -426,9 +608,27 @@ describe('ROLL-01: provision-canary-graph.ts safety and idempotency', () => {
     client.tables.organizations.push({ id: otherOrgId, slug: 'some-unrelated-org' })
     await provisionCanaryGraph({ supabase: client as never, graph, organizationId: TARGET_ORG_ID, apply: true })
 
-    for (const table of ['agents', 'workflows', 'agent_partners', 'agent_partner_workflow_grants']) {
+    for (const table of ['agents', 'workflows', 'agent_tools', 'agent_partners', 'agent_partner_workflow_grants']) {
       const rows = client.tables[table] ?? []
       expect(rows.some((r) => (r.organization_id ?? r.org_id) === otherOrgId)).toBe(false)
     }
+  })
+
+  it('never touches the existing generalist agent -- the graph provisions six specialist-mesh agents by their own slugs only', async () => {
+    const client = freshClient()
+    const generalist = {
+      id: 'generalist-agent-id',
+      organization_id: TARGET_ORG_ID,
+      slug: 'cuts-culture-booking-agent-en',
+      name: 'Cuts & Culture Booking Agent (EN)',
+      is_active: true,
+    }
+    client.seed('agents', [generalist])
+
+    await provisionCanaryGraph({ supabase: client as never, graph, organizationId: TARGET_ORG_ID, apply: true })
+
+    const stillThere = client.tables.agents.find((a) => a.slug === 'cuts-culture-booking-agent-en')
+    expect(stillThere).toEqual(generalist)
+    expect(client.tables.agents).toHaveLength(7) // generalist + 6 mesh agents
   })
 })

@@ -6,20 +6,107 @@
     "name": "Cuts & Culture Barbershop"
   },
   "workflows": [
-    { "tool_name": "list_services", "access": "read" },
-    { "tool_name": "business_info", "access": "read" },
-    { "tool_name": "get_quote", "access": "read" },
-    { "tool_name": "check_availability", "access": "read" },
-    { "tool_name": "lookup_customer", "access": "read" },
-    { "tool_name": "book_appointment", "access": "write" },
-    { "tool_name": "reschedule_appointment", "access": "write" },
-    { "tool_name": "cancel_appointment", "access": "write" }
+    {
+      "key": "list_services",
+      "tool_name": "list_services",
+      "node_kind": "action",
+      "access": "read",
+      "name": "List services",
+      "description": "Catalogue of services: names, ids, duration, starting price and which staff perform each one.",
+      "input_schema": {}
+    },
+    {
+      "key": "business_info",
+      "tool_name": "business_info",
+      "node_kind": "action",
+      "access": "read",
+      "name": "Business info",
+      "description": "Address, opening hours, and cancellation/no-show policy.",
+      "input_schema": {}
+    },
+    {
+      "key": "get_quote",
+      "tool_name": "get_quote",
+      "node_kind": "action",
+      "access": "read",
+      "name": "Get quote",
+      "description": "Real total and breakdown for one or more services.",
+      "input_schema": {
+        "service_ids": { "type": "array", "description": "Service ids to quote.", "required": true }
+      }
+    },
+    {
+      "key": "check_availability",
+      "tool_name": "check_availability",
+      "node_kind": "action",
+      "access": "read",
+      "name": "Check availability",
+      "description": "Open times for a set of services on a given date. Pinning a staff id materially speeds up the lookup.",
+      "input_schema": {
+        "service_ids": { "type": "array", "description": "Service ids to check.", "required": true },
+        "date": { "type": "string", "description": "Resolved date, YYYY-MM-DD.", "required": true },
+        "staff_id": { "type": "string", "description": "Pin a specific staff member to speed up the lookup.", "required": false }
+      }
+    },
+    {
+      "key": "lookup_customer",
+      "tool_name": "lookup_customer",
+      "node_kind": "action",
+      "access": "read",
+      "name": "Lookup customer",
+      "description": "Identify a returning customer by phone number and retrieve their upcoming bookings and booking ids.",
+      "input_schema": {
+        "phone": { "type": "string", "description": "Customer phone number.", "required": true }
+      }
+    },
+    {
+      "key": "book_appointment",
+      "tool_name": "book_appointment",
+      "node_kind": "action",
+      "access": "write",
+      "name": "Book appointment",
+      "description": "Create a new appointment. Requires service, date, time, customer name and phone.",
+      "input_schema": {
+        "service_id": { "type": "string", "description": "Service id to book.", "required": true },
+        "date": { "type": "string", "description": "Date, YYYY-MM-DD.", "required": true },
+        "time": { "type": "string", "description": "Time, HH:MM.", "required": true },
+        "customer_name": { "type": "string", "description": "Customer's full name.", "required": true },
+        "customer_phone": { "type": "string", "description": "Customer's phone number.", "required": true },
+        "notes": { "type": "string", "description": "Anything the customer asked for, in their own words.", "required": false }
+      }
+    },
+    {
+      "key": "reschedule_appointment",
+      "tool_name": "reschedule_appointment",
+      "node_kind": "action",
+      "access": "write",
+      "name": "Reschedule appointment",
+      "description": "Move an existing appointment to a new date/time. Requires the booking id.",
+      "input_schema": {
+        "booking_id": { "type": "string", "description": "Existing booking id, from lookup_customer.", "required": true },
+        "date": { "type": "string", "description": "New date, YYYY-MM-DD.", "required": true },
+        "time": { "type": "string", "description": "New time, HH:MM.", "required": true }
+      }
+    },
+    {
+      "key": "cancel_appointment",
+      "tool_name": "cancel_appointment",
+      "node_kind": "action",
+      "access": "write",
+      "name": "Cancel appointment",
+      "description": "Cancel an existing appointment. Requires the booking id.",
+      "input_schema": {
+        "booking_id": { "type": "string", "description": "Existing booking id, from lookup_customer.", "required": true }
+      }
+    }
   ],
   "agents": [
     {
       "key": "entry",
       "slug": "cc-entry-orchestrator",
       "name": "Cuts & Culture | Entry Orchestrator",
+      "role": "orchestrator",
+      "description": "Front desk orchestrator. Delegates to specialists; holds no direct tool of its own.",
       "model": "anthropic/claude-sonnet-4.6",
       "temperature": 0.3,
       "allowed_channels": ["voice", "web_widget"],
@@ -30,6 +117,8 @@
       "key": "services",
       "slug": "cc-services-specialist",
       "name": "Cuts & Culture | Services",
+      "role": "specialist",
+      "description": "Answers what the shop offers and how it operates: catalogue, hours, policies.",
       "model": "anthropic/claude-haiku-4.5",
       "temperature": 0.2,
       "allowed_channels": ["voice", "web_widget"],
@@ -40,6 +129,8 @@
       "key": "pricing",
       "slug": "cc-pricing-specialist",
       "name": "Cuts & Culture | Pricing",
+      "role": "specialist",
+      "description": "Gives real totals from get_quote, never estimates.",
       "model": "anthropic/claude-haiku-4.5",
       "temperature": 0.2,
       "allowed_channels": ["voice", "web_widget"],
@@ -50,6 +141,8 @@
       "key": "availability",
       "slug": "cc-availability-specialist",
       "name": "Cuts & Culture | Availability",
+      "role": "specialist",
+      "description": "Finds open times via check_availability, pinning staff id when named to cut latency.",
       "model": "anthropic/claude-haiku-4.5",
       "temperature": 0.2,
       "allowed_channels": ["voice", "web_widget"],
@@ -60,6 +153,8 @@
       "key": "customer",
       "slug": "cc-customer-specialist",
       "name": "Cuts & Culture | Customer",
+      "role": "specialist",
+      "description": "Identifies returning customers and their existing booking ids via lookup_customer.",
       "model": "anthropic/claude-haiku-4.5",
       "temperature": 0.2,
       "allowed_channels": ["voice", "web_widget"],
@@ -70,6 +165,8 @@
       "key": "booking",
       "slug": "cc-booking-specialist",
       "name": "Cuts & Culture | Booking",
+      "role": "specialist",
+      "description": "The only agent that writes to the calendar: book, reschedule, cancel.",
       "model": "anthropic/claude-sonnet-4.6",
       "temperature": 0.2,
       "allowed_channels": ["voice", "web_widget"],
@@ -78,12 +175,12 @@
     }
   ],
   "partner_edges": [
-    { "from": "entry", "to": "services",     "allowed_channels": ["voice", "web_widget"], "max_calls_per_turn": 3, "max_depth": 2, "timeout_ms": 20000, "workflow_grants": ["list_services", "business_info"], "invocation_description": "Ask what the shop offers, how long it takes, who performs it, or its hours and policies." },
-    { "from": "entry", "to": "pricing",      "allowed_channels": ["voice", "web_widget"], "max_calls_per_turn": 3, "max_depth": 2, "timeout_ms": 20000, "workflow_grants": ["get_quote"], "invocation_description": "Get a real total for one or more services. Pass the service ids." },
-    { "from": "entry", "to": "availability", "allowed_channels": ["voice", "web_widget"], "max_calls_per_turn": 3, "max_depth": 2, "timeout_ms": 25000, "workflow_grants": ["check_availability"], "invocation_description": "Find open times. Pass service ids and a resolved YYYY-MM-DD date, and a staff id when the customer named a barber." },
-    { "from": "entry", "to": "customer",     "allowed_channels": ["voice", "web_widget"], "max_calls_per_turn": 3, "max_depth": 2, "timeout_ms": 20000, "workflow_grants": ["lookup_customer"], "invocation_description": "Identify a returning customer by phone number and retrieve their bookings and booking ids." },
-    { "from": "entry", "to": "booking",      "allowed_channels": ["voice", "web_widget"], "max_calls_per_turn": 2, "max_depth": 2, "timeout_ms": 25000, "workflow_grants": ["book_appointment", "reschedule_appointment", "cancel_appointment"], "invocation_description": "Create, move or cancel an appointment, only after the customer confirmed every detail." },
-    { "from": "booking", "to": "customer",   "allowed_channels": ["voice", "web_widget"], "max_calls_per_turn": 1, "max_depth": 2, "timeout_ms": 20000, "workflow_grants": ["lookup_customer"], "invocation_description": "Look up a booking id when the customer needs an existing appointment changed and no id was supplied." },
-    { "from": "booking", "to": "availability", "allowed_channels": ["voice", "web_widget"], "max_calls_per_turn": 1, "max_depth": 2, "timeout_ms": 25000, "workflow_grants": ["check_availability"], "invocation_description": "Confirm the requested slot is still open immediately before writing it." }
+    { "key": "entry-to-services", "agent_key": "entry", "partner_agent_key": "services", "allowed_channels": ["voice", "web_widget"], "max_calls_per_turn": 3, "max_depth": 2, "timeout_ms": 20000, "workflow_grants": ["list_services", "business_info"], "invocation_description": "Ask what the shop offers, how long it takes, who performs it, or its hours and policies." },
+    { "key": "entry-to-pricing", "agent_key": "entry", "partner_agent_key": "pricing", "allowed_channels": ["voice", "web_widget"], "max_calls_per_turn": 3, "max_depth": 2, "timeout_ms": 20000, "workflow_grants": ["get_quote"], "invocation_description": "Get a real total for one or more services. Pass the service ids." },
+    { "key": "entry-to-availability", "agent_key": "entry", "partner_agent_key": "availability", "allowed_channels": ["voice", "web_widget"], "max_calls_per_turn": 3, "max_depth": 2, "timeout_ms": 25000, "workflow_grants": ["check_availability"], "invocation_description": "Find open times. Pass service ids and a resolved YYYY-MM-DD date, and a staff id when the customer named a barber." },
+    { "key": "entry-to-customer", "agent_key": "entry", "partner_agent_key": "customer", "allowed_channels": ["voice", "web_widget"], "max_calls_per_turn": 3, "max_depth": 2, "timeout_ms": 20000, "workflow_grants": ["lookup_customer"], "invocation_description": "Identify a returning customer by phone number and retrieve their bookings and booking ids." },
+    { "key": "entry-to-booking", "agent_key": "entry", "partner_agent_key": "booking", "allowed_channels": ["voice", "web_widget"], "max_calls_per_turn": 2, "max_depth": 2, "timeout_ms": 25000, "workflow_grants": ["book_appointment", "reschedule_appointment", "cancel_appointment"], "invocation_description": "Create, move or cancel an appointment, only after the customer confirmed every detail." },
+    { "key": "booking-to-customer", "agent_key": "booking", "partner_agent_key": "customer", "allowed_channels": ["voice", "web_widget"], "max_calls_per_turn": 1, "max_depth": 2, "timeout_ms": 20000, "workflow_grants": ["lookup_customer"], "invocation_description": "Look up a booking id when the customer needs an existing appointment changed and no id was supplied." },
+    { "key": "booking-to-availability", "agent_key": "booking", "partner_agent_key": "availability", "allowed_channels": ["voice", "web_widget"], "max_calls_per_turn": 1, "max_depth": 2, "timeout_ms": 25000, "workflow_grants": ["check_availability"], "invocation_description": "Confirm the requested slot is still open immediately before writing it." }
   ]
 }
