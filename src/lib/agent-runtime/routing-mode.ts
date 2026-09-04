@@ -13,9 +13,12 @@
 // changes which path reads the configuration, never the configuration
 // itself."
 //
-// Not wired into any live route yet (135/136 do that). Not the same concept
-// as the unrelated `routing_mode` (browser/phone_forward/sip) in
-// src/app/(dashboard)/calls/settings-actions.ts and routing-actions.ts —
+// Phase 136 Plan 01 wires this into invokeAgentWithChannelRouting() in
+// invocation-gateway.ts — the trusted boundary now consults it once per
+// invocation. Still not wired into any /api/** route (a human flips a row
+// and points a channel adapter at the routed entry point later). Not the
+// same concept as the unrelated `routing_mode` (browser/phone_forward/sip)
+// in src/app/(dashboard)/calls/settings-actions.ts and routing-actions.ts —
 // this module never imports from, or writes to, those files or their table.
 //
 // Fail-to-legacy contract (134-CONTEXT.md "Confirmed Gaps" /

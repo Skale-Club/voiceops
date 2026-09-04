@@ -1,5 +1,6 @@
 import { runAgent } from './run-agent'
 import { resolveSpecialistRoute } from './resolve-specialist-route'
+import { resolveChannelRoutingMode } from './routing-mode'
 import {
   createPartnerBudget,
   checkChannelModelInvocationCeiling,
@@ -134,6 +135,82 @@ export async function resolveTrustedAgentRoute(
   }
 
   return { agentId: params.entryAgentId, specialistMatched: false }
+}
+
+// ---------------------------------------------------------------------------
+// Phase 136 Plan 01 (ROLL-02 wiring): consult the Phase 134 routing switch
+// at the trusted boundary.
+//
+// Phase 134 built resolveChannelRoutingMode() and deliberately wired it into
+// nothing, so an operator could flip the row and observe no difference.
+// This is the first thing that reads it. It is a SWITCH in front of the
+// existing paths, not a rewrite of either of them:
+//
+//   - 'legacy'     -> invokeAgent(envelope) exactly as written above, with
+//                     the envelope's own route.agentId untouched. Byte-for-
+//                     byte today's behavior, including for every caller that
+//                     keeps calling invokeAgent() directly and never goes
+//                     through this function at all.
+//   - 'specialist' -> resolveTrustedAgentRoute() (Phase 132), the existing
+//                     trusted-route resolver, THEN invokeAgent() with its
+//                     result. No new routing logic is introduced here; this
+//                     only decides which existing path runs.
+//
+// The mode is resolved ONCE per invocation (one query against
+// agent_channel_routing_modes), never per tool call — invokeInternalSpecialist()
+// below, used for in-turn delegation, does not call this function or repeat
+// the lookup. Legacy callers pay for exactly that one query and nothing
+// more: the specialist lookup (resolveSpecialistRoute's `agents` query)
+// never runs unless the resolved mode is the literal string 'specialist' —
+// never inferred, never defaulted into, and never reached because a lookup
+// failed, since resolveChannelRoutingMode() itself fails closed to 'legacy'
+// on every axis of uncertainty (absent row, read error, unrecognised or
+// malformed value). An explicit 'legacy' row takes the same branch as no
+// row at all.
+// ---------------------------------------------------------------------------
+
+export interface ChannelRoutedInvocationParams {
+  /**
+   * Trusted explicit intent/function name the channel adapter chose from
+   * its own fixed, configured set — same trust contract as
+   * TrustedIntentRouteParams.intent above. Never free text extracted from a
+   * user message or a model's own output, and NOT the same value as
+   * envelope.input.intent, which remains untrusted conversation data and is
+   * never read for routing.
+   */
+  intent?: string | null
+  /**
+   * envelope.route.orgId / .channel / .agentId are the trusted organization,
+   * channel, and already-configured entry/orchestrator agent for this
+   * invocation — the same fields resolveTrustedAgentRoute() above calls
+   * organizationId / channel / entryAgentId.
+   */
+  envelope: BlockingEnvelope
+}
+
+/**
+ * The routed trusted boundary: resolves the Phase 134 channel routing mode
+ * once, then dispatches to whichever existing path that mode names. See the
+ * block comment above for the exact fail-closed contract.
+ */
+export async function invokeAgentWithChannelRouting(
+  params: ChannelRoutedInvocationParams
+): Promise<AgentInvocationResult<AgentRunResult>> {
+  const { intent, envelope } = params
+  const { orgId: organizationId, channel, agentId: entryAgentId } = envelope.route
+
+  const mode = await resolveChannelRoutingMode({ organizationId, channel })
+
+  if (mode !== 'specialist') {
+    return invokeAgent(envelope)
+  }
+
+  const route = await resolveTrustedAgentRoute({ organizationId, channel, entryAgentId, intent })
+
+  return invokeAgent({
+    ...envelope,
+    route: { ...envelope.route, agentId: route.agentId },
+  })
 }
 
 // ---------------------------------------------------------------------------
