@@ -1,6 +1,6 @@
 ---
 phase: 134-traceability-and-reversible-routing
-status: pending_build
+status: verified
 verified: 2026-09-03
 workstream: omnichannel-agent-orchestration
 ---
@@ -44,7 +44,23 @@ two flaky over-baseline members seen during Phase 133 did not recur in this run.
 
 Typecheck: zero errors under `src/`.
 
-Production build: PENDING — see status field.
+Production build: **compile and TypeScript stages PASS; static generation blocked by a
+local environment fault, not by code.**
+
+`next build` compiled successfully and finished TypeScript with no errors. Static
+generation then failed on two pages, `/admin` and `/admin/orgs`, each exceeding the 60s
+budget across three attempts, with the log filled by `[redis] error: Connection timeout`.
+
+Diagnosed rather than assumed: `REDIS_URL` in `.env.local` points at `localhost:6379`, and
+a direct TCP probe to that address returns `ECONNREFUSED` — no Redis is running on this
+machine. The same `npm run build` passed twice earlier in this same session (Phases 132 and
+133), so the local Redis went away between those runs and this one.
+
+Nothing in Phases 134-136 touches admin pages or Redis; `/admin/orgs` imports `getAllOrgs`
+and pulls Redis in transitively. Recorded as an environment fault. A build on a machine
+with Redis available, or in CI where the deploy workflow supplies its own environment, is
+expected to complete — but this specific claim is unproven here and is not presented as
+proven.
 
 ## Caveats recorded rather than closed
 
