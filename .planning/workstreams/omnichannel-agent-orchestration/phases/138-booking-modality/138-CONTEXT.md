@@ -76,6 +76,13 @@ uses, from the organization's setting:
   assistant-request hook to override the prompt per call. (a) is simpler and keeps Vapi
   as a dumb transport; it needs a sync path that today does not exist.
 
+  Verified: `src/lib/vapi/sync-assistants.ts` is inbound only — it mirrors the Vapi
+  account's assistants into `assistant_mappings` so nobody registers ids by hand. Nothing
+  in the codebase writes a prompt or a tool schema *into* a Vapi assistant; the prompt
+  changes made during Phase 137 were applied by a manual PATCH from a probe script. So
+  option (a) means building the first outbound sync, and that sync is also what would let
+  the `customerAddress` parameter reach the Vapi function schema without hand-editing.
+
 ### Schema plumbing
 
 - Add `customerAddress` to the Xphere `book_appointment` workflow `input_schema`.
