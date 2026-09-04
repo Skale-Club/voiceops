@@ -1,0 +1,111 @@
+name: Release Gate
+
+# Phase 135 (TEST-04): the CI enforcement point for the omnichannel agent
+# orchestration path. Before this workflow, none of the fifteen existing
+# workflows ran the test suite -- build-deploy.yml goes straight from build
+# to deploy. This workflow runs the named, deterministic subset of tests
+# that scripts/release-gate.ts declares (see tests/release-gate.test.ts for
+# the integrity checks on that membership), plus the TEST-03 latency
+# profile, plus workflow-definition validation -- and it BLOCKS: any step
+# failing fails the job, which fails the check on the PR/commit. A gate that
+# only reports is not a gate.
+#
+# Deliberately NOT wired into build-deploy.yml. That workflow is the live
+# production deploy path (GHCR build -> Coolify rollout); coupling a new,
+# unproven gate to it risks blocking real deploys on a check that has not
+# yet earned that trust. This workflow is independent and additive: it can
+# go red without touching what ships.
+#
+# `npm run build` is intentionally NOT a step here -- see
+# docs/agents/release-gate.md for why (it needs an 8 GB heap and 10-30
+# minutes on a loaded machine, and build-deploy.yml already builds on every
+# push to main; duplicating it here would make this gate slow enough that
+# nobody waits for it).
+#
+# Full coverage/exclusion notes, including the deliberately-excluded
+# tests/security-secdef-isolation.test.ts (real cross-org data leak, fix
+# authored but not applied) and the pending idempotency-classification
+# review for 24 write action types, live in docs/agents/release-gate.md --
+# read that before changing this file.
+
+on:
+  pull_request: {}
+  push:
+    branches: [main, dev]
+    paths:
+      - 'src/lib/agent-runtime/**'
+      - 'src/lib/action-engine/**'
+      - 'src/lib/xkedule/**'
+      - 'src/lib/llm/**'
+      - 'src/lib/workflows/**'
+      - 'src/app/api/vapi/**'
+      - 'supabase/seeds/workflows/**'
+      - '.planning/workflows/examples/**'
+      - 'tests/agent-*.test.ts'
+      - 'tests/vapi-*.test.ts'
+      - 'tests/idempotency-ingress-key.test.ts'
+      - 'tests/coverage-pins.test.ts'
+      - 'tests/openrouter-provider-policy.test.ts'
+      - 'tests/release-gate.test.ts'
+      - 'scripts/release-gate.ts'
+      - 'scripts/validate-workflows.ts'
+      - '.github/workflows/release-gate.yml'
+      - 'package.json'
+      - 'package-lock.json'
+
+concurrency:
+  group: release-gate-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  gate:
+    name: Release gate (deterministic subset + latency + workflows)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      # scripts/release-gate.ts runs the GATE_MEMBERS subset (TEST-02
+      # coverage, cross-cutting coverage-pins.test.ts) via vitest, then
+      # `npm run workflows:validate`. It exits non-zero if any test fails,
+      # any declared member file is missing, any TEST-02 area has zero
+      # members, or workflow validation fails -- see the script itself for
+      # the exact exit conditions. See docs/agents/release-gate.md for why
+      # tests/security-secdef-isolation.test.ts is not part of this subset.
+      #
+      # Note: tests/agent-schema-rls-smoke.test.ts (one of the members) only
+      # runs its real assertions when SUPABASE_DB_URL or DATABASE_URL is
+      # set; without one of those it soft-skips with a console warning
+      # rather than failing, per its own documented fallback. No such secret
+      # is configured for this workflow (none is invented here) -- if one is
+      # added later under either name, this step picks it up automatically
+      # and that member starts asserting for real. See
+      # docs/agents/release-gate.md.
+      - name: Release gate -- deterministic test subset + workflows:validate
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: npm run release-gate
+
+      # tests/vapi-latency-profile.test.ts (135-02) is not yet a
+      # scripts/release-gate.ts GATE_MEMBERS entry -- it is not one of the
+      # seven named TEST-02 areas, it asserts a TEST-03 p95 target instead,
+      # and GATE_MEMBERS intentionally stays scoped to TEST-02 coverage plus
+      # the coverage-pins cross-cutting guard. Run it as its own step so it
+      # still blocks this workflow. See docs/agents/latency-profile.md for
+      # what the p95 figure this asserts does and does not prove.
+      - name: TEST-03 latency profile
+        run: npx vitest run tests/vapi-latency-profile.test.ts
