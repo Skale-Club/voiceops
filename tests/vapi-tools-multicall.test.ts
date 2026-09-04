@@ -70,7 +70,7 @@ function toolConfigFor(name: string, actionType: string) {
   }
 }
 
-function buildRequest(toolCalls: Array<{ id: string; name: string; arguments?: Record<string, unknown> }>) {
+function buildRequest(toolCalls: unknown[]) {
   return new Request('https://xphere.app/api/vapi/tools', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
@@ -165,5 +165,46 @@ describe('vapi tools webhook — multi-call payload (OBS-03)', () => {
     const body = (await res.json()) as { results: Array<{ toolCallId: string; result: string }> }
 
     expect(body.results).toEqual([{ toolCallId: 'tc-1', result: '9-5' }])
+  })
+
+  it('executes the nested OpenAI-style shape and returns the matching toolCallId', async () => {
+    resolveToolMock.mockResolvedValue(toolConfigFor('check_availability', 'xkedule_check_availability'))
+    executeActionMock.mockResolvedValue('09:00, 10:30, or 14:15')
+
+    const res = await POST(buildRequest([{
+      id: 'toolu-live-shape',
+      type: 'function',
+      function: {
+        name: 'check_availability',
+        arguments: JSON.stringify({ serviceIds: [333], startDate: '2026-09-05' }),
+      },
+    }]))
+    const body = (await res.json()) as { results: Array<{ toolCallId: string; result: string }> }
+
+    expect(body.results).toEqual([{
+      toolCallId: 'toolu-live-shape',
+      result: '09:00, 10:30, or 14:15',
+    }])
+    expect(executeActionMock).toHaveBeenCalledWith(
+      'xkedule_check_availability',
+      { serviceIds: [333], startDate: '2026-09-05' },
+      expect.any(Object),
+      expect.objectContaining({ organizationId: 'org-1' }),
+    )
+  })
+
+  it('returns a correlated error and does not execute when nested arguments are malformed', async () => {
+    const res = await POST(buildRequest([{
+      id: 'toolu-bad-args',
+      type: 'function',
+      function: { name: 'book_appointment', arguments: '{not-json' },
+    }]))
+    const body = (await res.json()) as { results: Array<{ toolCallId: string; result: string }> }
+
+    expect(body.results).toHaveLength(1)
+    expect(body.results[0].toolCallId).toBe('toolu-bad-args')
+    expect(body.results[0].result).toMatch(/could not read/i)
+    expect(resolveToolMock).not.toHaveBeenCalled()
+    expect(executeActionMock).not.toHaveBeenCalled()
   })
 })

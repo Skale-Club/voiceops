@@ -211,10 +211,6 @@ describe('ACTN-11: executeAction dispatcher', () => {
   const credentials = { apiKey: 'decrypted-token', locationId: 'loc_xyz' }
   const params = { firstName: 'Jane', email: 'jane@example.com' }
 
-  // Cold import of execute-action.ts's ~60-module graph measured 8.6-9.9s on this
-  // machine (independent verification of Phase 131, and again 2026-09-04), so the
-  // 10s default tips over under parallel load. This asserts dispatch correctness,
-  // not latency; give it room.
   it('executeAction("create_contact", params, credentials) calls createContact and returns its string result', async () => {
     vi.doMock('@/lib/ghl/create-contact', () => ({
       createContact: vi.fn().mockResolvedValue('Contact created. ID: cid_123'),
@@ -222,7 +218,7 @@ describe('ACTN-11: executeAction dispatcher', () => {
     const { executeAction } = await import('@/lib/action-engine/execute-action')
     const result = await executeAction('create_contact', params, credentials)
     expect(result).toBe('Contact created. ID: cid_123')
-  }, 20000)
+  })
 
   it('executeAction("get_availability", params, credentials) calls getAvailability and returns its string result', async () => {
     vi.doMock('@/lib/ghl/get-availability', () => ({

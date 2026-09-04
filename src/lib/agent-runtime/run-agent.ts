@@ -49,6 +49,7 @@ import {
 } from './build-workflow-tools'
 import { buildBuiltinTools, BUILTIN_TOOLS_SYSTEM_SUFFIX } from './builtin-tools'
 import { insertInvocationStart, updateInvocationEnd } from './invocations'
+import { finalizeAssistantCompletion } from './completion'
 import {
   deriveIdempotencyKey,
   requiresIdempotency,
@@ -387,6 +388,8 @@ async function buildPartnerTools(params: {
   delegationChain: string[]
   parentInvocationId: string
   traceId: string
+  conversationId?: string
+  sessionId?: string
   serviceClient: ReturnType<typeof createServiceRoleClient>
   emit?: (obj: object) => void
   /**
@@ -406,7 +409,8 @@ async function buildPartnerTools(params: {
 }): Promise<Record<string, ReturnType<typeof dynamicTool>>> {
   const {
     agentId, orgId, channel, _depth, visitedAgentIds, delegationChain,
-    parentInvocationId, traceId, serviceClient, emit, partnerBudget, partnerCallsLog,
+    parentInvocationId, traceId, conversationId, sessionId,
+    serviceClient, emit, partnerBudget, partnerCallsLog,
   } = params
 
   // Fetch partner rows with partner agent slug + name
@@ -594,6 +598,9 @@ async function buildPartnerTools(params: {
             orgId,
             agentId: capturedPartner.id,
             channel,
+            traceId,
+            conversationId,
+            sessionId,
             userMessage: handoffMessage,
             mode: 'production',
             _depth: _depth + 1,
@@ -1181,6 +1188,8 @@ async function runAgentBlocking(opts: InternalAgentRunOptions): Promise<AgentRun
         delegationChain: currentChain,
         parentInvocationId: invocationId,
         traceId,
+        conversationId,
+        sessionId,
         serviceClient,
         // No emit in blocking path | SSE events only in streaming path
         partnerBudget,
@@ -1242,6 +1251,17 @@ async function runAgentBlocking(opts: InternalAgentRunOptions): Promise<AgentRun
       finalText = llmResult.text
       tokensIn = llmResult.usage.inputTokens ?? 0
       tokensOut = llmResult.usage.outputTokens ?? 0
+      ;({
+        text: finalText,
+        status: finalStatus,
+        errorDetail,
+      } = finalizeAssistantCompletion({
+        text: finalText,
+        status: finalStatus,
+        errorDetail,
+        signalAborted: controller.signal.aborted,
+        fallbackMessage: resolvedAgent.fallbackMessage,
+      }))
     }
   } catch (err) {
     const error = err as Error
@@ -1253,6 +1273,7 @@ async function runAgentBlocking(opts: InternalAgentRunOptions): Promise<AgentRun
       })
       finalStatus = 'aborted'
       errorDetail = 'turn_timeout'
+      finalText = resolvedAgent.fallbackMessage
     } else if (error.message === 'no_llm_key') {
       createLogger({ traceId, orgId }).error('no_llm_key', { agentId: resolvedAgentId })
       finalStatus = 'error'
@@ -1672,6 +1693,8 @@ function runAgentStreaming(
             delegationChain: currentChain,
             parentInvocationId: invocationId,
             traceId,
+            conversationId,
+            sessionId,
             serviceClient,
             emit: delegationVisible ? emit : undefined,
             partnerBudget,
@@ -1745,11 +1768,27 @@ function runAgentStreaming(
             }
           }
 
+          const completion = finalizeAssistantCompletion({
+            text: accumulatedText,
+            status: finalStatus,
+            errorDetail,
+            signalAborted: abortController.signal.aborted,
+            fallbackMessage: resolvedAgent.fallbackMessage,
+          })
+          accumulatedText = completion.text
+          finalStatus = completion.status
+          errorDetail = completion.errorDetail
+          if (completion.usedFallback) {
+            emit({ event: 'token', text: completion.text })
+          }
+
         } catch (err) {
           const error = err as Error
           if (error.name === 'AbortError') {
             finalStatus = 'aborted'
             errorDetail = 'turn_timeout'
+            accumulatedText = resolvedAgent.fallbackMessage
+            emit({ event: 'token', text: resolvedAgent.fallbackMessage })
           } else if (error.message === 'no_llm_key') {
             finalStatus = 'error'
             errorDetail = 'no_llm_key'

@@ -73,6 +73,8 @@ const IDEMPOTENCY_ABANDONED_RESULT =
   'I could not confirm the previous attempt completed. Please try again in a moment.'
 const IDEMPOTENCY_UNAVAILABLE_RESULT =
   'I could not verify that request right now. Please try again in a moment.'
+const INVALID_TOOL_ARGUMENTS_RESULT =
+  'I could not read that request. Please repeat the details and try again.'
 
 interface ToolCallResult {
   toolCallId: string
@@ -209,13 +211,26 @@ async function executeOneToolCall(params: {
   const { call, toolCall, orgId, supabase, startTime, routingMode } = params
 
   try {
+    // A malformed non-empty argument string is a transport failure, not an
+    // empty argument object. Never execute a write with silently discarded
+    // fields; keep the response correlated so Vapi can recover in-call.
+    let args: Record<string, unknown>
+    try {
+      args = getToolArguments(toolCall)
+    } catch (argumentErr) {
+      obs.warn('vapi_tool_arguments_invalid', {
+        toolCallId: toolCall.id,
+        toolName: toolCall.name,
+        error: argumentErr,
+      })
+      return { toolCallId: toolCall.id, result: INVALID_TOOL_ARGUMENTS_RESULT }
+    }
+
     // Resolve tool config (with nested integration credentials)
     const toolConfig = await resolveTool(orgId, toolCall.name, supabase)
     if (!toolConfig) {
       return { toolCallId: toolCall.id, result: 'Tool not configured.' }
     }
-
-    const args = getToolArguments(toolCall)
 
     // SAFE-02: guard side-effecting executions only — a read must not pay
     // for the check or be blocked by it.

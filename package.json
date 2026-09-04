@@ -13,6 +13,7 @@
     "start": "next start",
     "lint": "eslint .",
     "test": "vitest run",
+    "test:manual": "vitest run --config vitest.manual.config.ts",
     "test:watch": "vitest",
     "eval": "cross-env RUN_AGENT_EVALS=true vitest run tests/evals/runner.test.ts --reporter=verbose",
     "seed": "tsx scripts/load-workflow-seeds.ts",

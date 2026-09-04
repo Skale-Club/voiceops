@@ -106,6 +106,22 @@ export const GATE_MEMBERS: GateMember[] = [
     areas: ['Xkedule idempotency'],
   },
   {
+    // Production incident 2026-09-04: Vapi's nested wire shape was rejected
+    // before execution and produced "No result returned" on a live call.
+    file: 'tests/vapi-payload-shape.test.ts',
+    areas: [],
+  },
+  {
+    // Route-level proof that nested calls stay correlated through execution.
+    file: 'tests/vapi-tools-multicall.test.ts',
+    areas: [],
+  },
+  {
+    // A timed-out/step-exhausted chat turn must never end as success with no text.
+    file: 'tests/agent-completion-contract.test.ts',
+    areas: [],
+  },
+  {
     file: 'tests/coverage-pins.test.ts',
     // Cross-cutting: pins the full membership of every safety-critical set
     // (SIDE_EFFECTING_ACTIONS, COMMERCE_WRITE_ACTIONS, partner-edge denial

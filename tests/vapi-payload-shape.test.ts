@@ -42,10 +42,16 @@ describe('Vapi tool-call wire shapes', () => {
     expect(flat.name).toBe(nested.name)
   })
 
-  it('treats an empty or malformed argument string as no arguments rather than throwing', () => {
+  it('treats an empty or absent argument string as no arguments', () => {
     expect(getToolArguments(normalizeVapiToolCall({ id: 'a', type: 'function', function: { name: 'list_services', arguments: '' } }))).toEqual({})
-    expect(getToolArguments(normalizeVapiToolCall({ id: 'b', type: 'function', function: { name: 'list_services', arguments: 'not json' } }))).toEqual({})
     expect(getToolArguments(normalizeVapiToolCall({ id: 'c', type: 'function', function: { name: 'list_services' } }))).toEqual({})
+  })
+
+  it('rejects malformed or non-object argument JSON instead of silently executing with {}', () => {
+    const malformed = normalizeVapiToolCall({ id: 'b', type: 'function', function: { name: 'book_appointment', arguments: 'not json' } })
+    const array = normalizeVapiToolCall({ id: 'd', type: 'function', function: { name: 'book_appointment', arguments: '[]' } })
+    expect(() => getToolArguments(malformed)).toThrow('malformed JSON')
+    expect(() => getToolArguments(array)).toThrow('JSON object')
   })
 
   it('still fails closed on a shape that is neither', () => {

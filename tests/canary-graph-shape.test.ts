@@ -79,14 +79,20 @@ describe('MESH-01: Cuts & Culture canary graph shape', () => {
     expect(entry.direct_tools).toEqual([])
   })
 
+  it('routes named-service availability directly without a Services detour', () => {
+    const entry = graph.agents.find((a) => a.key === 'entry')!
+    expect(entry.system_prompt).toContain('hand directly to Availability')
+    expect(entry.system_prompt).toContain('Never call Services first just to obtain an id')
+  })
+
   it('every specialist directly owns exactly the tools it needs, using only real tool names', () => {
     const byKey = new Map(graph.agents.map((a) => [a.key, a]))
     expect(byKey.get('services')!.direct_tools.sort()).toEqual(['business_info', 'list_services'].sort())
-    expect(byKey.get('pricing')!.direct_tools).toEqual(['get_quote'])
-    expect(byKey.get('availability')!.direct_tools).toEqual(['check_availability'])
+    expect(byKey.get('pricing')!.direct_tools.sort()).toEqual(['get_quote', 'list_services'].sort())
+    expect(byKey.get('availability')!.direct_tools.sort()).toEqual(['check_availability', 'list_services'].sort())
     expect(byKey.get('customer')!.direct_tools).toEqual(['lookup_customer'])
     expect(byKey.get('booking')!.direct_tools.sort()).toEqual(
-      ['book_appointment', 'reschedule_appointment', 'cancel_appointment'].sort(),
+      ['book_appointment', 'reschedule_appointment', 'cancel_appointment', 'list_services'].sort(),
     )
     for (const agent of graph.agents) {
       for (const toolName of agent.direct_tools) {
@@ -354,13 +360,13 @@ function freshClient(orgSlug = TARGET_ORG_SLUG): FakeSupabase {
   return client
 }
 
-// Total per-edge delegated-workflow grants: entry->services(2) + entry->pricing(1)
-// + entry->availability(1) + entry->customer(1) + entry->booking(3)
-// + booking->customer(1) + booking->availability(1) = 10.
-const EXPECTED_EDGE_GRANT_COUNT = 10
-// Total direct-ownership (agent_tools) grants: services(2) + pricing(1)
-// + availability(1) + customer(1) + booking(3) = 8. Entry holds none.
-const EXPECTED_DIRECT_TOOL_COUNT = 8
+// Total per-edge delegated-workflow grants: entry->services(2) + entry->pricing(2)
+// + entry->availability(2) + entry->customer(1) + entry->booking(4)
+// + booking->customer(1) + booking->availability(2) = 14.
+const EXPECTED_EDGE_GRANT_COUNT = 14
+// Total direct-ownership (agent_tools) grants: services(2) + pricing(2)
+// + availability(2) + customer(1) + booking(4) = 11. Entry holds none.
+const EXPECTED_DIRECT_TOOL_COUNT = 11
 
 // ─────────────────────────────────────────────────────────────────────────
 // Task 2/3: safe, idempotent, dry-run-by-default provisioning that reuses
@@ -560,8 +566,6 @@ describe('MESH-03: provision-canary-graph.ts safety and idempotency', () => {
       if (isWrite) {
         writeGrantCount += 1
         expect(partnerAgent.slug).toBe('cc-booking-specialist')
-      } else {
-        expect(partnerAgent.slug).not.toBe('cc-booking-specialist')
       }
     }
     expect(writeGrantCount).toBe(3)

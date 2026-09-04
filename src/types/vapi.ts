@@ -41,22 +41,30 @@ export interface VapiToolCall {
   name: string
   arguments?: Record<string, unknown>
   parameters?: Record<string, unknown>
+  /** Present when Vapi supplied a non-empty argument string that is not a JSON object. */
+  argumentParseError?: string
 }
 
-function decodeArgs(v: unknown): Record<string, unknown> | undefined {
-  if (v == null) return undefined
+interface DecodedArgs {
+  value?: Record<string, unknown>
+  error?: string
+}
+
+function decodeArgs(v: unknown): DecodedArgs {
+  if (v == null) return {}
   if (typeof v === 'string') {
-    if (!v.trim()) return {}
+    if (!v.trim()) return { value: {} }
     try {
       const parsed: unknown = JSON.parse(v)
-      return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
-        ? (parsed as Record<string, unknown>)
-        : {}
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        return { error: 'arguments must decode to a JSON object' }
+      }
+      return { value: parsed as Record<string, unknown> }
     } catch {
-      return {}
+      return { error: 'arguments contain malformed JSON' }
     }
   }
-  return v as Record<string, unknown>
+  return { value: v as Record<string, unknown> }
 }
 
 /**
@@ -66,13 +74,22 @@ function decodeArgs(v: unknown): Record<string, unknown> | undefined {
  */
 export function normalizeVapiToolCall(raw: z.infer<typeof VapiToolCallSchema>): VapiToolCall {
   if ('function' in raw) {
-    return { id: raw.id, name: raw.function.name, arguments: decodeArgs(raw.function.arguments) }
+    const decoded = decodeArgs(raw.function.arguments)
+    return {
+      id: raw.id,
+      name: raw.function.name,
+      arguments: decoded.value,
+      argumentParseError: decoded.error,
+    }
   }
+  const decodedArguments = decodeArgs(raw.arguments)
+  const decodedParameters = decodeArgs(raw.parameters)
   return {
     id: raw.id,
     name: raw.name,
-    arguments: decodeArgs(raw.arguments),
-    parameters: decodeArgs(raw.parameters),
+    arguments: decodedArguments.value,
+    parameters: decodedParameters.value,
+    argumentParseError: decodedArguments.error ?? decodedParameters.error,
   }
 }
 
@@ -107,6 +124,9 @@ export type VapiToolCallMessage = z.infer<typeof VapiToolCallMessageSchema>
 
 // Helper: coalesce arguments/parameters field (Vapi sends either depending on version)
 export function getToolArguments(toolCall: VapiToolCall): Record<string, unknown> {
+  if (toolCall.argumentParseError) {
+    throw new Error(`Invalid Vapi tool arguments: ${toolCall.argumentParseError}`)
+  }
   return toolCall.arguments ?? toolCall.parameters ?? {}
 }
 
