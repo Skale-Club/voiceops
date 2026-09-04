@@ -1,6 +1,13 @@
 import { describe, it, vi } from 'vitest'
 vi.mock('next/server', () => ({ after: (fn: () => unknown) => { void fn() } }))
 import { runAgent } from '@/lib/agent-runtime'
+import { createServiceRoleClient } from '@/lib/supabase/admin'
+
+async function orchestratorId() {
+  const s = createServiceRoleClient()
+  const { data } = await s.from('agents').select('id').eq('organization_id', ORG).eq('slug', 'cc-entry-orchestrator').single()
+  return data!.id as string
+}
 
 const ORG = '31502b7d-f4bd-4493-91f7-fc6f2738a09d'
 
