@@ -3,6 +3,9 @@ import type { Database } from '@/types/database'
 import type {
   OrgTemplateAssetGroup,
   OrgTemplateSnapshot,
+  SnapshotAgent,
+  SnapshotAgentChannelDefault,
+  SnapshotAgentPartnerEdge,
   SnapshotCustomField,
   SnapshotMessageTemplate,
   SnapshotPipeline,
@@ -45,6 +48,15 @@ export async function captureOrgSnapshot(
   }
   if (want.has('workflows')) {
     tasks.push(captureWorkflows(supabase).then((v) => void (snapshot.workflows = v)))
+  }
+  if (want.has('agents')) {
+    tasks.push(
+      captureAgents(supabase).then((v) => {
+        snapshot.agents = v.agents
+        snapshot.agent_partner_edges = v.agent_partner_edges
+        snapshot.agent_channel_defaults = v.agent_channel_defaults
+      })
+    )
   }
 
   await Promise.all(tasks)
@@ -168,4 +180,162 @@ async function captureWorkflows(supabase: Client): Promise<SnapshotWorkflow[]> {
     trigger_config: (w.trigger_config as Record<string, unknown>) ?? {},
     definition: w.current_version_id ? definitions.get(w.current_version_id) ?? null : null,
   }))
+}
+
+/**
+ * Capture the agent mesh: agents, their active prompt text, direct tool
+ * grants, partner edges, delegated workflow grants, and channel defaults.
+ *
+ * Every cross-reference is resolved to a stable name before it leaves this
+ * function — agent ids become `slug`, workflow ids become `tool_name` — so
+ * the result can be installed into a different organization where none of
+ * the source ids exist. RLS scopes every read to the caller's active org,
+ * exactly like every sibling capture function; no explicit organization_id
+ * filter is added anywhere below.
+ */
+async function captureAgents(supabase: Client): Promise<{
+  agents: SnapshotAgent[]
+  agent_partner_edges: SnapshotAgentPartnerEdge[]
+  agent_channel_defaults: SnapshotAgentChannelDefault[]
+}> {
+  const { data: agentRows } = await supabase
+    .from('agents')
+    .select(
+      'id, slug, name, description, model, temperature, max_tokens, max_history, fallback_message, kb_scope, allowed_channels, is_active, active_prompt_version_id'
+    )
+    .order('name')
+
+  if (!agentRows || agentRows.length === 0) {
+    return { agents: [], agent_partner_edges: [], agent_channel_defaults: [] }
+  }
+
+  const slugById = new Map(agentRows.map((a) => [a.id, a.slug]))
+
+  // Active prompt text — never fall back to agents.system_prompt (legacy/unused
+  // by the runtime; see resolveAgent()). A missing/broken active version
+  // captures an empty string rather than blocking the whole capture.
+  const versionIds = agentRows
+    .map((a) => a.active_prompt_version_id)
+    .filter((id): id is string => !!id)
+
+  const promptById = new Map<string, string>()
+  if (versionIds.length > 0) {
+    const { data: versions } = await supabase
+      .from('agent_prompt_versions')
+      .select('id, system_prompt')
+      .in('id', versionIds)
+    for (const v of versions ?? []) promptById.set(v.id, v.system_prompt)
+  }
+
+  // Direct tool grants — only workflow_id-sourced rows are portable across
+  // tenants; tool_config_id-sourced rows point at a per-org integration
+  // config a template cannot carry, and are silently skipped.
+  const { data: agentToolRows } = await supabase
+    .from('agent_tools')
+    .select('agent_id, workflow_id, tool_config_id')
+
+  const workflowIds = new Set<string>()
+  for (const t of agentToolRows ?? []) {
+    if (t.workflow_id) workflowIds.add(t.workflow_id)
+  }
+
+  // Partner edges + delegated workflow grants.
+  const { data: partnerRows } = await supabase
+    .from('agent_partners')
+    .select(
+      'id, agent_id, partner_agent_id, invocation_description, allowed_channels, max_calls_per_turn, max_depth, timeout_ms'
+    )
+
+  const partnerEdgeIds = (partnerRows ?? []).map((p) => p.id)
+  let grantRows: { partner_edge_id: string; workflow_id: string }[] = []
+  if (partnerEdgeIds.length > 0) {
+    const { data } = await supabase
+      .from('agent_partner_workflow_grants')
+      .select('partner_edge_id, workflow_id')
+      .in('partner_edge_id', partnerEdgeIds)
+    grantRows = data ?? []
+  }
+  for (const g of grantRows) workflowIds.add(g.workflow_id)
+
+  const toolNameById = new Map<string, string | null>()
+  if (workflowIds.size > 0) {
+    const { data: workflows } = await supabase
+      .from('workflows')
+      .select('id, tool_name')
+      .in('id', Array.from(workflowIds))
+    for (const w of workflows ?? []) toolNameById.set(w.id, w.tool_name)
+  }
+
+  const directToolsByAgent = new Map<string, string[]>()
+  for (const t of agentToolRows ?? []) {
+    if (!t.workflow_id) continue
+    const toolName = toolNameById.get(t.workflow_id)
+    if (!toolName) continue
+    const list = directToolsByAgent.get(t.agent_id) ?? []
+    list.push(toolName)
+    directToolsByAgent.set(t.agent_id, list)
+  }
+
+  const grantsByPartnerEdge = new Map<string, string[]>()
+  for (const g of grantRows) {
+    const toolName = toolNameById.get(g.workflow_id)
+    if (!toolName) continue
+    const list = grantsByPartnerEdge.get(g.partner_edge_id) ?? []
+    list.push(toolName)
+    grantsByPartnerEdge.set(g.partner_edge_id, list)
+  }
+
+  const agents: SnapshotAgent[] = agentRows.map((a) => {
+    const directTools = directToolsByAgent.get(a.id) ?? []
+    return {
+      slug: a.slug,
+      name: a.name,
+      description: a.description,
+      role: directTools.length === 0 ? 'orchestrator' : 'specialist',
+      model: a.model,
+      temperature: a.temperature,
+      max_tokens: a.max_tokens,
+      max_history: a.max_history,
+      fallback_message: a.fallback_message,
+      allowed_channels: a.allowed_channels ?? [],
+      kb_scope: a.kb_scope,
+      is_active: a.is_active,
+      system_prompt: a.active_prompt_version_id
+        ? promptById.get(a.active_prompt_version_id) ?? ''
+        : '',
+      direct_tools: directTools,
+    }
+  })
+
+  const agent_partner_edges: SnapshotAgentPartnerEdge[] = (partnerRows ?? [])
+    .map((p) => {
+      const agentSlug = slugById.get(p.agent_id)
+      const partnerSlug = slugById.get(p.partner_agent_id)
+      if (!agentSlug || !partnerSlug) return null
+      return {
+        agent_slug: agentSlug,
+        partner_agent_slug: partnerSlug,
+        invocation_description: p.invocation_description,
+        allowed_channels: p.allowed_channels as string[] | null,
+        max_calls_per_turn: p.max_calls_per_turn,
+        max_depth: p.max_depth,
+        timeout_ms: p.timeout_ms,
+        workflow_grants: grantsByPartnerEdge.get(p.id) ?? [],
+      }
+    })
+    .filter((e): e is SnapshotAgentPartnerEdge => e !== null)
+
+  const { data: channelDefaultRows } = await supabase
+    .from('agent_channel_defaults')
+    .select('channel, agent_id')
+
+  const agent_channel_defaults: SnapshotAgentChannelDefault[] = (channelDefaultRows ?? [])
+    .map((c) => {
+      const agentSlug = slugById.get(c.agent_id)
+      if (!agentSlug) return null
+      return { channel: c.channel as string, agent_slug: agentSlug }
+    })
+    .filter((c): c is SnapshotAgentChannelDefault => c !== null)
+
+  return { agents, agent_partner_edges, agent_channel_defaults }
 }
