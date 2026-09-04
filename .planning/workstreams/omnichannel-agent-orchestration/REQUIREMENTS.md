@@ -56,9 +56,9 @@ Total: **32 active requirements** across 7 delivery categories.
 ### Verification Gates
 
 - [x] **TEST-01**: Existing Vapi and Action Engine baseline tests are repaired before behavioral cutover so failures distinguish regressions from stale mocks or external Redis availability.
-- [ ] **TEST-02**: Automated tests cover tenant isolation, direct versus delegated authorization, cross-agent calls, cycle/depth limits, handoff injection resistance, OpenRouter-only generation, and Xkedule idempotency.
-- [ ] **TEST-03**: A realistic timed integration test exercises Vapi ingress to specialist to tool result; simple voice lookup meets a p95 target of 5 seconds under the documented test profile.
-- [ ] **TEST-04**: Build, focused Vitest suites, workflow validation, and a documented voice/text UAT checklist pass before specialist routing is enabled for production traffic.
+- [x] **TEST-02**: Automated tests cover tenant isolation, direct versus delegated authorization, cross-agent calls, cycle/depth limits, handoff injection resistance, OpenRouter-only generation, and Xkedule idempotency.
+- [x] **TEST-03**: A realistic timed integration test exercises Vapi ingress to specialist to tool result; simple voice lookup meets a p95 target of 5 seconds under the documented test profile.
+- [x] **TEST-04**: Build, focused Vitest suites, workflow validation, and a documented voice/text UAT checklist pass before specialist routing is enabled for production traffic.
 
 ## Future Requirements
 
@@ -115,9 +115,9 @@ Every active v3.5 requirement maps to exactly one implementation phase.
 | ROLL-02 | Phase 134 | Done |
 | ROLL-03 | Phase 136 | Pending |
 | TEST-01 | Phase 131 | Complete |
-| TEST-02 | Phase 135 | Pending |
-| TEST-03 | Phase 135 | Pending |
-| TEST-04 | Phase 135 | Pending |
+| TEST-02 | Phase 135 | Done |
+| TEST-03 | Phase 135 | Done |
+| TEST-04 | Phase 135 | Done |
 
 ### Coverage Summary by Phase
 

@@ -1,0 +1,228 @@
+{
+  "$schema": "cuts-and-culture-canary-graph-v1",
+  "description": "Phase 136 Plan 02 (ROLL-01): the Cuts & Culture canary specialist graph. Tenant-scoped, isolated canary data -- deliberately kept OUT of supabase/seeds/workflows/ (platform defaults, CI-validated). This tenant is never a product default; see 136-CONTEXT.md 'Constraints That Shape the Design'. Consumed only by scripts/provision-canary-graph.ts, which has not been run against any real organization.",
+  "organization": {
+    "slug": "cuts-and-culture",
+    "name": "Cuts & Culture"
+  },
+  "agents": [
+    {
+      "key": "entry",
+      "slug": "cuts-and-culture-entry",
+      "name": "Cuts & Culture Entry Orchestrator",
+      "role": "orchestrator",
+      "description": "Entry point for both the voice and web widget channels. Understands what the caller or visitor needs and delegates to the right specialist.",
+      "system_prompt": "You are the entry point for Cuts & Culture, a barbershop and salon, on both the phone and the website chat widget. Figure out what the person needs and delegate to the right specialist: Services for what is offered, Pricing for a cost estimate, Availability for open time slots, Customer for looking up an existing customer by phone, and Booking for creating, rescheduling, or cancelling an appointment. Only the Booking specialist may write a change to the schedule -- never attempt to create, move, or cancel an appointment yourself, and never guess a price, opening hours, address, or staff member's name. Relay only what a specialist's tool returns.",
+      "allowed_channels": ["voice", "web_widget"],
+      "model": "gpt-4o-mini"
+    },
+    {
+      "key": "services",
+      "slug": "cuts-and-culture-services",
+      "name": "Cuts & Culture Services Specialist",
+      "role": "specialist",
+      "description": "Answers what services Cuts & Culture offers and which staff member can perform each one. Read-only.",
+      "system_prompt": "You are the Services specialist for Cuts & Culture. Use the get_services tool to answer questions about what services are offered, their typical duration, and which staff member is able to perform each one. Never state a service, price, or duration the tool did not return, and never create, change, or cancel a booking -- that belongs to the Booking specialist.",
+      "allowed_channels": ["voice", "web_widget"],
+      "model": "gpt-4o-mini"
+    },
+    {
+      "key": "pricing",
+      "slug": "cuts-and-culture-pricing",
+      "name": "Cuts & Culture Pricing Specialist",
+      "role": "specialist",
+      "description": "Prices one or more services before a booking is made. Read-only.",
+      "system_prompt": "You are the Pricing specialist for Cuts & Culture. Use the quote tool to price one or more services before the customer commits to a booking. State only the total and the breakdown the tool returns -- never estimate a price from memory, and never create, change, or cancel a booking -- that belongs to the Booking specialist.",
+      "allowed_channels": ["voice", "web_widget"],
+      "model": "gpt-4o-mini"
+    },
+    {
+      "key": "availability",
+      "slug": "cuts-and-culture-availability",
+      "name": "Cuts & Culture Availability Specialist",
+      "role": "specialist",
+      "description": "Finds open time slots for a date or date range. Shared by both the voice and web widget channels -- one definition, two channels, per ROLL-03. Read-only.",
+      "system_prompt": "You are the Availability specialist for Cuts & Culture, shared by both the phone and the web widget. Use the check_availability tool to find open slots for the requested date (or date range) and service(s), optionally narrowed to a specific staff member. Never claim a slot is open or closed without checking, and never create, change, or cancel a booking -- that belongs to the Booking specialist.",
+      "allowed_channels": ["voice", "web_widget"],
+      "model": "gpt-4o-mini"
+    },
+    {
+      "key": "customer",
+      "slug": "cuts-and-culture-customer",
+      "name": "Cuts & Culture Customer Specialist",
+      "role": "specialist",
+      "description": "Recognizes a returning customer by phone number and answers hours/address/policy questions. Read-only.",
+      "system_prompt": "You are the Customer specialist for Cuts & Culture. Use the lookup_customer tool to recognize a returning customer by phone number and see their upcoming appointments, and the business_info tool to answer questions about opening hours, address, timezone, service area, and policies. Never answer a policy or hours question from memory -- only from what business_info returns -- and never create, change, or cancel a booking -- that belongs to the Booking specialist.",
+      "allowed_channels": ["voice", "web_widget"],
+      "model": "gpt-4o-mini"
+    },
+    {
+      "key": "booking",
+      "slug": "cuts-and-culture-booking",
+      "name": "Cuts & Culture Booking Specialist",
+      "role": "specialist",
+      "description": "The only specialist authorized to write a change to the Xkedule schedule: create, reschedule, or cancel an appointment.",
+      "system_prompt": "You are the Booking specialist for Cuts & Culture, and the only specialist authorized to write a change to the schedule. Use create_booking to create a new appointment, reschedule_booking to move an existing one, and cancel_booking to cancel one. Confirm the customer's details and the exact slot before writing, and never guess a booking id -- ask the Customer specialist to look one up if the caller does not already have it. Never invent a price, duration, or availability window; rely on what the other specialists or your own tools return.",
+      "allowed_channels": ["voice", "web_widget"],
+      "model": "gpt-4o-mini"
+    }
+  ],
+  "workflows": [
+    {
+      "key": "get_services",
+      "tool_name": "xkedule_get_services",
+      "node_kind": "xkedule_get_services",
+      "access": "read",
+      "name": "Xkedule -- Get Services",
+      "description": "Returns the bookable services, their typical duration, and which staff member can perform each one.",
+      "input_schema": {}
+    },
+    {
+      "key": "check_availability",
+      "tool_name": "xkedule_check_availability",
+      "node_kind": "xkedule_check_availability",
+      "access": "read",
+      "name": "Xkedule -- Check Availability",
+      "description": "Returns open slots for a date or date range and one or more services, optionally narrowed to a staff member.",
+      "input_schema": {
+        "date": { "type": "string", "description": "Single date to check, YYYY-MM-DD." },
+        "startDate": { "type": "string", "description": "Start of a date range to check, YYYY-MM-DD." },
+        "endDate": { "type": "string", "description": "End of a date range to check, YYYY-MM-DD." },
+        "serviceIds": { "type": "string", "description": "Comma-separated service id(s) to check availability for." },
+        "staffMemberId": { "type": "string", "description": "Restrict the check to a single staff member id." },
+        "includeStaff": { "type": "boolean", "description": "Include per-slot staff attribution in the response." }
+      }
+    },
+    {
+      "key": "quote",
+      "tool_name": "xkedule_quote",
+      "node_kind": "xkedule_quote",
+      "access": "read",
+      "name": "Xkedule -- Quote",
+      "description": "Prices a cart of one or more services without creating a booking.",
+      "input_schema": {
+        "serviceIds": { "type": "string", "description": "Comma-separated service id(s) to price.", "required": true }
+      }
+    },
+    {
+      "key": "lookup_customer",
+      "tool_name": "xkedule_lookup_customer",
+      "node_kind": "xkedule_lookup_customer",
+      "access": "read",
+      "name": "Xkedule -- Lookup Customer",
+      "description": "Resolves a phone number to an existing Xkedule customer record and their upcoming (non-cancelled) bookings.",
+      "input_schema": {
+        "phone": { "type": "string", "description": "The caller's phone number.", "required": true }
+      }
+    },
+    {
+      "key": "business_info",
+      "tool_name": "xkedule_business_info",
+      "node_kind": "xkedule_business_info",
+      "access": "read",
+      "name": "Xkedule -- Business Info",
+      "description": "Returns opening hours, address, timezone, service area, and booking policies.",
+      "input_schema": {}
+    },
+    {
+      "key": "create_booking",
+      "tool_name": "xkedule_create_booking",
+      "node_kind": "xkedule_create_booking",
+      "access": "write",
+      "name": "Xkedule -- Create Booking",
+      "description": "Creates a booking from the minimum details gathered from the customer. Xkedule computes duration, end time, and price, and re-validates the slot.",
+      "input_schema": {
+        "customerName": { "type": "string", "description": "The customer's name." },
+        "customerPhone": { "type": "string", "description": "The customer's phone number." },
+        "customerEmail": { "type": "string", "description": "The customer's email address." },
+        "bookingDate": { "type": "string", "description": "Requested date, YYYY-MM-DD.", "required": true },
+        "startTime": { "type": "string", "description": "Requested start time.", "required": true },
+        "serviceIds": { "type": "string", "description": "Comma-separated service id(s) being booked.", "required": true },
+        "staffMemberId": { "type": "string", "description": "Requested staff member id, if any." },
+        "notes": { "type": "string", "description": "What the customer actually asked for, in their own words." }
+      }
+    },
+    {
+      "key": "cancel_booking",
+      "tool_name": "xkedule_cancel_booking",
+      "node_kind": "xkedule_cancel_booking",
+      "access": "write",
+      "name": "Xkedule -- Cancel Booking",
+      "description": "Cancels an existing booking by id. Idempotent on Xkedule's side -- cancelling an already-terminal booking returns its current state instead of erroring.",
+      "input_schema": {
+        "bookingId": { "type": "string", "description": "The Xkedule booking id to cancel.", "required": true }
+      }
+    },
+    {
+      "key": "reschedule_booking",
+      "tool_name": "xkedule_reschedule_booking",
+      "node_kind": "xkedule_reschedule_booking",
+      "access": "write",
+      "name": "Xkedule -- Reschedule Booking",
+      "description": "Moves an existing booking to a new date/time and optionally a different staff member. Xkedule re-validates the slot and rejects a cancelled/completed booking.",
+      "input_schema": {
+        "bookingId": { "type": "string", "description": "The Xkedule booking id to reschedule.", "required": true },
+        "bookingDate": { "type": "string", "description": "New date, YYYY-MM-DD." },
+        "startTime": { "type": "string", "description": "New start time." },
+        "staffMemberId": { "type": "string", "description": "New staff member id, if changing." }
+      }
+    }
+  ],
+  "partner_edges": [
+    {
+      "key": "entry_to_services",
+      "agent_key": "entry",
+      "partner_agent_key": "services",
+      "invocation_description": "Delegate to the Services specialist to answer what Cuts & Culture offers.",
+      "allowed_channels": ["voice", "web_widget"],
+      "max_calls_per_turn": 3,
+      "max_depth": 2,
+      "timeout_ms": 30000,
+      "workflow_grants": ["get_services"]
+    },
+    {
+      "key": "entry_to_pricing",
+      "agent_key": "entry",
+      "partner_agent_key": "pricing",
+      "invocation_description": "Delegate to the Pricing specialist to quote one or more services.",
+      "allowed_channels": ["voice", "web_widget"],
+      "max_calls_per_turn": 3,
+      "max_depth": 2,
+      "timeout_ms": 30000,
+      "workflow_grants": ["quote"]
+    },
+    {
+      "key": "entry_to_availability",
+      "agent_key": "entry",
+      "partner_agent_key": "availability",
+      "invocation_description": "Delegate to the Availability specialist to find open slots. Same edge, same specialist, for both voice and web_widget -- see the 'allowed_channels' on this edge and on the Availability agent itself.",
+      "allowed_channels": ["voice", "web_widget"],
+      "max_calls_per_turn": 3,
+      "max_depth": 2,
+      "timeout_ms": 30000,
+      "workflow_grants": ["check_availability"]
+    },
+    {
+      "key": "entry_to_customer",
+      "agent_key": "entry",
+      "partner_agent_key": "customer",
+      "invocation_description": "Delegate to the Customer specialist to recognize a returning customer or answer an hours/address/policy question.",
+      "allowed_channels": ["voice", "web_widget"],
+      "max_calls_per_turn": 3,
+      "max_depth": 2,
+      "timeout_ms": 30000,
+      "workflow_grants": ["lookup_customer", "business_info"]
+    },
+    {
+      "key": "entry_to_booking",
+      "agent_key": "entry",
+      "partner_agent_key": "booking",
+      "invocation_description": "Delegate to the Booking specialist -- the only specialist authorized to create, reschedule, or cancel an appointment.",
+      "allowed_channels": ["voice", "web_widget"],
+      "max_calls_per_turn": 3,
+      "max_depth": 2,
+      "timeout_ms": 45000,
+      "workflow_grants": ["create_booking", "cancel_booking", "reschedule_booking"]
+    }
+  ]
+}

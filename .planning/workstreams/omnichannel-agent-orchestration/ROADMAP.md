@@ -14,7 +14,7 @@ This milestone extends the existing text-agent platform into a tenant-safe voice
 - [x] **Phase 132: Authorized Specialist Orchestration** - Agents route and delegate with typed contracts, least privilege, scoped knowledge, and centralized model access.
 - [x] **Phase 133: Idempotent Action and Vapi Safety** - Voice-triggered actions stay fast, replay-safe, timeout-safe, and compatible with the always-200 Vapi contract.
 - [x] **Phase 134: Traceability and Reversible Routing** - Operators can inspect complete invocation trees and switch each channel between legacy and specialist routing without data loss.
-- [ ] **Phase 135: Release Verification and Hardening** - Automated, timed, build, workflow, and UAT gates prove the orchestration path is safe to expose to production traffic.
+- [x] **Phase 135: Release Verification and Hardening** - Automated, timed, build, workflow, and UAT gates prove the orchestration path is safe to expose to production traffic.
 - [ ] **Phase 136: Cuts & Culture Canary Rollout** - The specialist graph is enabled and proven for one tenant without becoming platform-default behavior.
 
 ## Phase Details
@@ -88,9 +88,9 @@ This milestone extends the existing text-agent platform into a tenant-safe voice
   2. A realistic timed integration test exercises Vapi ingress through specialist and tool result, with a simple voice lookup meeting p95 at or below 5 seconds under the documented test profile.
   3. The production build, focused Vitest suites, workflow validation, and documented voice/text UAT checklist all pass before the canary receives specialist-routed traffic.
 **Plans**:
-- [ ] 135-01-PLAN.md — Declare the release gate subset and pin safety-critical set coverage.
-- [ ] 135-02-PLAN.md — Measure the Vapi path p95 against a written test profile.
-- [ ] 135-03-PLAN.md — Wire the gate into CI and write the voice/text UAT checklist.
+- [x] 135-01-PLAN.md — Declare the release gate subset and pin safety-critical set coverage.
+- [x] 135-02-PLAN.md — Measure the Vapi path p95 against a written test profile.
+- [x] 135-03-PLAN.md — Wire the gate into CI and write the voice/text UAT checklist.
 
 ### Phase 136: Cuts & Culture Canary Rollout
 **Goal**: Cuts & Culture alone runs the first production specialist graph across voice and widget, proving shared specialization, real idempotent booking, and complete tracing without installing tenant-specific behavior as a platform default.
@@ -118,7 +118,7 @@ Phases execute in numeric order: 131 → 132 → 133 → 134 → 135 → 136.
 | 132. Authorized Specialist Orchestration | 4/4 | Complete | 2026-09-03 |
 | 133. Idempotent Action and Vapi Safety | 3/3 | Complete | 2026-09-03 |
 | 134. Traceability and Reversible Routing | 3/3 | Complete | 2026-09-03 |
-| 135. Release Verification and Hardening | 0/3 | Planned | - |
+| 135. Release Verification and Hardening | 3/3 | Complete | 2026-09-03 |
 | 136. Cuts & Culture Canary Rollout | 0/3 | Planned | - |
 
 ---
