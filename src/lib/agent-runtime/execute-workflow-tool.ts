@@ -36,6 +36,16 @@ export interface ExecuteWorkflowToolParams {
     conversationId?: string
     channel?: string
     agentId?: string
+    /**
+     * Phase 134 Plan 03 (OBS-01/OBS-02): the calling agent turn's trace and
+     * invocation identity, threaded straight into logToolRun()'s Phase
+     * 134-01 columns (migration 1292) so an agent-triggered workflow run is
+     * joinable back to the invocation that caused it. Optional — the MCP
+     * tool-invocation call site (src/lib/mcp/tools/workflows.ts) has no
+     * agent invocation to attribute to and legitimately omits both.
+     */
+    traceId?: string
+    agentInvocationId?: string
   }
   timeoutMs?: number
   /** Display name recorded on the kind='tool' run row (workflow_runs.tool_name). */
@@ -115,6 +125,8 @@ export async function executeWorkflowTool(
         executionMs: Date.now() - startMs,
         requestPayload: merged,
         responsePayload: { result },
+        traceId: params.context.traceId ?? null,
+        agentInvocationId: params.context.agentInvocationId ?? null,
       }, supabase)
       return { ok: true, result }
     } catch (err) {
@@ -133,6 +145,8 @@ export async function executeWorkflowTool(
         requestPayload: merged,
         responsePayload: {},
         errorDetail: message,
+        traceId: params.context.traceId ?? null,
+        agentInvocationId: params.context.agentInvocationId ?? null,
       }, supabase)
       return {
         ok: false,

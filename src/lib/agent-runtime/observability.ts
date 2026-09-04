@@ -11,6 +11,8 @@
 import { createClient, getUser } from '@/lib/supabase/server'
 import type { AgentInvocationStatus } from '@/types/database'
 
+type SupabaseServerClient = Awaited<ReturnType<typeof createClient>>
+
 // ─── Time windows ────────────────────────────────────────────────────────────
 
 export type ObsWindow = '24h' | '7d' | '30d'
@@ -170,6 +172,19 @@ export async function getOrgCostTicker(): Promise<OrgCostTicker | null> {
 
 // ─── OBS-06: Conversation delegation tree ────────────────────────────────────
 
+// Phase 134 Plan 03 (OBS-01): one workflow_tool_logs row (workflow_runs
+// kind='tool' UNION legacy action_logs — migration 1249/1255, the Action
+// Engine execution record) caused by an invocation node.
+export interface WorkflowRunSummary {
+  id: string
+  workflowId: string | null
+  toolName: string
+  status: string
+  executionMs: number
+  createdAt: string
+  source: 'run' | 'legacy'
+}
+
 export interface InvocationTreeNode {
   id: string
   agentId: string
@@ -180,6 +195,15 @@ export interface InvocationTreeNode {
   durationMs: number | null
   depth: number
   children: InvocationTreeNode[]
+  /**
+   * Workflow runs / Action Engine executions this invocation caused,
+   * joined via workflow_tool_logs.agent_invocation_id (migration 1292 +
+   * Phase 134 Plan 03's executeWorkflowTool() wiring). Undefined until
+   * attachWorkflowRuns() populates it; always an array (possibly empty)
+   * once populated — never omitted, so a caller can tell "attached, none
+   * found" apart from "not attached yet".
+   */
+  workflowRuns?: WorkflowRunSummary[]
 }
 
 type RawInvocationRow = {
@@ -223,6 +247,67 @@ function buildTree(rows: RawInvocationRow[]): InvocationTreeNode[] {
   return roots
 }
 
+// Depth-first flatten of a tree already built by buildTree() — used to
+// collect every node's id for a single follow-up workflow_tool_logs query
+// (attachWorkflowRuns), rather than one query per node.
+function flattenNodes(nodes: InvocationTreeNode[]): InvocationTreeNode[] {
+  const out: InvocationTreeNode[] = []
+  const walk = (list: InvocationTreeNode[]) => {
+    for (const n of list) {
+      out.push(n)
+      if (n.children.length > 0) walk(n.children)
+    }
+  }
+  walk(nodes)
+  return out
+}
+
+// Phase 134 Plan 03 (OBS-01): completes the join this module exists to
+// serve — channel ingress -> entry agent -> nested specialists
+// (agent_invocations, already the tree above) -> workflow run -> Action
+// Engine execution (workflow_tool_logs, one row per kind='tool' run or
+// legacy action_log). ONE extra query for the whole tree (`.in(...)` over
+// every node id), not one per node. Mutates each node's `workflowRuns` in
+// place so callers keep using the same InvocationTreeNode[] shape.
+async function attachWorkflowRuns(
+  nodes: InvocationTreeNode[],
+  supabase: SupabaseServerClient,
+): Promise<void> {
+  if (nodes.length === 0) return
+  const ids = nodes.map((n) => n.id)
+
+  const { data, error } = await supabase
+    .from('workflow_tool_logs')
+    .select('id, workflow_id, tool_name, status, execution_ms, created_at, source, agent_invocation_id')
+    .in('agent_invocation_id', ids)
+
+  if (error || !data) {
+    for (const n of nodes) n.workflowRuns = []
+    return
+  }
+
+  const byInvocation = new Map<string, WorkflowRunSummary[]>()
+  for (const row of data) {
+    if (!row.agent_invocation_id) continue
+    const summary: WorkflowRunSummary = {
+      id: row.id,
+      workflowId: row.workflow_id,
+      toolName: row.tool_name,
+      status: row.status,
+      executionMs: row.execution_ms,
+      createdAt: row.created_at,
+      source: row.source,
+    }
+    const list = byInvocation.get(row.agent_invocation_id) ?? []
+    list.push(summary)
+    byInvocation.set(row.agent_invocation_id, list)
+  }
+
+  for (const n of nodes) {
+    n.workflowRuns = byInvocation.get(n.id) ?? []
+  }
+}
+
 export async function getConversationDelegationTree(
   conversationId: string
 ): Promise<InvocationTreeNode[]> {
@@ -241,7 +326,9 @@ export async function getConversationDelegationTree(
     .order('created_at', { ascending: true })
 
   if (error || !data) return []
-  return buildTree(data as unknown as RawInvocationRow[])
+  const roots = buildTree(data as unknown as RawInvocationRow[])
+  await attachWorkflowRuns(flattenNodes(roots), supabase)
+  return roots
 }
 
 // ─── OBS-07: Agent invocations list ──────────────────────────────────────────
@@ -339,5 +426,7 @@ export async function getInvocationDelegationTree(
     .order('created_at', { ascending: true })
 
   if (error || !data) return []
-  return buildTree(data as unknown as RawInvocationRow[])
+  const roots = buildTree(data as unknown as RawInvocationRow[])
+  await attachWorkflowRuns(flattenNodes(roots), supabase)
+  return roots
 }

@@ -225,12 +225,27 @@ export async function buildWorkflowTools(
         }
 
         // Dispatch.
+        // Phase 134 Plan 03 (OBS-01): thread this turn's trace + invocation
+        // identity through so logToolRun() (migration 1292 columns) can join
+        // the resulting workflow_runs row back to the invocation that caused
+        // it. invocationId is '' or 'insert-failed' when the earlier INSERT
+        // didn't produce a real row — never pass those as if they were one.
         const dispatched = await executeWorkflowTool({
           workflowId: capturedWorkflowId,
           kind: capturedKind,
           definition: capturedDefinition,
           input: toolArgs,
-          context: { orgId, conversationId, channel, agentId },
+          context: {
+            orgId,
+            conversationId,
+            channel,
+            agentId,
+            traceId,
+            agentInvocationId:
+              invocationId && invocationId !== '' && invocationId !== 'insert-failed'
+                ? invocationId
+                : undefined,
+          },
           toolName: capturedToolName,
           triggerType: 'agent',
         })

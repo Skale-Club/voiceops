@@ -89,7 +89,13 @@ describe('run-agent partner recursion wiring', () => {
   })
 
   it('returns the denial to the caller instead of throwing', () => {
-    expect(runAgentSource).toMatch(/const ceilingDenial = checkChannelModelInvocationCeiling[\s\S]{0,200}?if \(ceilingDenial\) return ceilingDenial/)
+    // Phase 134 Plan 03 (OBS-02) wraps the return in a block that also
+    // records the denial to partnerCallsLog before returning — the pattern
+    // tolerates that intermediate statement rather than requiring the
+    // single-line `if (ceilingDenial) return ceilingDenial` shape.
+    expect(runAgentSource).toMatch(
+      /const ceilingDenial = checkChannelModelInvocationCeiling[\s\S]{0,300}?if \(ceilingDenial\) \{[\s\S]{0,200}?return ceilingDenial/,
+    )
   })
 })
 

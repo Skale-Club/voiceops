@@ -7,6 +7,7 @@ import { createServiceRoleClient } from '@/lib/supabase/admin'
 import { createLogger } from '@/lib/obs/logger'
 import type { Json } from '@/types/database'
 import type { AgentChannel } from './types'
+import { redactText, redactJson } from './redact'
 
 export interface InvocationStartParams {
   organizationId: string
@@ -31,6 +32,15 @@ export interface InvocationEndParams {
   tokensIn: number
   tokensOut: number
   toolCallsJson: Json[]
+  /**
+   * Phase 134 Plan 03 (OBS-02): edges actually traversed to specialist
+   * agents during this invocation's turn — their timing and outcome,
+   * including denied traversal attempts (cycle, depth, edge policy,
+   * timeout, channel ceiling). Optional/defaulted to [] so this stays a
+   * backward-compatible addition; only run-agent.ts's delegation loop
+   * populates it today.
+   */
+  partnerCallsJson?: Json[]
   errorDetail?: string
   startedAt: number // Date.now() timestamp at invocation start
 }
@@ -52,7 +62,7 @@ export async function insertInvocationStart(
       depth: params.depth,
       mode: params.mode,
       status: 'running',
-      user_message: params.userMessage,
+      user_message: redactText(params.userMessage),
       model: params.model,
       ...(params.conversationId ? { conversation_id: params.conversationId } : {}),
       ...(params.sessionId ? { session_id: params.sessionId } : {}),
@@ -103,12 +113,13 @@ export async function updateInvocationEnd(
     .from('agent_invocations')
     .update({
       status: params.status,
-      assistant_reply: params.assistantReply,
+      assistant_reply: redactText(params.assistantReply),
       tokens_in: params.tokensIn,
       tokens_out: params.tokensOut,
       cost_usd: costUsd,
       duration_ms: durationMs,
-      tool_calls: params.toolCallsJson,
+      tool_calls: redactJson(params.toolCallsJson),
+      partner_calls: redactJson(params.partnerCallsJson ?? []),
       ...(params.errorDetail ? { error_detail: params.errorDetail } : {}),
     })
     .eq('id', params.invocationId)

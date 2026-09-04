@@ -271,6 +271,105 @@ const ACTION_DESCRIPTIONS: Record<string, string> = {
 // in ./handoff.ts — see validateHandoffInput / findForbiddenHandoffKey there.
 
 // ---------------------------------------------------------------------------
+// Phase 134 Plan 03 (OBS-02): partner_calls entry builders.
+// ---------------------------------------------------------------------------
+// Pure, side-effect-free constructors for the JSON entries buildPartnerTools()
+// below pushes into the shared partnerCallsLog array (mirrors the toolCallsLog
+// pattern already used for tool_calls). Exported so they are directly unit
+// testable without mocking the whole ai@^6 generateText/streamText loop.
+//
+// A denied entry covers every partner-call-attempt denial class from Phases
+// 132/133: delegation_cycle, delegation_depth_exceeded, every
+// PartnerEdgeDenialReason (edge_not_found, cross_organization,
+// source_inactive, target_inactive, channel_not_allowed, depth_exceeded,
+// call_count_exceeded, malformed_policy, invalid_request), and the two
+// Phase 133 tree-wide budget checks (partner_budget_timeout,
+// channel_model_invocation_ceiling). `denied: true` is the sole
+// discriminator — this is a deliberate, successful refusal, never conflated
+// with `error_detail` or an exception.
+export function buildDeniedPartnerCallEntry(params: {
+  partnerAgentId: string
+  partnerSlug: string
+  deniedReason: string
+  depth: number
+  startedAt: number
+}): Json {
+  return {
+    partner_agent_id: params.partnerAgentId,
+    partner_slug: params.partnerSlug,
+    edge_id: null,
+    denied: true,
+    denied_reason: params.deniedReason,
+    depth: params.depth,
+    duration_ms: Date.now() - params.startedAt,
+    started_at: new Date(params.startedAt).toISOString(),
+  } as unknown as Json
+}
+
+/**
+ * A completed entry covers every traversal that actually recursed into
+ * runAgentBlocking() for the partner, whatever the outcome — including a
+ * denial the SPECIALIST'S OWN invocation-level gate raised (e.g. its
+ * allowed_channels, its own depth/cycle guard, agent_inactive,
+ * daily_cost_cap_exceeded), surfaced here via childStatus/childErrorDetail
+ * so it is never swallowed. `outcome` is the typed SpecialistResult bucket
+ * (success | business_failure | retryable_failure | handoff); a
+ * 'retryable_failure' outcome is what applyNestedFailurePenalty() below
+ * looks for to flip the PARENT's own persisted status.
+ */
+export function buildCompletedPartnerCallEntry(params: {
+  partnerAgentId: string
+  partnerSlug: string
+  edgeId: string | null
+  outcome: SpecialistResult['outcome']
+  childInvocationId: string | null
+  childStatus: string
+  childErrorDetail?: string
+  depth: number
+  startedAt: number
+}): Json {
+  return {
+    partner_agent_id: params.partnerAgentId,
+    partner_slug: params.partnerSlug,
+    edge_id: params.edgeId,
+    denied: false,
+    outcome: params.outcome,
+    child_invocation_id: params.childInvocationId,
+    child_status: params.childStatus,
+    ...(params.childErrorDetail ? { child_error_detail: params.childErrorDetail } : {}),
+    depth: params.depth,
+    duration_ms: Date.now() - params.startedAt,
+    started_at: new Date(params.startedAt).toISOString(),
+  } as unknown as Json
+}
+
+/**
+ * "A nested specialist failure must be reflected in the parent invocation's
+ * status, not swallowed" (134-CONTEXT.md). A specialist being DENIED by
+ * policy is a successful refusal (business_failure) and never downgrades the
+ * parent — the parent's own turn still completed normally. A specialist that
+ * actually errored/timed out/threw (retryable_failure) is a real fault: if
+ * the parent would otherwise report 'success', this downgrades it to
+ * 'error' with a distinguishing errorDetail so the trace shows the parent's
+ * apparent success was masking a nested failure, rather than hiding it.
+ * A parent that already failed for its own reasons is left untouched.
+ */
+export function applyNestedFailurePenalty(
+  status: 'success' | 'error' | 'aborted' | 'skipped',
+  errorDetail: string | undefined,
+  partnerCallsLog: Json[],
+): { status: 'success' | 'error' | 'aborted' | 'skipped'; errorDetail: string | undefined } {
+  if (status !== 'success') return { status, errorDetail }
+  const hasNestedFailure = partnerCallsLog.some((entry) => {
+    if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) return false
+    const e = entry as Record<string, unknown>
+    return e.denied === false && e.outcome === 'retryable_failure'
+  })
+  if (!hasNestedFailure) return { status, errorDetail }
+  return { status: 'error', errorDetail: errorDetail ?? 'nested_specialist_failure' }
+}
+
+// ---------------------------------------------------------------------------
 // buildPartnerTools | inject call_partner_<slug> synthetic tools (DELEG-02, DELEG-03)
 // ---------------------------------------------------------------------------
 // Queries agent_partners for the current agentId, fetches partner slug+name,
@@ -295,10 +394,17 @@ async function buildPartnerTools(params: {
    * counts against the same total budget as its parent's.
    */
   partnerBudget: PartnerBudget
+  /**
+   * Phase 134 Plan 03 (OBS-02): shared-by-reference partner_calls log for
+   * THIS invocation (never the whole tree — a specialist's own delegations
+   * land on ITS OWN row, joined back through parent_invocation_id/trace_id).
+   * Mirrors the toolCallsLog convention already used for tool_calls.
+   */
+  partnerCallsLog: Json[]
 }): Promise<Record<string, ReturnType<typeof dynamicTool>>> {
   const {
     agentId, orgId, channel, _depth, visitedAgentIds, delegationChain,
-    parentInvocationId, traceId, serviceClient, emit, partnerBudget,
+    parentInvocationId, traceId, serviceClient, emit, partnerBudget, partnerCallsLog,
   } = params
 
   // Fetch partner rows with partner agent slug + name
@@ -377,16 +483,36 @@ async function buildPartnerTools(params: {
         }
         const handoffArgs = validation.value
 
+        // Phase 134 Plan 03 (OBS-02): start of a traversal ATTEMPT — every
+        // return path below (denied or completed) pushes exactly one entry
+        // to partnerCallsLog so the invocation row reflects delegation that
+        // ACTUALLY happened, never just intent.
+        const callStartedAt = Date.now()
+        const denyEntry = (deniedReason: string) =>
+          buildDeniedPartnerCallEntry({
+            partnerAgentId: capturedPartner.id,
+            partnerSlug: capturedPartner.slug,
+            deniedReason,
+            depth: _depth + 1,
+            startedAt: callStartedAt,
+          })
+
         // DELEG-06: Visited-set check BEFORE recursing (edge-based checks
         // below do not, by themselves, catch an A→B→A cycle across
         // otherwise-independent edges).
         const cycleCheck = checkVisitedSet(visitedAgentIds, capturedPartner.id, orgId)
-        if (cycleCheck) return cycleCheck
+        if (cycleCheck) {
+          partnerCallsLog.push(denyEntry('delegation_cycle'))
+          return cycleCheck
+        }
 
         // RUNTIME-04: Global depth ceiling (defense-in-depth, independent of
         // any single edge's own max_depth policy checked by resolvePartnerEdge below).
         const depthDenial = checkDelegationDepth(_depth + 1, orgId, capturedPartner.id)
-        if (depthDenial) return depthDenial
+        if (depthDenial) {
+          partnerCallsLog.push(denyEntry('delegation_depth_exceeded'))
+          return depthDenial
+        }
 
         // Phase 132 (AUTHZ-01, ROUT-03): fail-closed preflight for THIS edge —
         // cross-org, inactive endpoints, channel policy, edge-specific
@@ -406,6 +532,7 @@ async function buildPartnerTools(params: {
             reason: edgeDecision.reason,
             partnerSlug: capturedPartner.slug,
           })
+          partnerCallsLog.push(denyEntry(edgeDecision.reason))
           return specialistResultToToolMessage({
             outcome: 'business_failure',
             reason: 'Specialist is not authorized for this request.',
@@ -416,7 +543,10 @@ async function buildPartnerTools(params: {
         // timeout_ms policy (132-CONTEXT.md: partner-to-partner calls go
         // through the same authorization AND budget checks).
         const timeoutDenial = checkPartnerBudgetTimeout(partnerBudget, edgeDecision.timeoutMs, orgId, capturedPartner.id)
-        if (timeoutDenial) return timeoutDenial
+        if (timeoutDenial) {
+          partnerCallsLog.push(denyEntry('partner_budget_timeout'))
+          return timeoutDenial
+        }
 
         // PERF-01: the channel's own ceiling on internal specialist model
         // invocations, counted on the SAME shared budget as everything above —
@@ -424,7 +554,10 @@ async function buildPartnerTools(params: {
         // normally permits one internal specialist call before deterministic
         // tool execution; other channels are uncapped.
         const ceilingDenial = checkChannelModelInvocationCeiling(partnerBudget, channel, orgId, capturedPartner.id)
-        if (ceilingDenial) return ceilingDenial
+        if (ceilingDenial) {
+          partnerCallsLog.push(denyEntry('channel_model_invocation_ceiling'))
+          return ceilingDenial
+        }
 
         // A call actually traverses the edge now — count it against the
         // shared tree-wide budget before recursing.
@@ -453,8 +586,9 @@ async function buildPartnerTools(params: {
         // caller — the only owner of what reaches the parent LLM/channel —
         // never forwards internal reasoning or raw provider errors.
         let specialistResult: SpecialistResult
+        let partnerResult: AgentRunResult | undefined
         try {
-          const partnerResult = await runAgentBlocking({
+          partnerResult = await runAgentBlocking({
             orgId,
             agentId: capturedPartner.id,
             channel,
@@ -472,6 +606,28 @@ async function buildPartnerTools(params: {
           specialistResult = { outcome: 'retryable_failure', reason: 'Specialist agent invocation failed.' }
           createLogger({ traceId, orgId }).error('partner_invocation_failed', { partnerSlug: capturedPartner.slug, error: err })
         }
+
+        // Phase 134 Plan 03 (OBS-02): the traversal actually happened — record
+        // its outcome (success | business_failure | retryable_failure |
+        // handoff) and the child's own raw status/errorDetail, so a
+        // specialist-side denial (its own allowed_channels, depth, cycle,
+        // agent_inactive, daily_cost_cap_exceeded, ...) is never swallowed —
+        // it is visible on THIS invocation's partner_calls entry even though
+        // it never became a row of its own (D-34-10/12/13: denied top-level
+        // invocations write no row by design).
+        partnerCallsLog.push(
+          buildCompletedPartnerCallEntry({
+            partnerAgentId: capturedPartner.id,
+            partnerSlug: capturedPartner.slug,
+            edgeId: edgeDecision.edgeId,
+            outcome: specialistResult.outcome,
+            childInvocationId: partnerResult?.invocationId || null,
+            childStatus: partnerResult?.status ?? 'error',
+            childErrorDetail: partnerResult?.errorDetail,
+            depth: _depth + 1,
+            startedAt: callStartedAt,
+          }),
+        )
 
         // Emit partner_done SSE event (streaming path only | DELEG-08)
         if (emit) {
@@ -727,6 +883,9 @@ async function runAgentBlocking(opts: InternalAgentRunOptions): Promise<AgentRun
 
   // Accumulated state across the LLM call
   const toolCallsLog: Json[] = []
+  // Phase 134 Plan 03 (OBS-02): edges actually traversed to specialist
+  // agents this turn, populated by buildPartnerTools()'s execute() closure.
+  const partnerCallsLog: Json[] = []
   let finalText = ''
   let tokensIn = 0
   let tokensOut = 0
@@ -1008,6 +1167,7 @@ async function runAgentBlocking(opts: InternalAgentRunOptions): Promise<AgentRun
         serviceClient,
         // No emit in blocking path | SSE events only in streaming path
         partnerBudget,
+        partnerCallsLog,
       })
       Object.assign(toolSet, partnerTools)
 
@@ -1093,6 +1253,11 @@ async function runAgentBlocking(opts: InternalAgentRunOptions): Promise<AgentRun
   } finally {
     if (timeoutId) clearTimeout(timeoutId)
 
+    // Phase 134 Plan 03 (OBS-02): a nested specialist that genuinely failed
+    // (not merely denied) must not be swallowed behind an otherwise-'success'
+    // parent status.
+    ;({ status: finalStatus, errorDetail } = applyNestedFailurePenalty(finalStatus, errorDetail, partnerCallsLog))
+
     // Step 13: UPDATE invocation row with final state (D-34-03)
     await updateInvocationEnd({
       invocationId,
@@ -1103,6 +1268,7 @@ async function runAgentBlocking(opts: InternalAgentRunOptions): Promise<AgentRun
       tokensIn,
       tokensOut,
       toolCallsJson: toolCallsLog,
+      partnerCallsJson: partnerCallsLog,
       errorDetail,
       startedAt,
     })
@@ -1171,6 +1337,9 @@ function runAgentStreaming(
       let tokensOut = 0
       let errorDetail: string | undefined
       const toolCallsLog: Json[] = []
+      // Phase 134 Plan 03 (OBS-02): edges actually traversed to specialist
+      // agents this turn, populated by buildPartnerTools()'s execute() closure.
+      const partnerCallsLog: Json[] = []
       let invocationId = ''
       let capturedModel = 'unknown'
       let finalResolvedAgentId = opts.agentId ?? ''
@@ -1476,6 +1645,7 @@ function runAgentStreaming(
             serviceClient,
             emit: delegationVisible ? emit : undefined,
             partnerBudget,
+            partnerCallsLog,
           })
           Object.assign(toolSet, partnerToolsStream)
 
@@ -1599,16 +1769,20 @@ function runAgentStreaming(
               })
             }
             if (invocationId && invocationId !== '') {
+              // Phase 134 Plan 03 (OBS-02): see the mirrored comment in the
+              // blocking path's finally block above.
+              const penalized = applyNestedFailurePenalty(finalStatus, errorDetail, partnerCallsLog)
               await updateInvocationEnd({
                 invocationId,
                 agentId: finalResolvedAgentId,
                 model: capturedModel,
-                status: finalStatus,
+                status: penalized.status,
                 assistantReply: accumulatedText,
                 tokensIn,
                 tokensOut,
                 toolCallsJson: toolCallsLog,
-                errorDetail,
+                partnerCallsJson: partnerCallsLog,
+                errorDetail: penalized.errorDetail,
                 startedAt,
               })
             }
