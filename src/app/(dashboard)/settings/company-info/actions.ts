@@ -7,6 +7,7 @@ import { createClient } from '@/lib/supabase/server'
 import { createServiceRoleClient } from '@/lib/supabase/admin'
 import { decrypt, encrypt } from '@/lib/crypto'
 import type { WhatsAppProvider, WhatsAppProviderStatus } from '@/lib/whatsapp/types'
+import { BUSINESS_TYPES, deriveServiceLocationModeFromBusinessType } from '@/lib/org/business-type'
 
 const HEX_RE = /^#[0-9a-fA-F]{6}$/
 
@@ -151,6 +152,10 @@ const SUPPORTED_TZS: string[] =
 
 const companyProfileSchema = z.object({
   orgId: z.string().uuid().optional(),
+  // Phase 138 Plan 00 (MODAL-00): what kind of business this org is. Feeds
+  // the DEFAULT organizations.service_location_mode (Plan 138-01) — see
+  // the business_type branch in updateCompanyProfile below.
+  business_type: z.enum(BUSINESS_TYPES).optional(),
   legal_name: optionalText(160),
   tax_id: optionalText(64),
   address_line1: optionalText(200),
@@ -202,6 +207,37 @@ export async function updateCompanyProfile(input: UpdateCompanyProfileInput): Pr
     patch.address_country = c ? c.toUpperCase() : null
   }
   if (d.timezone !== undefined && d.timezone) patch.timezone = d.timezone
+
+  // Phase 138 Plan 00 (MODAL-00): business_type sets service_location_mode's
+  // DEFAULT only. We detect "no explicit override" by comparing the org's
+  // CURRENT service_location_mode against what its CURRENT (pre-save)
+  // business_type would derive: if they still match, the stored mode is
+  // still tracking the auto-derived default (or the org never diverged from
+  // it), so it is safe to re-derive for the new business_type. If they
+  // differ, an operator (or a future direct edit) deliberately moved the
+  // mode away from its auto-derived value, and business_type must never
+  // silently overwrite that choice. organizations.service_location_mode is
+  // added at the DB level by Plan 138-01's migration 1297 (authored
+  // alongside this one; both ship together in numeric order before either
+  // runs against a real database).
+  if (d.business_type !== undefined) {
+    patch.business_type = d.business_type
+
+    const { data: current } = await supabase
+      .from('organizations')
+      .select('business_type, service_location_mode')
+      .eq('id', orgId as string)
+      .maybeSingle()
+
+    const currentRow = current as { business_type?: string | null; service_location_mode?: string | null } | null
+    const oldDerivedMode = deriveServiceLocationModeFromBusinessType(currentRow?.business_type ?? null)
+    const currentMode = currentRow?.service_location_mode ?? null
+    const noExplicitOverride = currentMode === null || currentMode === oldDerivedMode
+
+    if (noExplicitOverride) {
+      patch.service_location_mode = deriveServiceLocationModeFromBusinessType(d.business_type)
+    }
+  }
 
   if (Object.keys(patch).length === 0) return { ok: true }
 

@@ -15,8 +15,11 @@ import {
   updateCompanyProfile,
   updateDefaultCurrency,
 } from '@/app/(dashboard)/settings/company-info/actions'
+import { BUSINESS_TYPES, BUSINESS_TYPE_LABELS, type BusinessType } from '@/lib/org/business-type'
 
 export interface CompanyProfileShape {
+  /** Phase 138 Plan 00 (MODAL-00): what kind of business this org is. */
+  business_type: BusinessType
   legal_name: string | null
   tax_id: string | null
   address_line1: string | null
@@ -65,6 +68,7 @@ export function CompanyProfileForm({ orgId, initial }: Props) {
   // Baseline = last-saved values. Dirty is computed against this so the page
   // save bar hides again right after a successful save (no router.refresh).
   const [baseline, setBaseline] = React.useState<CompanyProfileShape>(initial)
+  const [businessType, setBusinessType] = React.useState<BusinessType>(initial.business_type ?? 'on_premises_shop')
   const [legalName, setLegalName] = React.useState(initial.legal_name ?? '')
   const [taxId, setTaxId] = React.useState(initial.tax_id ?? '')
   const [line1, setLine1] = React.useState(initial.address_line1 ?? '')
@@ -77,6 +81,7 @@ export function CompanyProfileForm({ orgId, initial }: Props) {
   const [currency, setCurrency] = React.useState(initial.default_currency ?? 'USD')
 
   const dirty =
+    businessType !== (baseline.business_type ?? 'on_premises_shop') ||
     legalName !== (baseline.legal_name ?? '') ||
     taxId !== (baseline.tax_id ?? '') ||
     line1 !== (baseline.address_line1 ?? '') ||
@@ -91,6 +96,7 @@ export function CompanyProfileForm({ orgId, initial }: Props) {
   async function handleSave(): Promise<boolean> {
     const res = await updateCompanyProfile({
       orgId,
+      business_type: businessType,
       legal_name: legalName,
       tax_id: taxId,
       address_line1: line1,
@@ -114,6 +120,7 @@ export function CompanyProfileForm({ orgId, initial }: Props) {
       }
     }
     setBaseline({
+      business_type: businessType,
       legal_name: legalName,
       tax_id: taxId,
       address_line1: line1,
@@ -130,6 +137,7 @@ export function CompanyProfileForm({ orgId, initial }: Props) {
   }
 
   function handleReset() {
+    setBusinessType(baseline.business_type ?? 'on_premises_shop')
     setLegalName(baseline.legal_name ?? '')
     setTaxId(baseline.tax_id ?? '')
     setLine1(baseline.address_line1 ?? '')
@@ -163,6 +171,19 @@ export function CompanyProfileForm({ orgId, initial }: Props) {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
+          <Field label="Business type" htmlFor="business_type">
+            <NativeSelect
+              id="business_type"
+              value={businessType}
+              onChange={(e) => setBusinessType(e.target.value as BusinessType)}
+              className={CONTROL_CLASS}
+            >
+              {BUSINESS_TYPES.map((type) => (
+                <option key={type} value={type}>{BUSINESS_TYPE_LABELS[type]}</option>
+              ))}
+            </NativeSelect>
+          </Field>
+
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <Field label="Legal name" htmlFor="legal_name">
               <Input id="legal_name" value={legalName} onChange={(e) => setLegalName(e.target.value)} placeholder="Acme Inc." maxLength={160} className={CONTROL_CLASS} />

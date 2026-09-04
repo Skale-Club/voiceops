@@ -6,6 +6,7 @@ import { PageContainer, PageHeader } from '@/components/layout/page-header'
 import { CompanyProfileForm } from '@/components/settings/company-profile-form'
 import { WorkspaceBrandingForm } from '@/components/settings/workspace-branding-form'
 import { WorkspaceSaveProvider } from '@/components/settings/workspace-save-bar'
+import { isBusinessType } from '@/lib/org/business-type'
 
 export default async function WorkspaceSettingsPage() {
   const user = await getUser()
@@ -18,7 +19,7 @@ export default async function WorkspaceSettingsPage() {
   const { data: org } = await supabase
     .from('organizations')
     .select(
-      'id, name, logo_url, accent_color, brand_name, default_currency, legal_name, tax_id, address_line1, address_line2, address_city, address_state, address_postal_code, address_country, timezone',
+      'id, name, logo_url, accent_color, brand_name, default_currency, business_type, legal_name, tax_id, address_line1, address_line2, address_city, address_state, address_postal_code, address_country, timezone',
     )
     .eq('id', orgId as string)
     .single()
@@ -49,6 +50,7 @@ export default async function WorkspaceSettingsPage() {
           <CompanyProfileForm
             orgId={org.id}
             initial={{
+              business_type: isBusinessType(org.business_type) ? org.business_type : 'on_premises_shop',
               legal_name: org.legal_name,
               tax_id: org.tax_id,
               address_line1: org.address_line1,

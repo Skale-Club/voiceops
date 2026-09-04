@@ -611,6 +611,16 @@ export interface Database {
           accent_color: string | null
           brand_name: string | null
           default_currency: string
+          /** Migration 1296 (Phase 138 Plan 00): what kind of business this org is */
+          business_type: string
+          /**
+           * Migration 1297 (Phase 138 Plan 01): booking modality. Declared
+           * here ahead of that migration's own database.ts edit because
+           * Plan 138-00's updateCompanyProfile() already reads/writes this
+           * column to derive its default from business_type; both
+           * migrations are authored-only and applied together in DB order.
+           */
+          service_location_mode: string
           /** Migration 1105: company control panel fields */
           legal_name: string | null
           tax_id: string | null
@@ -652,6 +662,8 @@ export interface Database {
           accent_color?: string | null
           brand_name?: string | null
           default_currency?: string
+          business_type?: string
+          service_location_mode?: string
           legal_name?: string | null
           tax_id?: string | null
           address_line1?: string | null
@@ -692,6 +704,8 @@ export interface Database {
           accent_color?: string | null
           brand_name?: string | null
           default_currency?: string
+          business_type?: string
+          service_location_mode?: string
           legal_name?: string | null
           tax_id?: string | null
           address_line1?: string | null
