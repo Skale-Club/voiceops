@@ -80,6 +80,15 @@ export const SIDE_EFFECTING_ACTIONS = new Set([
   // wishlist read/list tool is intentionally absent from this set.
   'medusa_wishlist_add',
   'medusa_wishlist_remove',
+  // Phase 135: the Xkedule booking mutations. They were absent here through
+  // Phase 133, so requiresIdempotency() returned false for them at every call
+  // site and a Vapi retry of a booking created a SECOND booking - the exact
+  // scenario SAFE-02 names, unguarded, despite the machinery around it being
+  // complete. The Xkedule reads (get_services, check_availability, quote,
+  // business_info, lookup_customer) stay out deliberately.
+  'xkedule_create_booking',
+  'xkedule_cancel_booking',
+  'xkedule_reschedule_booking',
 ])
 
 // ---------------------------------------------------------------------------

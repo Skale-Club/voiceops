@@ -265,13 +265,30 @@ describe('requiresIdempotency — side-effecting action classification (IDEMP-02
     expect(requiresIdempotency('manychat_trigger_flow')).toBe(false)
   })
 
-  it('SIDE_EFFECTING_ACTIONS set contains exactly the 6 documented types (Phase 134 added the 2 Medusa cart writes)', () => {
+  it('SIDE_EFFECTING_ACTIONS covers the documented write types (Phase 135 added the 3 Xkedule booking mutations)', () => {
     expect(SIDE_EFFECTING_ACTIONS.has('create_appointment')).toBe(true)
     expect(SIDE_EFFECTING_ACTIONS.has('send_sms')).toBe(true)
     expect(SIDE_EFFECTING_ACTIONS.has('create_contact')).toBe(true)
     expect(SIDE_EFFECTING_ACTIONS.has('custom_webhook')).toBe(true)
     expect(SIDE_EFFECTING_ACTIONS.has('medusa_add_to_cart')).toBe(true)
     expect(SIDE_EFFECTING_ACTIONS.has('medusa_update_cart_item')).toBe(true)
+    // SAFE-02 names the Xkedule mutation explicitly. These were missing until
+    // Phase 135, so a Vapi retry of a booking created a second booking.
+    expect(SIDE_EFFECTING_ACTIONS.has('xkedule_create_booking')).toBe(true)
+    expect(SIDE_EFFECTING_ACTIONS.has('xkedule_cancel_booking')).toBe(true)
+    expect(SIDE_EFFECTING_ACTIONS.has('xkedule_reschedule_booking')).toBe(true)
+    expect(requiresIdempotency('xkedule_create_booking')).toBe(true)
+    expect(requiresIdempotency('xkedule_cancel_booking')).toBe(true)
+    expect(requiresIdempotency('xkedule_reschedule_booking')).toBe(true)
+
+    // Xkedule reads must stay out: they must not pay for the guard.
+    expect(SIDE_EFFECTING_ACTIONS.has('xkedule_get_services')).toBe(false)
+    expect(SIDE_EFFECTING_ACTIONS.has('xkedule_check_availability')).toBe(false)
+    expect(SIDE_EFFECTING_ACTIONS.has('xkedule_quote')).toBe(false)
+    expect(SIDE_EFFECTING_ACTIONS.has('xkedule_business_info')).toBe(false)
+    expect(SIDE_EFFECTING_ACTIONS.has('xkedule_lookup_customer')).toBe(false)
+    expect(requiresIdempotency('xkedule_check_availability')).toBe(false)
+
     expect(SIDE_EFFECTING_ACTIONS.has('get_availability')).toBe(false)
     expect(SIDE_EFFECTING_ACTIONS.has('knowledge_base')).toBe(false)
   })
