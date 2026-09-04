@@ -19,6 +19,8 @@ import { executeWorkflowTool } from './execute-workflow-tool'
 import type { PartnerEdgeDecision } from './resolve-partner-edge'
 import {
   deriveWorkflowInputSchema,
+  getWorkflowInputSchema,
+  type InputSchemaMap,
 } from '@/lib/workflows/derive-input-schema'
 import {
   deriveIdempotencyKey,
@@ -27,6 +29,9 @@ import {
   recordAbandonedIdempotency,
   hashToolArgs,
 } from './idempotency'
+import { resolveServiceLocationMode } from './resolve-service-location-mode'
+import { applyServiceLocationMode, type ServiceLocationMode } from './service-location-schema'
+import { renderServiceLocationBlock } from './service-location-prompt'
 
 export interface WorkflowToolSummary {
   toolName: string
@@ -37,6 +42,48 @@ export interface WorkflowToolSummary {
 interface BuildResult {
   toolSet: Record<string, ReturnType<typeof dynamicTool>>
   summaries: WorkflowToolSummary[]
+  /**
+   * Phase 138 Plan 02 (MODAL-02/MODAL-03): renderServiceLocationBlock() text
+   * for the org's resolved service_location_mode, set only when a
+   * book_appointment row was attached to this agent. Empty string for every
+   * agent that never touches booking — zero resolver calls, zero prompt
+   * change.
+   */
+  modalityBlock: string
+}
+
+/**
+ * Rebuilds a workflow definition with its input_schema map replaced, at
+ * whichever of the two shapes derive-input-schema.ts's extractInputSchemaMap
+ * reads from (trigger.config.input_schema, the YAML/canary shape, checked
+ * first; trigger_config.input_schema, the flattened workflows-row shape,
+ * checked second). Falls back to the trigger.config shape when the
+ * definition declares neither — book_appointment always declares one of
+ * these, so this only guards against a malformed definition silently
+ * dropping the transformed map.
+ */
+function rebuildDefinitionWithInputSchema(definition: unknown, inputSchema: InputSchemaMap): unknown {
+  if (!definition || typeof definition !== 'object') return definition
+  const def = definition as Record<string, unknown>
+
+  const trigger = def.trigger as Record<string, unknown> | undefined
+  if (trigger && typeof trigger === 'object') {
+    const triggerConfig = (trigger.config ?? {}) as Record<string, unknown>
+    return {
+      ...def,
+      trigger: { ...trigger, config: { ...triggerConfig, input_schema: inputSchema } },
+    }
+  }
+
+  const triggerConfigField = def.trigger_config as Record<string, unknown> | undefined
+  if (triggerConfigField && typeof triggerConfigField === 'object') {
+    return {
+      ...def,
+      trigger_config: { ...triggerConfigField, input_schema: inputSchema },
+    }
+  }
+
+  return { ...def, trigger: { config: { input_schema: inputSchema } } }
 }
 
 export interface BuildWorkflowToolsParams {
@@ -78,7 +125,11 @@ export async function buildWorkflowTools(
     incomingEdge,
   } = params
 
-  const result: BuildResult = { toolSet: {}, summaries: [] }
+  const result: BuildResult = { toolSet: {}, summaries: [], modalityBlock: '' }
+
+  // Phase 138 Plan 02: resolved at most once per call, only when a
+  // book_appointment row is actually present among the agent's tools.
+  let serviceLocationMode: ServiceLocationMode | null = null
 
   // Fetch agent_tools rows whose workflow_id is set, joined with workflows
   // + current workflow_versions.definition. Health-blocked and inactive
@@ -129,7 +180,23 @@ export async function buildWorkflowTools(
       .single()
     if (!version) continue
 
-    const definition = version.definition as unknown
+    let definition = version.definition as unknown
+
+    // Phase 138 Plan 02 (MODAL-02/MODAL-03): the engine, not the prompt
+    // author, decides whether book_appointment can be called without an
+    // address. Resolve the org's mode once, transform ONLY this row's
+    // input_schema, and render the same text into the system prompt suffix
+    // below — every other workflow's definition passes through untouched.
+    if (wf.tool_name === 'book_appointment') {
+      if (serviceLocationMode === null) {
+        serviceLocationMode = await resolveServiceLocationMode(orgId)
+        result.modalityBlock = renderServiceLocationBlock(serviceLocationMode)
+      }
+      const rawInputSchema = getWorkflowInputSchema(definition)
+      const transformed = applyServiceLocationMode(rawInputSchema, serviceLocationMode)
+      definition = rebuildDefinitionWithInputSchema(definition, transformed)
+    }
+
     const inputSchema = deriveWorkflowInputSchema(definition)
     const desc =
       wf.description ??
@@ -317,8 +384,15 @@ export async function buildWorkflowTools(
 
 // Returns the suffix block to append to the system prompt. Empty string when
 // no workflows are attached. Format matches the SEED-033 contract.
+//
+// Phase 138 Plan 02 (MODAL-03): `modalityBlock` is BuildResult.modalityBlock
+// from buildWorkflowTools() — renderServiceLocationBlock() text for whichever
+// org/mode built the toolset, or '' for any agent without book_appointment.
+// Empty/omitted produces byte-identical output to before this parameter
+// existed, so every non-booking agent's prompt is unaffected.
 export function buildWorkflowSystemPromptSuffix(
   summaries: WorkflowToolSummary[],
+  modalityBlock: string = '',
 ): string {
   if (summaries.length === 0) return ''
   const lines = summaries
@@ -327,7 +401,7 @@ export function buildWorkflowSystemPromptSuffix(
       return `- **${s.toolName}**: ${s.description}${annotation}`
     })
     .join('\n')
-  return [
+  const base = [
     '',
     '## Available Workflows',
     'You have access to the following workflows as tools. Call them when appropriate:',
@@ -335,4 +409,8 @@ export function buildWorkflowSystemPromptSuffix(
     '',
     'When calling a workflow tool, provide only the required input fields. The system handles execution and will return the result.',
   ].join('\n')
+
+  if (!modalityBlock) return base
+
+  return [base, '', '## Service Location', modalityBlock].join('\n')
 }

@@ -12,6 +12,8 @@
 // for real.
 
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { Database, Json } from '../src/types/database'
 import type { PartnerEdgeAllow } from '../src/lib/agent-runtime/resolve-partner-edge'
@@ -29,10 +31,30 @@ vi.mock('@/lib/agent-runtime/execute-workflow-tool', () => ({
 vi.mock('@/lib/obs/logger', () => ({
   createLogger: vi.fn(() => ({ warn: vi.fn(), error: vi.fn(), info: vi.fn() })),
 }))
+// Phase 138 Plan 02: every existing test in this file builds a
+// book_appointment tool (TOOL_NAME below). Mocking the resolver to the safe
+// default at the module boundary keeps every pre-existing test passing
+// unchanged — no new `organizations` branch needed in makeServiceClient.
+vi.mock('@/lib/agent-runtime/resolve-service-location-mode', () => ({
+  resolveServiceLocationMode: vi.fn().mockResolvedValue('on_premises'),
+}))
+// Spy on the real implementation so tests can assert on the definition
+// object it was called with, without duplicating derive-input-schema.ts's
+// own extraction logic here.
+vi.mock('@/lib/workflows/derive-input-schema', async () => {
+  const actual =
+    await vi.importActual<typeof import('@/lib/workflows/derive-input-schema')>(
+      '@/lib/workflows/derive-input-schema',
+    )
+  return { ...actual, deriveWorkflowInputSchema: vi.fn(actual.deriveWorkflowInputSchema) }
+})
 
-import { buildWorkflowTools } from '../src/lib/agent-runtime/build-workflow-tools'
+import { buildWorkflowTools, buildWorkflowSystemPromptSuffix, type WorkflowToolSummary } from '../src/lib/agent-runtime/build-workflow-tools'
 import { resolveAgentTool } from '../src/lib/agent-runtime/resolve-agent-tool'
 import { executeWorkflowTool } from '../src/lib/agent-runtime/execute-workflow-tool'
+import { resolveServiceLocationMode } from '../src/lib/agent-runtime/resolve-service-location-mode'
+import { renderServiceLocationBlock } from '../src/lib/agent-runtime/service-location-prompt'
+import { deriveWorkflowInputSchema } from '../src/lib/workflows/derive-input-schema'
 
 const AGENT_ID = 'agent-wf-tools-0000-0000-000000000001'
 const ORG_ID = 'org-wf-tools-0000-0000-000000000001'
@@ -73,10 +95,10 @@ function workflowRow(
   }
 }
 
-function makeServiceClient(agentToolsRows: unknown[]) {
+function makeServiceClient(agentToolsRows: unknown[], definition: unknown = {}) {
   const from = vi.fn((table: string) => {
     if (table === 'agent_tools') return chainable({ data: agentToolsRows, error: null })
-    if (table === 'workflow_versions') return chainable({ data: { definition: {} } })
+    if (table === 'workflow_versions') return chainable({ data: { definition } })
     throw new Error(`unexpected table: ${table}`)
   })
   return { from } as unknown as SupabaseClient<Database>
@@ -252,5 +274,144 @@ describe('buildWorkflowTools: execute() authorization (AUTHZ-01/AUTHZ-02)', () =
     // never for any ancestor in currentChain.
     expect(resolveAgentTool).toHaveBeenCalledTimes(1)
     expect(resolveAgentTool).toHaveBeenCalledWith(AGENT_ID, TOOL_NAME, 'web_widget')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Phase 138 Plan 02 (MODAL-02/MODAL-03): service location modality
+// ---------------------------------------------------------------------------
+
+function bookAppointmentDefinition() {
+  return {
+    trigger: {
+      type: 'tool_call',
+      config: {
+        tool_name: TOOL_NAME,
+        input_schema: {
+          service_id: { type: 'string', required: true },
+          date: { type: 'string', required: true },
+          time: { type: 'string', required: true },
+          customer_name: { type: 'string', required: true },
+          customer_phone: { type: 'string', required: true },
+          customerAddress: {
+            type: 'string',
+            description: "Customer's service address.",
+            required: false,
+          },
+          notes: { type: 'string', required: false },
+        },
+      },
+    },
+  }
+}
+
+function bookAppointmentClient() {
+  return makeServiceClient([workflowRow()], bookAppointmentDefinition())
+}
+
+/** The definition object passed to deriveWorkflowInputSchema() for a given call index. */
+function derivedInputSchemaArg(callIndex = 0): Record<string, unknown> {
+  const call = vi.mocked(deriveWorkflowInputSchema).mock.calls[callIndex]
+  const definition = call[0] as { trigger: { config: { input_schema: Record<string, unknown> } } }
+  return definition.trigger.config.input_schema
+}
+
+describe('buildWorkflowTools: service location modality', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.mocked(resolveServiceLocationMode).mockResolvedValue('on_premises')
+  })
+
+  it('omits customerAddress from the derived schema for the default-mocked on_premises mode', async () => {
+    const params = baseParams({ serviceClient: bookAppointmentClient() })
+    await buildWorkflowTools(params)
+    expect(derivedInputSchemaArg()).not.toHaveProperty('customerAddress')
+  })
+
+  it('requires customerAddress when the org resolves to at_customer', async () => {
+    vi.mocked(resolveServiceLocationMode).mockResolvedValue('at_customer')
+    const params = baseParams({ serviceClient: bookAppointmentClient() })
+    await buildWorkflowTools(params)
+    expect(derivedInputSchemaArg().customerAddress).toMatchObject({ required: true })
+  })
+
+  it('keeps customerAddress optional when the org resolves to either', async () => {
+    vi.mocked(resolveServiceLocationMode).mockResolvedValue('either')
+    const params = baseParams({ serviceClient: bookAppointmentClient() })
+    await buildWorkflowTools(params)
+    expect(derivedInputSchemaArg().customerAddress).toMatchObject({ required: false })
+  })
+
+  it('never resolves or renders a modality block for an agent whose tools do not include book_appointment', async () => {
+    const params = baseParams({
+      serviceClient: makeServiceClient(
+        [workflowRow({ workflows: { tool_name: 'list_services' } })],
+        { trigger: { config: { input_schema: { query: { type: 'string', required: false } } } } },
+      ),
+    })
+    const result = await buildWorkflowTools(params)
+    expect(resolveServiceLocationMode).not.toHaveBeenCalled()
+    expect(result.modalityBlock).toBe('')
+  })
+
+  it('sets modalityBlock to the exact renderServiceLocationBlock() text for the resolved mode', async () => {
+    vi.mocked(resolveServiceLocationMode).mockResolvedValue('at_customer')
+    const params = baseParams({ serviceClient: bookAppointmentClient() })
+    const result = await buildWorkflowTools(params)
+    expect(result.modalityBlock).toBe(renderServiceLocationBlock('at_customer'))
+  })
+
+  it('resolves the mode at most once per build', async () => {
+    const params = baseParams({ serviceClient: bookAppointmentClient() })
+    await buildWorkflowTools(params)
+    expect(resolveServiceLocationMode).toHaveBeenCalledTimes(1)
+  })
+
+  it('leaves every other workflow definition untouched (no book_appointment attached)', async () => {
+    const otherDefinition = { trigger: { config: { input_schema: { foo: { type: 'string', required: true } } } } }
+    const params = baseParams({
+      serviceClient: makeServiceClient(
+        [workflowRow({ workflows: { tool_name: 'reschedule_appointment' } })],
+        otherDefinition,
+      ),
+    })
+    await buildWorkflowTools(params)
+    expect(derivedInputSchemaArg()).toEqual({ foo: { type: 'string', required: true } })
+  })
+})
+
+describe('buildWorkflowSystemPromptSuffix', () => {
+  const summaries: WorkflowToolSummary[] = [
+    { toolName: TOOL_NAME, description: 'Books an appointment.', kind: 'tool' },
+  ]
+
+  it('produces byte-identical output whether modalityBlock is omitted or explicitly empty', () => {
+    const omitted = buildWorkflowSystemPromptSuffix(summaries)
+    const explicit = buildWorkflowSystemPromptSuffix(summaries, '')
+    expect(omitted).toBe(explicit)
+    expect(omitted).not.toContain('## Service Location')
+  })
+
+  it('appends the modality block under its own heading after Available Workflows, without altering that section', () => {
+    const base = buildWorkflowSystemPromptSuffix(summaries)
+    const withBlock = buildWorkflowSystemPromptSuffix(summaries, 'MODALITY TEXT HERE')
+    expect(withBlock.startsWith(base)).toBe(true)
+    expect(withBlock).toContain('## Service Location')
+    expect(withBlock).toContain('MODALITY TEXT HERE')
+  })
+
+  it('produces no suffix at all for an empty summaries list, regardless of modalityBlock', () => {
+    expect(buildWorkflowSystemPromptSuffix([], 'unused')).toBe('')
+  })
+})
+
+describe('run-agent.ts: modality block threading (structural)', () => {
+  const source = readFileSync(resolve(process.cwd(), 'src/lib/agent-runtime/run-agent.ts'), 'utf8')
+
+  it('has exactly two call sites of buildWorkflowSystemPromptSuffix(, each passing a modalityBlock second argument', () => {
+    const matches = source.match(/buildWorkflowSystemPromptSuffix\(/g) ?? []
+    expect(matches).toHaveLength(2)
+    expect(source).toContain('workflowToolsResult.modalityBlock')
+    expect(source).toContain('workflowToolsStream.modalityBlock')
   })
 })

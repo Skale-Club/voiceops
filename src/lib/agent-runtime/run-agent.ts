@@ -1175,7 +1175,7 @@ async function runAgentBlocking(opts: InternalAgentRunOptions): Promise<AgentRun
       // Append "## Available Workflows" block to the system prompt only when
       // there is at least one workflow tool to mention.
       if (workflowToolsResult.summaries.length > 0) {
-        systemPrompt = `${systemPrompt}${buildWorkflowSystemPromptSuffix(workflowToolsResult.summaries)}`
+        systemPrompt = `${systemPrompt}${buildWorkflowSystemPromptSuffix(workflowToolsResult.summaries, workflowToolsResult.modalityBlock)}`
       }
 
       // DELEG-02: Inject synthetic partner tools for each configured partner agent
@@ -1680,7 +1680,7 @@ function runAgentStreaming(
           })
           Object.assign(toolSet, workflowToolsStream.toolSet)
           if (workflowToolsStream.summaries.length > 0) {
-            systemPrompt = `${systemPrompt}${buildWorkflowSystemPromptSuffix(workflowToolsStream.summaries)}`
+            systemPrompt = `${systemPrompt}${buildWorkflowSystemPromptSuffix(workflowToolsStream.summaries, workflowToolsStream.modalityBlock)}`
           }
 
           // DELEG-02: Inject synthetic partner tools for each configured partner agent
