@@ -32,7 +32,7 @@ routing without destroying configuration or history.
 | 4 | Every Phase 132/133 denial class recorded, distinguishable from an error | PASS | `delegation_cycle`, `delegation_depth_exceeded` (global ceiling and per-edge), all eight `PartnerEdgeDenialReason` values, `partner_budget_timeout`, and `channel_model_invocation_ceiling`, each carried as `denied: true` rather than stuffed into `error_detail`. Idempotency `conflict`/`abandoned` and direct-tool denials were already recorded in `tool_calls` with the same flag — verified unchanged rather than duplicated. |
 | 5 | An idempotency replay is visible as a replay | PASS | Carried through the existing `tool_calls` denial/outcome recording from Phase 133 rather than duplicated into `partner_calls`. |
 | 6 | No credential or unnecessary personal data reaches a persisted row | PASS | `redact.ts` applied inside `insertInvocationStart`/`updateInvocationEnd`, before any write, over `user_message`, `assistant_reply`, `tool_calls`, `partner_calls`, including nested structures. Key-based redaction on exact-match keys, plus patterns for `xph_` tokens, Bearer tokens, vendor `sk-`/`pk-` keys, JWTs, emails, and spaced card numbers. See the caveat below. |
-| 7 | Channel switch is independent and rollback destroys nothing | PASS | The rollback test snapshots agents, mappings, workflows and invocation rows, flips `legacy → specialist → legacy`, then asserts the resolver only ever queried its own table and the snapshot is unchanged. Independence proved by seeding one channel and asserting the other stays legacy. |
+| 7 | Channel switch is independent and rollback destroys nothing | PASS as a mechanism — the switch is not yet read by anything, see below | The rollback test snapshots agents, mappings, workflows and invocation rows, flips `legacy → specialist → legacy`, then asserts the resolver only ever queried its own table and the snapshot is unchanged. Independence proved by seeding one channel and asserting the other stays legacy. |
 | 8 | Defaults are safe | PASS | Migration 1293 inserts no rows; every organization resolves through absence. The resolver returns legacy on missing row, read error, unrecognised string, malformed value, and missing inputs — an unknown value is never read as "enable specialist". |
 | 9 | Phase 131/132/133 suites stay green | PASS | 292/292 across the full keep-green list plus the new suites. |
 
@@ -89,5 +89,18 @@ reviewing 134-01's report and folded into 134-03 as migration 1294 before that p
 - Migrations 1290, 1291, 1292, 1293 and 1294 are all authored and **unapplied**.
 - The 134-02 routing-mode resolver is built and tested but **wired into nothing**. No
   route reads it yet.
+
+### Scope note on ROLL-02
+
+ROLL-02 reads "operators can switch each channel between legacy and specialist routing".
+What this phase delivers is the storage, the safe-defaulting resolver, and the proof that
+flipping it destroys nothing. What it does not deliver is any code path that consults the
+resolver — plan 134-02 said "build the resolver only, do not wire it into any live route",
+deliberately, because wiring it is cutting over routing.
+
+So the requirement is satisfied at the mechanism level and inert at the behavior level.
+The wiring belongs to Phase 136, alongside the canary it exists to serve. Recording this
+explicitly so nobody reads the checked box as "an operator can flip this today and see a
+difference" — they cannot, yet, and that is by design.
 - `/api/vapi/tools` is not cut over. No Vapi assistant bound, no tenant agent modified,
   no live booking executed.

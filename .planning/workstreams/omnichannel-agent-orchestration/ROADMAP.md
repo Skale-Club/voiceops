@@ -101,7 +101,10 @@ This milestone extends the existing text-agent platform into a tenant-safe voice
   2. The Cuts & Culture canary configuration is isolated to that tenant and no new or existing organization receives its specialist graph as a platform default.
   3. A live widget interaction and a live Vapi interaction both invoke the same Availability specialist definition successfully.
   4. A real booking completes idempotently and its trace shows channel ingress, routing, specialist invocation, workflow, Action Engine execution, and provider result end to end.
-**Plans**: TBD
+**Plans**:
+- [ ] 136-01-PLAN.md — Wire the routing switch at the trusted boundary, legacy still default.
+- [ ] 136-02-PLAN.md — Declare the tenant canary graph and a dry-run-first provisioning script.
+- [ ] 136-03-PLAN.md — Write the human activation runbook with an abort step per stage.
 **UI hint**: yes
 
 ## Progress
@@ -116,7 +119,7 @@ Phases execute in numeric order: 131 → 132 → 133 → 134 → 135 → 136.
 | 133. Idempotent Action and Vapi Safety | 3/3 | Complete | 2026-09-03 |
 | 134. Traceability and Reversible Routing | 3/3 | Complete | 2026-09-03 |
 | 135. Release Verification and Hardening | 0/3 | Planned | - |
-| 136. Cuts & Culture Canary Rollout | 0/TBD | Not started | - |
+| 136. Cuts & Culture Canary Rollout | 0/3 | Planned | - |
 
 ---
 
