@@ -188,7 +188,14 @@ export async function checkIdempotency(
 
 export async function recordIdempotency(params: {
   organizationId: string
-  agentInvocationId: string
+  /**
+   * The agent invocation that owns this execution, when there is one.
+   * `agent_invocation_id` is a nullable FK: legacy ingress paths (the Vapi
+   * tool webhook calls executeAction directly) have no invocation to point
+   * at, and must pass `null` rather than a fabricated id that would fail the
+   * FK or the UUID format check.
+   */
+  agentInvocationId: string | null
   idempotencyKey: string
   toolName: string
   requestHash: string
@@ -201,7 +208,7 @@ export async function recordIdempotency(params: {
     .upsert(
       {
         organization_id: params.organizationId,
-        agent_invocation_id: params.agentInvocationId,
+        agent_invocation_id: params.agentInvocationId ?? null,
         idempotency_key: params.idempotencyKey,
         tool_name: params.toolName,
         request_hash: params.requestHash,
@@ -236,7 +243,14 @@ export async function recordIdempotency(params: {
 
 export async function recordAbandonedIdempotency(params: {
   organizationId: string
-  agentInvocationId: string
+  /**
+   * The agent invocation that owns this execution, when there is one.
+   * `agent_invocation_id` is a nullable FK: legacy ingress paths (the Vapi
+   * tool webhook calls executeAction directly) have no invocation to point
+   * at, and must pass `null` rather than a fabricated id that would fail the
+   * FK or the UUID format check.
+   */
+  agentInvocationId: string | null
   idempotencyKey: string
   toolName: string
   requestHash: string
@@ -255,7 +269,7 @@ export async function recordAbandonedIdempotency(params: {
     .upsert(
       {
         organization_id: params.organizationId,
-        agent_invocation_id: params.agentInvocationId,
+        agent_invocation_id: params.agentInvocationId ?? null,
         idempotency_key: params.idempotencyKey,
         tool_name: params.toolName,
         request_hash: params.requestHash,

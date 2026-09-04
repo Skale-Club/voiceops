@@ -59,14 +59,12 @@ interface VapiCallShape {
   customer?: { number?: string; name?: string }
 }
 
-// The shared idempotency helpers persist rows keyed to an agent invocation
-// (agent_invocation_id is a nullable FK to agent_invocations). This route has
-// no agent invocation — it calls executeAction directly — so there is no
-// valid id to supply. Passing `undefined` (rather than an empty string or a
-// made-up id) means the field is dropped from the upsert payload entirely and
-// the nullable column is written as NULL, instead of failing the FK/format
-// check with a fabricated value that isn't a real invocation.
-const NO_AGENT_INVOCATION = undefined as unknown as string
+// This route calls executeAction directly and never creates an agent
+// invocation, so it has no id to point the nullable agent_invocation_id FK at.
+// The helper accepts null for exactly this case — a fabricated id would fail
+// the FK or the UUID format check inside the helper's non-fatal error
+// handling, which would silently drop the receipt and disable the guard.
+const NO_AGENT_INVOCATION = null
 
 export async function POST(request: Request): Promise<Response> {
   const startTime = Date.now()
