@@ -1,14 +1,14 @@
 {
   "version": "1.0",
-  "timestamp": "2026-09-03T20:45:00.000Z",
+  "timestamp": "2026-09-04T00:05:00.000Z",
   "workstream": "omnichannel-agent-orchestration",
-  "phase": "134",
-  "phase_name": "Traceability and Reversible Routing",
+  "phase": "136",
+  "phase_name": "Cuts & Culture Canary Rollout",
   "phase_dir": ".planning/workstreams/omnichannel-agent-orchestration/phases",
   "plan": null,
   "task": 0,
   "total_tasks": 0,
-  "status": "needs_planning",
+  "status": "milestone_built_awaiting_human_gate",
   "completed_tasks": [
     {
       "id": 1,
@@ -53,14 +53,21 @@
       "status": "done",
       "commit": "29ad98aa, 7b399031, e007da1c, c31368fb, 3cc836aa, b6ad9f63, 519ce698",
       "progress": "Three plans in two waves. Two defects the plans did not anticipate were found and fixed: the channel ceiling was inert in the run-agent recursion, and the idempotency preflight masked both success and the tenant fallback message on every side-effecting voice call. Build exit 0."
+    },
+    {
+      "id": 12,
+      "name": "Plan, execute and verify Phases 134, 135 and 136",
+      "status": "done",
+      "commit": "89fce2a8..6d0ac933",
+      "progress": "All 6 phases built and verified to their gates. Two real defects found while building the Phase 135 release gate: the Xkedule booking mutations never reached the idempotency guard (d0a162bf), and a cross-organization data leak in get_org_member_profiles was hiding inside the failing-test set treated as pre-existing baseline (fix authored as migration 1295, unapplied)."
     }
   ],
   "remaining_tasks": [
     {
-      "id": 9,
-      "name": "Plan and execute Phases 134 through 136 in order",
-      "status": "in_progress",
-      "progress": "Phases 131, 132 and 133 complete and verified. Phase 134 has no context document and no plans yet."
+      "id": 13,
+      "name": "Human gate: apply migrations, wire ingress, provision the canary, activate",
+      "status": "blocked_on_human",
+      "progress": "See docs/agents/canary-activation-runbook.md. Six ordered steps, each with an abort step. Nothing in them has been performed."
     }
   ],
   "blockers": [
@@ -72,8 +79,28 @@
   ],
   "human_actions_pending": [
     {
-      "action": "Authorize production migration and canary activation only when the later execution plan reaches those gates.",
-      "context": "Phase 131 planning does not authorize db push, Vapi cutover, or live booking mutation.",
+      "action": "Apply migrations 1290-1295 with npx supabase db push",
+      "context": "1295 is a SECURITY fix independent of the canary - it closes a cross-org member/email/phone leak in get_org_member_profiles and should be applied regardless. Afterwards, re-add tests/security-secdef-isolation.test.ts to GATE_MEMBERS in scripts/release-gate.ts.",
+      "blocking": true
+    },
+    {
+      "action": "Change an ingress route to call invokeAgentWithChannelRouting() instead of runAgent/executeAction",
+      "context": "Runbook step 5.0. invokeAgent has no production callers today, so the gateway, specialist routing and the channel switch are not on any request path and flipping a routing row changes nothing. This is a code change through PR/CI/deploy.",
+      "blocking": true
+    },
+    {
+      "action": "Run scripts/provision-canary-graph.ts as a dry run, then with --apply --org=<uuid>",
+      "context": "Never run against any organization. Dry run is the default; --apply requires an explicit org whose slug must match.",
+      "blocking": true
+    },
+    {
+      "action": "Bind the Vapi assistant to the entry orchestrator, flip voice then widget routing, place one real booking",
+      "context": "Runbook steps 4-6. ROLL-03 stays unproven until this happens.",
+      "blocking": true
+    },
+    {
+      "action": "Decide what to do about the 24 unclassified write action types",
+      "context": "See FINDINGS-OUTSIDE-SCOPE.md item 2. send_whatsapp_message, send_email, the pipeline surface and others bypass the idempotency guard the way the Xkedule mutations did. Deliberately not fixed autonomously: the change spans most of the integration surface and the guard fails closed.",
       "blocking": false
     }
   ],
@@ -126,6 +153,6 @@
   ],
   "uncommitted_files": [],
   "background_processes": [],
-  "next_action": "Phase 134 (Traceability and Reversible Routing) needs a context document and plans. Requirements OBS-01, OBS-02, ROLL-02. Read ROADMAP.md for scope, verify every claimed gap against current source before writing the context (the planning-time inventories in this workstream have been wrong twice), then generate and review plans before executing.",
-  "context_notes": "Phase 133 shipped in 7b399031 (ingress-scoped idempotency key, replay/conflict/abandoned outcome), e007da1c + c31368fb (voice latency ceiling on the Phase 132 shared budget, including the run-agent recursion wiring the plan left open), and 3cc836aa + b6ad9f63 + 519ce698 (Vapi webhook made idempotent and multi-call safe, then hardened after it regressed the pre-existing action-engine suite). Read 133-VERIFICATION.md before touching the Vapi route. Full-suite baseline is now 30-32 failing files / 52-53 failing tests; the over-baseline members shift between runs and pass in isolation (Postgres deadlock in calendar-rls, vitest SSR module-cycle in demo-readonly) - measure, do not assume. Build needs NODE_OPTIONS=--max-old-space-size=8192. Never junction node_modules into a git worktree. Use --ws omnichannel-agent-orchestration for GSD commands."
+  "next_action": "The milestone is built. Everything remaining is on the human gate in docs/agents/canary-activation-runbook.md. Start with migration 1295 - it is a security fix independent of the canary.",
+  "context_notes": "All 6 phases (131-136) built and verified. What is LIVE today: everything phases 132-134 put inside runAgent and /api/vapi/tools - edge-based least privilege, kb_scope, partner_calls, denial recording, redaction before persistence, and the idempotency guard. The widget route calls runAgent directly so it inherits these. What is NOT live: the Phase 131 gateway, Phase 132 specialist routing and the Phase 134 channel switch - invokeAgent has zero production callers. Release gate: npm run release-gate (8 suites, 206 tests + 33 workflow validations), CI at .github/workflows/release-gate.yml. Full-suite baseline is ~30 failing files for live-DB and module-resolution reasons - but note that one of those was a real security leak, so audit newcomers rather than assuming noise. Build needs NODE_OPTIONS=--max-old-space-size=8192; a local Redis on localhost:6379 being down makes static generation slow and flaky but it passes on retry. Never junction node_modules into a git worktree."
 }
