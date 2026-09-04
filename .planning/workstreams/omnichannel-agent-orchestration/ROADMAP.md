@@ -74,7 +74,10 @@ This milestone extends the existing text-agent platform into a tenant-safe voice
   1. An operator can follow one correlation trace from channel ingress through the entry agent, all child specialist invocations, workflow run, Action Engine execution, and provider result.
   2. The trace reports nested tool and partner failures plus partner calls, timing, token usage, model, cost, denial reason, and idempotency replay without plaintext credentials or unnecessary personal data.
   3. An operator can switch voice and text channels independently between legacy and specialist routing, then roll either channel back without deleting agents, mappings, workflows, or invocation history.
-**Plans**: TBD
+**Plans**:
+- [ ] 134-01-PLAN.md — Link workflow runs to the trace and invocation that caused them.
+- [ ] 134-02-PLAN.md — Add a per-channel legacy/specialist routing mode that defaults to legacy.
+- [ ] 134-03-PLAN.md — Populate partner_calls, record denials as denials, and redact before persistence.
 
 ### Phase 135: Release Verification and Hardening
 **Goal**: The complete omnichannel orchestration path satisfies its security, provider, idempotency, latency, build, workflow, and human-validation gates before any specialist routing is enabled for production traffic.
@@ -108,7 +111,7 @@ Phases execute in numeric order: 131 → 132 → 133 → 134 → 135 → 136.
 | 131. Trusted Omnichannel Invocation Foundation | 3/3 | Complete | 2026-09-03 |
 | 132. Authorized Specialist Orchestration | 4/4 | Complete | 2026-09-03 |
 | 133. Idempotent Action and Vapi Safety | 3/3 | Complete | 2026-09-03 |
-| 134. Traceability and Reversible Routing | 0/TBD | Not started | - |
+| 134. Traceability and Reversible Routing | 0/3 | Planned | - |
 | 135. Release Verification and Hardening | 0/TBD | Not started | - |
 | 136. Cuts & Culture Canary Rollout | 0/TBD | Not started | - |
 
