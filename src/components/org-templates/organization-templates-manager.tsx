@@ -246,6 +246,7 @@ function TemplateCard({
     c.message_templates &&
       `${c.message_templates} message template${c.message_templates === 1 ? '' : 's'}`,
     c.workflows && `${c.workflows} workflow${c.workflows === 1 ? '' : 's'}`,
+    c.agents && `${c.agents} agent${c.agents === 1 ? '' : 's'}`,
   ].filter(Boolean) as string[]
 
   return (

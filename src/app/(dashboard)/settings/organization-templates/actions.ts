@@ -54,6 +54,7 @@ export interface OrgTemplateListItem {
     tags: number
     message_templates: number
     workflows: number
+    agents: number
   }
 }
 
@@ -64,6 +65,7 @@ function snapshotCounts(snapshot: OrgTemplateSnapshot) {
     tags: snapshot.tags?.length ?? 0,
     message_templates: snapshot.message_templates?.length ?? 0,
     workflows: snapshot.workflows?.length ?? 0,
+    agents: snapshot.agents?.length ?? 0,
   }
 }
 

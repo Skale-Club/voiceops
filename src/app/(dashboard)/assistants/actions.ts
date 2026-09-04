@@ -83,3 +83,42 @@ export async function syncVapiAssistantsAction(): Promise<{
   if (result.ok) revalidatePath('/calls')
   return result
 }
+
+/**
+ * Outbound half: PATCHes the org's mesh (rendered prompt, function schemas,
+ * per-tool spoken messages) onto a single mapped Vapi assistant. This is a
+ * live write to a real Vapi assistant, which may be answering a real phone
+ * number right now — it must only ever run from a deliberate operator click
+ * on a specific mapping row, never on render, mount, or as a side effect of
+ * loading the page. The RLS-scoped client (not the service-role client) is
+ * used deliberately: this runs as the authenticated user and the mapping
+ * lookup below is naturally scoped to organizations that user belongs to.
+ */
+export async function pushAssistantConfigAction(
+  mappingId: string
+): Promise<{ error?: string } | { ok: true }> {
+  if (!mappingId || mappingId.trim() === '') return { error: 'Mapping id is required.' }
+
+  const supabase = await createClient()
+  const organization_id = await getCurrentOrgId(supabase)
+  if (!organization_id) return { error: 'No organization found for current user.' }
+
+  const { data: mapping, error: mappingError } = await supabase
+    .from('assistant_mappings')
+    .select('id, organization_id, vapi_assistant_id')
+    .eq('id', mappingId)
+    .maybeSingle()
+
+  if (mappingError) return { error: mappingError.message }
+  if (!mapping) return { error: 'Assistant mapping not found.' }
+  if (mapping.organization_id !== organization_id) {
+    return { error: 'Assistant mapping not found.' }
+  }
+
+  const { pushAssistantConfig } = await import('@/lib/vapi/sync-assistant-config')
+  const result = await pushAssistantConfig(supabase, organization_id, mapping.vapi_assistant_id)
+  if (!result.ok) return { error: result.error ?? 'Push failed.' }
+
+  revalidatePath('/calls')
+  return { ok: true }
+}

@@ -3,7 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Bot, ExternalLink, MoreHorizontal, RefreshCw, Trash2 } from "lucide-react";
+import { Bot, ExternalLink, MoreHorizontal, RefreshCw, Trash2, UploadCloud } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -29,6 +29,7 @@ import {
   toggleAssistantMappingStatus,
   deleteAssistantMapping,
   syncVapiAssistantsAction,
+  pushAssistantConfigAction,
 } from "@/app/(dashboard)/assistants/actions";
 import type { Database } from "@/types/database";
 import { cn } from "@/lib/utils";
@@ -70,6 +71,8 @@ export function AssistantMappingsTable({
   const [deleteTarget, setDeleteTarget] = useState<AssistantMapping | null>(
     null,
   );
+  const [pushTarget, setPushTarget] = useState<AssistantMapping | null>(null);
+  const [pushingId, setPushingId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
 
   async function handleToggle(id: string, newValue: boolean) {
@@ -101,6 +104,21 @@ export function AssistantMappingsTable({
       toast.success("Assistant mapping removed.");
     }
     setIsLoading(false);
+  }
+
+  async function handlePushConfig() {
+    if (!pushTarget) return;
+    const id = pushTarget.id;
+    const name = pushTarget.name || pushTarget.vapi_assistant_id;
+    setPushTarget(null);
+    setPushingId(id);
+    const result = await pushAssistantConfigAction(id);
+    setPushingId(null);
+    if ("error" in result && result.error) {
+      toast.error(`Push to Vapi failed for "${name}": ${result.error}`);
+    } else {
+      toast.success(`Pushed the latest mesh configuration to "${name}" on Vapi.`);
+    }
   }
 
   async function handleSync() {
@@ -226,6 +244,20 @@ export function AssistantMappingsTable({
                             <DropdownMenuItem onClick={() => setEditMapping(m)}>
                               Edit Mapping
                             </DropdownMenuItem>
+                            {isActive && (
+                              <DropdownMenuItem
+                                disabled={pushingId === m.id}
+                                onClick={() => setPushTarget(m)}
+                              >
+                                <UploadCloud
+                                  className={cn(
+                                    "h-3.5 w-3.5 mr-2",
+                                    pushingId === m.id && "animate-pulse",
+                                  )}
+                                />
+                                {pushingId === m.id ? "Pushing…" : "Push Config to Vapi"}
+                              </DropdownMenuItem>
+                            )}
                             <DropdownMenuItem
                               className="text-destructive"
                               onClick={() => setDeleteTarget(m)}
@@ -351,6 +383,20 @@ export function AssistantMappingsTable({
                             <DropdownMenuItem onClick={() => setEditMapping(m)}>
                               Edit Mapping
                             </DropdownMenuItem>
+                            {isActive && (
+                              <DropdownMenuItem
+                                disabled={pushingId === m.id}
+                                onClick={() => setPushTarget(m)}
+                              >
+                                <UploadCloud
+                                  className={cn(
+                                    "h-3.5 w-3.5 mr-2",
+                                    pushingId === m.id && "animate-pulse",
+                                  )}
+                                />
+                                {pushingId === m.id ? "Pushing…" : "Push Config to Vapi"}
+                              </DropdownMenuItem>
+                            )}
                             <DropdownMenuItem
                               className="text-destructive"
                               onClick={() => setDeleteTarget(m)}
@@ -406,6 +452,31 @@ export function AssistantMappingsTable({
               onClick={handleDelete}
             >
               Remove
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog
+        open={!!pushTarget}
+        onOpenChange={(open) => {
+          if (!open) setPushTarget(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Push mesh configuration to Vapi?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This immediately updates the live assistant &ldquo;
+              {pushTarget?.name || pushTarget?.vapi_assistant_id}&rdquo; on Vapi
+              with this organization&apos;s current prompt, tools, and tool
+              messages. It may be answering a real phone number right now.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handlePushConfig}>
+              Push Config
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
