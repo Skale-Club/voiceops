@@ -1,7 +1,7 @@
 // src/lib/xkedule/actions/create-booking.ts
 // POST /api/v1/bookings — create a booking from the minimum the AI gathers.
 // Xkedule computes duration/endTime/price and re-validates the slot (409).
-import { xkeduleFetchJson, type XkeduleCredentials } from '../client'
+import { xkeduleFetchJson, WRITE_TIMEOUT_MS, type XkeduleCredentials } from '../client'
 
 interface CreateBookingParams {
   customerName?: string
@@ -70,6 +70,7 @@ export async function createXkeduleBooking(
       'POST',
       body,
       credentials,
+      WRITE_TIMEOUT_MS,
     )
     const end = booking.endTime ? `-${booking.endTime}` : ''
     const total = booking.totalPrice ? ` | Total: $${booking.totalPrice}` : ''

@@ -3,7 +3,7 @@
 // a new date/time (and optionally a different staff member). Xkedule
 // re-validates the slot and rejects a cancelled/completed booking outright
 // (409 booking_terminal).
-import { xkeduleFetchJson, type XkeduleCredentials } from '../client'
+import { xkeduleFetchJson, WRITE_TIMEOUT_MS, type XkeduleCredentials } from '../client'
 
 interface RescheduleBookingParams {
   bookingId?: number | string
@@ -43,6 +43,7 @@ export async function rescheduleXkeduleBooking(
       'POST',
       body,
       credentials,
+      WRITE_TIMEOUT_MS,
     )
     const end = booking.endTime ? `-${booking.endTime}` : ''
     return `Booking ${booking.id} rescheduled to ${booking.bookingDate ?? p.bookingDate} at ${booking.startTime ?? p.startTime}${end}. Status: ${booking.status}`

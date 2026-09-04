@@ -2,7 +2,7 @@
 // POST /api/v1/bookings/:id/cancel — cancel an existing Xkedule booking.
 // Idempotent on Xkedule's side: cancelling an already-terminal booking
 // returns its current state instead of erroring.
-import { xkeduleFetchJson, type XkeduleCredentials } from '../client'
+import { xkeduleFetchJson, WRITE_TIMEOUT_MS, type XkeduleCredentials } from '../client'
 
 interface CancelBookingParams {
   bookingId?: number | string
@@ -31,6 +31,7 @@ export async function cancelXkeduleBooking(
       'POST',
       {},
       credentials,
+      WRITE_TIMEOUT_MS,
     )
     return `Booking ${booking.id} is now ${booking.status}.`
   } catch (err) {

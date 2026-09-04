@@ -12,6 +12,14 @@
 // leaves room for the LLM turn around one slow call.
 export const DEFAULT_TIMEOUT_MS = 15000
 
+// A write is not a read. On 2026-09-04 a real booking through the mesh took
+// longer than 15s on Xkedule's side: our client aborted, the tool reported
+// failure, the agent told the customer the booking had not gone through -
+// and Xkedule had already created it (booking #471). Telling someone they
+// have no appointment when they do is worse than making them wait, so the
+// mutations get a longer budget than the reads.
+export const WRITE_TIMEOUT_MS = 30000
+
 export interface XkeduleCredentials {
   tenantBaseUrl: string
   apiKey: string
@@ -22,6 +30,7 @@ async function xkeduleFetch(
   method: 'GET' | 'POST',
   body: unknown | null,
   credentials: XkeduleCredentials,
+  timeoutMs?: number,
 ): Promise<Response> {
   const url = `${credentials.tenantBaseUrl.replace(/\/$/, '')}${path}`
   const response = await fetch(url, {
@@ -31,7 +40,7 @@ async function xkeduleFetch(
       'X-Xkedule-Key': credentials.apiKey,
     },
     body: body !== null ? JSON.stringify(body) : undefined,
-    signal: AbortSignal.timeout(DEFAULT_TIMEOUT_MS),
+    signal: AbortSignal.timeout(timeoutMs ?? DEFAULT_TIMEOUT_MS),
   })
   return response
 }
@@ -41,8 +50,9 @@ export async function xkeduleFetchJson<T>(
   method: 'GET' | 'POST',
   body: unknown | null,
   credentials: XkeduleCredentials,
+  timeoutMs?: number,
 ): Promise<T> {
-  const response = await xkeduleFetch(path, method, body, credentials)
+  const response = await xkeduleFetch(path, method, body, credentials, timeoutMs)
   if (!response.ok) {
     const errorText = await response.text()
     throw new Error(`Xkedule API error ${response.status}: ${errorText}`)
