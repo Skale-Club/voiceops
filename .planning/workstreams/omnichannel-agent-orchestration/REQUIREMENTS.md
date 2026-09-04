@@ -46,11 +46,11 @@ Total: **32 active requirements** across 7 delivery categories.
 
 ### Observability and Rollout
 
-- [ ] **OBS-01**: One trace links channel ingress, entry agent, every specialist invocation, workflow run, Action Engine execution, and provider result using parent/child invocation relationships.
-- [ ] **OBS-02**: Invocation status reflects nested tool and partner failures; `partner_calls`, timing, token usage, model, cost, denial reason, and idempotency replay are recorded without plaintext credentials or unnecessary personal data.
+- [x] **OBS-01**: One trace links channel ingress, entry agent, every specialist invocation, workflow run, Action Engine execution, and provider result using parent/child invocation relationships.
+- [x] **OBS-02**: Invocation status reflects nested tool and partner failures; `partner_calls`, timing, token usage, model, cost, denial reason, and idempotency replay are recorded without plaintext credentials or unnecessary personal data.
 - [x] **OBS-03**: Vapi payloads containing multiple tool calls either execute every supported call with matching result IDs or reject the unsupported shape deterministically without silently ignoring calls.
 - [ ] **ROLL-01**: Cuts & Culture is configured as the first tenant canary with entry orchestrator plus Services, Pricing, Availability, Customer, and Booking specialists; only Booking receives Xkedule write capabilities.
-- [ ] **ROLL-02**: Operators can switch each channel between legacy and specialist routing independently and roll back without deleting agents, mappings, workflows, or invocation history.
+- [x] **ROLL-02**: Operators can switch each channel between legacy and specialist routing independently and roll back without deleting agents, mappings, workflows, or invocation history.
 - [ ] **ROLL-03**: A live canary proves the same Availability specialist is called from widget and Vapi, followed by a real idempotent booking flow and a trace showing the complete path.
 
 ### Verification Gates
@@ -108,11 +108,11 @@ Every active v3.5 requirement maps to exactly one implementation phase.
 | PERF-01 | Phase 133 | Done |
 | PERF-02 | Phase 133 | Done |
 | PERF-03 | Phase 133 | Done |
-| OBS-01 | Phase 134 | Pending |
-| OBS-02 | Phase 134 | Pending |
+| OBS-01 | Phase 134 | Done |
+| OBS-02 | Phase 134 | Done |
 | OBS-03 | Phase 133 | Done |
 | ROLL-01 | Phase 136 | Pending |
-| ROLL-02 | Phase 134 | Pending |
+| ROLL-02 | Phase 134 | Done |
 | ROLL-03 | Phase 136 | Pending |
 | TEST-01 | Phase 131 | Complete |
 | TEST-02 | Phase 135 | Pending |

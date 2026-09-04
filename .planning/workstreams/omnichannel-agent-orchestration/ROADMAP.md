@@ -13,7 +13,7 @@ This milestone extends the existing text-agent platform into a tenant-safe voice
 - [x] **Phase 131: Trusted Omnichannel Invocation Foundation** - Voice and widget enter the same tenant-resolved agent boundary on a repaired regression baseline.
 - [x] **Phase 132: Authorized Specialist Orchestration** - Agents route and delegate with typed contracts, least privilege, scoped knowledge, and centralized model access.
 - [x] **Phase 133: Idempotent Action and Vapi Safety** - Voice-triggered actions stay fast, replay-safe, timeout-safe, and compatible with the always-200 Vapi contract.
-- [ ] **Phase 134: Traceability and Reversible Routing** - Operators can inspect complete invocation trees and switch each channel between legacy and specialist routing without data loss.
+- [x] **Phase 134: Traceability and Reversible Routing** - Operators can inspect complete invocation trees and switch each channel between legacy and specialist routing without data loss.
 - [ ] **Phase 135: Release Verification and Hardening** - Automated, timed, build, workflow, and UAT gates prove the orchestration path is safe to expose to production traffic.
 - [ ] **Phase 136: Cuts & Culture Canary Rollout** - The specialist graph is enabled and proven for one tenant without becoming platform-default behavior.
 
@@ -75,9 +75,9 @@ This milestone extends the existing text-agent platform into a tenant-safe voice
   2. The trace reports nested tool and partner failures plus partner calls, timing, token usage, model, cost, denial reason, and idempotency replay without plaintext credentials or unnecessary personal data.
   3. An operator can switch voice and text channels independently between legacy and specialist routing, then roll either channel back without deleting agents, mappings, workflows, or invocation history.
 **Plans**:
-- [ ] 134-01-PLAN.md — Link workflow runs to the trace and invocation that caused them.
-- [ ] 134-02-PLAN.md — Add a per-channel legacy/specialist routing mode that defaults to legacy.
-- [ ] 134-03-PLAN.md — Populate partner_calls, record denials as denials, and redact before persistence.
+- [x] 134-01-PLAN.md — Link workflow runs to the trace and invocation that caused them.
+- [x] 134-02-PLAN.md — Add a per-channel legacy/specialist routing mode that defaults to legacy.
+- [x] 134-03-PLAN.md — Populate partner_calls, record denials as denials, and redact before persistence.
 
 ### Phase 135: Release Verification and Hardening
 **Goal**: The complete omnichannel orchestration path satisfies its security, provider, idempotency, latency, build, workflow, and human-validation gates before any specialist routing is enabled for production traffic.
@@ -87,7 +87,10 @@ This milestone extends the existing text-agent platform into a tenant-safe voice
   1. Automated suites pass for tenant isolation, direct versus delegated authorization, cross-agent calls, cycle/depth limits, handoff injection resistance, OpenRouter-only generation, and Xkedule idempotency.
   2. A realistic timed integration test exercises Vapi ingress through specialist and tool result, with a simple voice lookup meeting p95 at or below 5 seconds under the documented test profile.
   3. The production build, focused Vitest suites, workflow validation, and documented voice/text UAT checklist all pass before the canary receives specialist-routed traffic.
-**Plans**: TBD
+**Plans**:
+- [ ] 135-01-PLAN.md — Declare the release gate subset and pin safety-critical set coverage.
+- [ ] 135-02-PLAN.md — Measure the Vapi path p95 against a written test profile.
+- [ ] 135-03-PLAN.md — Wire the gate into CI and write the voice/text UAT checklist.
 
 ### Phase 136: Cuts & Culture Canary Rollout
 **Goal**: Cuts & Culture alone runs the first production specialist graph across voice and widget, proving shared specialization, real idempotent booking, and complete tracing without installing tenant-specific behavior as a platform default.
@@ -111,8 +114,8 @@ Phases execute in numeric order: 131 → 132 → 133 → 134 → 135 → 136.
 | 131. Trusted Omnichannel Invocation Foundation | 3/3 | Complete | 2026-09-03 |
 | 132. Authorized Specialist Orchestration | 4/4 | Complete | 2026-09-03 |
 | 133. Idempotent Action and Vapi Safety | 3/3 | Complete | 2026-09-03 |
-| 134. Traceability and Reversible Routing | 0/3 | Planned | - |
-| 135. Release Verification and Hardening | 0/TBD | Not started | - |
+| 134. Traceability and Reversible Routing | 3/3 | Complete | 2026-09-03 |
+| 135. Release Verification and Hardening | 0/3 | Planned | - |
 | 136. Cuts & Culture Canary Rollout | 0/TBD | Not started | - |
 
 ---
