@@ -75,6 +75,40 @@ export async function vapiFetch<T>(apiKey: string, path: string): Promise<T> {
   return response.json() as Promise<T>
 }
 
+/**
+ * Authenticated write (PATCH today; the signature leaves room for other verbs
+ * without a breaking change) against the Vapi API, with the same 8s hard
+ * timeout and VapiApiError contract as vapiFetch().
+ */
+export async function vapiFetchWrite<T>(
+  apiKey: string,
+  path: string,
+  method: 'PATCH',
+  body: unknown
+): Promise<T> {
+  let response: Response
+  try {
+    response = await fetch(`${VAPI_BASE_URL}${path}`, {
+      method,
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(DEFAULT_TIMEOUT_MS),
+    })
+  } catch (err) {
+    const timedOut = err instanceof Error && err.name === 'TimeoutError'
+    throw new VapiApiError(timedOut ? 'Vapi request timed out' : 'Failed to reach Vapi', 0)
+  }
+
+  if (!response.ok) {
+    throw new VapiApiError(`Vapi returned ${response.status}`, response.status)
+  }
+
+  return response.json() as Promise<T>
+}
+
 // ── Minimal Vapi resource shapes ────────────────────────────────────────────
 // Only the fields Xphere reads directly. Real Vapi payloads carry more
 // (provider-specific) fields — the index signature keeps those accessible
