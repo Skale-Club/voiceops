@@ -131,3 +131,151 @@ export async function resolveSpecialistRoute(
 
   return { matched: true, agentId: agent.id, agentSlug: agent.slug }
 }
+
+// ---------------------------------------------------------------------------
+// Phase 137 Plan 02 (MESH-02): trusted tool-name -> specialist resolution.
+//
+// resolveSpecialistRoute() above answers "does this intent match an active
+// specialist's own slug?" (used by the text/web_widget call_partner_<slug>
+// convention). This is a DIFFERENT question, asked by a channel adapter that
+// only has a trusted function/tool name (e.g. Vapi's tool-call payload) and
+// no agent slug at all: "which active, channel-allowed specialist in this
+// org has this tool_name attached as one of its own granted workflows?"
+//
+// The mapping is derived entirely from tenant configuration already on disk
+// (agent_tools joined to workflows) rather than a hardcoded table of tool
+// names, so a tenant that names its tools differently still resolves
+// correctly, and nothing here hardcodes any particular tenant's tool name.
+//
+// Fails closed, same posture as resolveSpecialistRoute(): no tool name, no
+// owning agent, an inactive/unhealthy workflow, a channel the agent (or its
+// per-tool override) does not allow, or MORE THAN ONE agent owning the same
+// tool_name for this org+channel (ambiguous — e.g. a generalist agent that
+// also has every tool attached) all resolve to no route. This function never
+// guesses; the caller falls back to the existing direct Action Engine path.
+// ---------------------------------------------------------------------------
+
+export type SpecialistToolRouteDenialReason =
+  | 'no_tool_name'
+  | 'not_found'
+  | 'ambiguous'
+  | 'cross_organization'
+
+export type SpecialistToolRouteResult =
+  | SpecialistRouteMatch
+  | { matched: false; reason: SpecialistToolRouteDenialReason }
+
+export interface ResolveSpecialistForToolParams {
+  /** Trusted org id of the current invocation. Never payload-derived. */
+  organizationId: string
+  /** Trusted invocation channel. Never payload-derived. */
+  channel: AgentChannel
+  /**
+   * Trusted explicit tool/function name chosen by the channel adapter from
+   * its own fixed, already-verified payload (e.g. a Vapi toolCall.name).
+   * Never free text extracted from a user message or a model's own output.
+   */
+  toolName: string | null | undefined
+}
+
+type ToolOwnerAgentRow = {
+  id: string
+  organization_id: string
+  slug: string
+  is_active: boolean | null
+  allowed_channels: string[] | null
+}
+
+type ToolOwnerRow = {
+  agent_id: string
+  allowed_channels: string[] | null
+  agents: ToolOwnerAgentRow | ToolOwnerAgentRow[] | null
+}
+
+function firstOf<T>(v: T | T[] | null): T | null {
+  if (v === null) return null
+  return Array.isArray(v) ? (v[0] ?? null) : v
+}
+
+/**
+ * Resolves a trusted tool/function name to the single same-org, channel-
+ * allowed specialist agent that has it attached as a granted workflow (via
+ * `agent_tools` -> `workflows`), with NO orchestrator or router model call.
+ */
+export async function resolveSpecialistForTool(
+  params: ResolveSpecialistForToolParams
+): Promise<SpecialistToolRouteResult> {
+  const { organizationId, channel, toolName } = params
+  const trimmedToolName = toolName?.trim()
+
+  if (!organizationId || !channel || !trimmedToolName) {
+    return { matched: false, reason: 'no_tool_name' }
+  }
+
+  const supabase = createServiceRoleClient()
+
+  const { data, error } = await supabase
+    .from('agent_tools')
+    .select(
+      `
+      agent_id,
+      allowed_channels,
+      workflows!inner ( tool_name, is_active, health_blocked ),
+      agents!inner ( id, organization_id, slug, is_active, allowed_channels )
+    `
+    )
+    .eq('organization_id', organizationId)
+    .eq('workflows.tool_name', trimmedToolName)
+    .eq('workflows.is_active', true)
+    .eq('workflows.health_blocked', false)
+    .eq('agents.is_active', true)
+
+  const rows = data as unknown as ToolOwnerRow[] | null
+
+  if (error || !rows || rows.length === 0) {
+    return { matched: false, reason: 'not_found' }
+  }
+
+  const matchedAgents = new Map<string, ToolOwnerAgentRow>()
+
+  for (const row of rows) {
+    const agent = firstOf(row.agents)
+    if (!agent) continue
+
+    // Defense-in-depth: the query above already scopes by organization_id,
+    // but the runtime preflight never trusts a single layer blindly.
+    if (agent.organization_id !== organizationId) continue
+
+    const agentAllowedChannels = (agent.allowed_channels ?? []) as AgentChannel[]
+    if (channel !== 'workflow' && !agentAllowedChannels.includes(channel)) continue
+
+    // Per-tool channel override on the agent_tools junction row, if present.
+    const toolAllowedChannels = row.allowed_channels
+    if (
+      channel !== 'workflow' &&
+      Array.isArray(toolAllowedChannels) &&
+      !(toolAllowedChannels as string[]).includes(channel)
+    ) {
+      continue
+    }
+
+    matchedAgents.set(agent.id, agent)
+  }
+
+  if (matchedAgents.size === 0) {
+    return { matched: false, reason: 'not_found' }
+  }
+
+  if (matchedAgents.size > 1) {
+    createLogger({ orgId: organizationId }).warn('specialist_tool_route_denied', {
+      reason: 'ambiguous',
+      toolName: trimmedToolName,
+      candidateCount: matchedAgents.size,
+    })
+    return { matched: false, reason: 'ambiguous' }
+  }
+
+  const [agent] = [...matchedAgents.values()]
+
+  return { matched: true, agentId: agent.id, agentSlug: agent.slug }
+}
