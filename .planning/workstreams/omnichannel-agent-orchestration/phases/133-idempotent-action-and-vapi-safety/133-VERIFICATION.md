@@ -29,7 +29,7 @@ and HTTP-200-compatible under retries, multi-call payloads, timeouts, and failur
 
 | # | Focus | Result | Evidence |
 |---|-------|--------|----------|
-| 1 | A replayed Vapi tool call executes the mutation once and returns the original result | PASS | `deriveIngressIdempotencyKey({channel, externalCallId, externalToolCallId})` keyed on the verified `call.id` + `toolCall.id`; `tests/vapi-tools-idempotency.test.ts` asserts `executeAction` is not called on replay and the recorded response is returned verbatim. |
+| 1 | A replayed Vapi tool call executes the mutation once and returns the original result | PASS for the mechanism — see the correction below | `deriveIngressIdempotencyKey({channel, externalCallId, externalToolCallId})` keyed on the verified `call.id` + `toolCall.id`; `tests/vapi-tools-idempotency.test.ts` asserts `executeAction` is not called on replay and the recorded response is returned verbatim. |
 | 2 | Same key, different arguments is a conflict, not a replay | PASS | `checkIdempotency` compares `hashToolArgs()`; conflict returns a distinct message and never the original response. Also fixed at the three pre-existing callers, where conflict was previously **not detected at all** — they only checked `cached !== null`. |
 | 3 | Multi-call payloads return one result per call, never silently truncated | PASS | `toolCallList[0]` replaced with a `Promise.all` over every call; per-call try/catch keeps failures isolated; `tests/vapi-tools-multicall.test.ts` asserts 1:1 id matching and order. |
 | 4 | A timeout on a side-effecting action records ownership and does not report success | PASS | `recordAbandonedIdempotency()` runs before the fallback message; a later retry sees `abandoned`, which is neither a free slot nor a success. |
@@ -114,3 +114,23 @@ result. Both paths are now pinned by tests.
 - No Vapi assistant bound or activated, no tenant agent data modified, no live booking.
 - Routing was not cut over. The Vapi tool webhook was hardened in place; it still runs
   the legacy direct-`executeAction` path and does not invoke the specialist graph.
+
+## Correction issued 2026-09-03 (commit `d0a162bf`)
+
+This document originally recorded SAFE-02 as satisfied. That was true of the mechanism
+and false of the thing SAFE-02 actually names.
+
+`xkedule_create_booking`, `xkedule_cancel_booking` and `xkedule_reschedule_booking` were
+never added to `SIDE_EFFECTING_ACTIONS`, so `requiresIdempotency()` returned false for
+them at every call site — the Vapi route and both run-agent tool loops. Every piece of
+Phase 133's machinery was correct and complete, and the Xkedule booking mutations walked
+straight past it. A Vapi retry of a booking created a second booking: precisely the
+scenario the phase exists to prevent.
+
+Found while preparing Phase 135, whose TEST-02 names Xkedule idempotency explicitly.
+Fixed in `d0a162bf`, which adds the three mutations and pins the five Xkedule reads as
+deliberately excluded so they never start paying for the guard.
+
+The lesson worth carrying: every verification claim in this phase was about the guard's
+behavior, and none checked which action types actually reach it. A mechanism test and a
+coverage test are different tests.
