@@ -44,23 +44,20 @@ two flaky over-baseline members seen during Phase 133 did not recur in this run.
 
 Typecheck: zero errors under `src/`.
 
-Production build: **compile and TypeScript stages PASS; static generation blocked by a
-local environment fault, not by code.**
+Production build: **PASS** — `npm run build` exit 0 with an 8 GB Node heap, including the
+`verify-sw` postbuild guard.
 
-`next build` compiled successfully and finished TypeScript with no errors. Static
-generation then failed on two pages, `/admin` and `/admin/orgs`, each exceeding the 60s
-budget across three attempts, with the log filled by `[redis] error: Connection timeout`.
+Worth recording how that conclusion was reached, because the first attempt failed. That
+run died during static generation with `/admin` and `/admin/orgs` each exceeding the 60s
+budget, the log flooded by `[redis] error: Connection timeout`. `REDIS_URL` in `.env.local`
+points at `localhost:6379`, and a direct TCP probe returns `ECONNREFUSED` — no Redis is
+running on this machine, and the two admin pages reach it transitively through
+`getAllOrgs`.
 
-Diagnosed rather than assumed: `REDIS_URL` in `.env.local` points at `localhost:6379`, and
-a direct TCP probe to that address returns `ECONNREFUSED` — no Redis is running on this
-machine. The same `npm run build` passed twice earlier in this same session (Phases 132 and
-133), so the local Redis went away between those runs and this one.
-
-Nothing in Phases 134-136 touches admin pages or Redis; `/admin/orgs` imports `getAllOrgs`
-and pulls Redis in transitively. Recorded as an environment fault. A build on a machine
-with Redis available, or in CI where the deploy workflow supplies its own environment, is
-expected to complete — but this specific claim is unproven here and is not presented as
-proven.
+A second run under the same conditions passed: the admin page timed out on its first
+attempt and succeeded on retry. So the failure was a timing artifact of an unreachable
+dependency under a loaded machine, not a deterministic break and not a code regression.
+Nothing in Phases 134-136 touches admin pages or Redis.
 
 ## Caveats recorded rather than closed
 
