@@ -114,3 +114,35 @@ uses, from the organization's setting:
 
 Travel-time availability (Xkedule does not model it), per-service modality, address
 validation/geocoding.
+
+---
+
+## Addendum 2026-09-04 — the modality needs a business type above it
+
+Reviewing the plans, the operator raised the case this phase exists for and one it had
+missed. The case it serves: a cleaning company travels to the customer, so the address is
+required; a barbershop does not, so asking for one is nonsense. The case it missed: that
+distinction has to be **adaptable per business and set in the panel**, and the operator
+asked whether such a setting already exists.
+
+It does not. Verified against the schema: `organizations` has `legal_name`, `tax_id`,
+address, `timezone`, `default_currency` and a `settings` JSON, and no industry or business
+type. The `industry` column that exists belongs to `org_templates` — the sector a template
+serves — and to `accounts`, which are companies inside a tenant's own CRM. Neither
+describes the tenant. Nothing in `organizations.settings` holds a modality.
+
+So `service_location_mode` on its own would have shipped as a column reachable only by
+`UPDATE`, which is precisely the defect recorded in Phase 139's context about the mesh
+being hand-assembled.
+
+**Plan 138-00 is added ahead of the others.** It puts `business_type` on the organization,
+exposes it in the existing `Settings → Company Info` form rather than inventing a surface,
+and derives the modality's initial value from it. The derived value is a default only:
+`service_location_mode` stays the authority, so a barbershop that starts doing home visits
+can override it without changing what kind of business it says it is.
+
+This also gives Phase 139 the question it should start from. Duplicating a tenant becomes
+"what kind of business is this", with the modality, the prompts and eventually the choice
+of mesh template following from the answer — rather than an operator picking a template by
+name and hoping it matches.
+

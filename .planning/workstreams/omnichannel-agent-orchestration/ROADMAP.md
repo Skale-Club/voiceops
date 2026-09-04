@@ -120,9 +120,9 @@ Phases execute in numeric order: 131 → 132 → 133 → 134 → 135 → 136.
 | 134. Traceability and Reversible Routing | 3/3 | Complete (ROLL-02 partial) | 2026-09-03 |
 | 135. Release Verification and Hardening | 3/3 | Complete | 2026-09-03 |
 | 136. Cuts & Culture Canary Rollout | 3/3 | ROLL-01 done; ROLL-03 blocked on a real booking | 2026-09-04 |
-| 137. Shared Specialist Mesh | 2/3 | Mesh live on the widget; 137-03 unwritten, unverified | 2026-09-04 |
-| 138. Booking Modality | 0/TBD | Context only - on-premises vs at-customer | - |
-| 139. Agent Mesh as a Template | 0/TBD | Context only - duplicable to another tenant | - |
+| 137. Shared Specialist Mesh | 3/3 | Mesh live on the widget; booking unproven (MESH-04) | 2026-09-04 |
+| 138. Booking Modality | 0/3 | Planned - business type seeds the modality | - |
+| 139. Agent Mesh as a Template | 0/8 | Planned - agents asset group + outbound Vapi sync | - |
 
 ---
 

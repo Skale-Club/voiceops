@@ -118,6 +118,19 @@ Every active v3.5 requirement maps to exactly one implementation phase.
 | TEST-02 | Phase 135 | Done |
 | TEST-03 | Phase 135 | Done |
 | TEST-04 | Phase 135 | Done |
+| MESH-01 | Phase 137 | Done — six specialists and seven edges serve voice and widget from one set of rows |
+| MESH-02 | Phase 137 | Done — /api/vapi/tools dispatches an explicit tool call to its specialist behind the channel routing mode |
+| MESH-03 | Phase 137 | Done — only cc-booking-specialist holds Xkedule write grants, verified against provisioned rows |
+| MESH-04 | Phase 137 | BLOCKED — no booking has been created end to end on either channel |
+| MODAL-00 | Phase 138 | Pending — organization business_type, set in Company Info, seeds the modality |
+| MODAL-01 | Phase 138 | Pending — service_location_mode on the organization, defaulting to on_premises |
+| MODAL-02 | Phase 138 | Pending — customerAddress required only when the business travels to the customer |
+| MODAL-03 | Phase 138 | Pending — the engine renders the ask/never-ask block; no prompt hardcodes it |
+| TMPL-01 | Phase 139 | Pending — an agents asset group in org-templates, bound by slug and tool_name |
+| TMPL-02 | Phase 139 | Pending — prompts render tenant facts instead of hardcoding one business |
+| TMPL-03 | Phase 139 | Pending — outbound Vapi sync for prompt, function schemas and tool messages |
+| TMPL-04 | Phase 139 | Pending — operator surface for agent_channel_routing_modes |
+| TMPL-05 | Phase 139 | Pending — install is idempotent and never activates routing on its own |
 
 ### Coverage Summary by Phase
 
@@ -140,3 +153,16 @@ Every active v3.5 requirement maps to exactly one implementation phase.
 ---
 *Requirements defined: 2026-09-03 from operator architecture discussion and repository analysis.*
 *Last updated: 2026-09-03 — roadmap traceability populated with 32/32 requirements across Phases 131-136.*
+
+
+## Requirements added after the v3.5 milestone closed
+
+Phases 137, 138 and 139 were opened after the original 32 requirements were fixed, in
+response to production findings and to the operator's requirement that the system be
+duplicable to another tenant. Their identifiers are registered above so the phases are
+traceable, and they are deliberately kept separate from the v3.5 count rather than
+inflating a closed milestone.
+
+MESH-04 is the one that matters most and is the only one blocked on something no amount of
+code can supply: a real booking, created by a real caller or visitor, with a trace showing
+the whole path. Phases 136 and 137 both stop at exactly that line.

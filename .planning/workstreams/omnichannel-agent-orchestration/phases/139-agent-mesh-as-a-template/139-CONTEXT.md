@@ -121,3 +121,29 @@ rollback is non-destructive; nobody can reach it without database access.
 `scripts/provision-canary-graph.ts` not creating `agent_prompt_versions` is the specific
 bug that made the mesh silently unusable on first provisioning. Whatever replaces or
 wraps it must not be able to produce an agent without an active prompt version.
+
+---
+
+## Addendum 2026-09-04 — two corrections and the business-type link
+
+**Correction, found while planning.** This context claimed `agent_channel_defaults` is
+reachable only by raw SQL. That is wrong: a `ChannelDefaultsCard` already exists and is
+wired into the agents page. Only `agent_channel_routing_modes` genuinely lacks an operator
+surface, so plan 139-03 builds that one alone rather than duplicating a card that exists.
+
+**The question a duplication should start from.** Phase 138 gained a plan 138-00 that puts
+`business_type` on the organization and exposes it in `Settings → Company Info`, because
+no such field existed anywhere — the `industry` columns that do exist describe templates
+and CRM accounts, not the tenant.
+
+That gives this phase a better entry point than picking a template by name. Installing a
+mesh should follow from what kind of business the tenant is: the business type seeds the
+booking modality, the modality decides whether prompts collect an address, and the same
+answer can eventually select which mesh template to install. `org_templates.industry`
+already exists to label a template's sector, so matching a template to a tenant's
+`business_type` is a join this phase can offer rather than a new concept it must invent.
+
+Treat that as the direction of travel, not a ninth plan: the eight plans stand as written,
+and template-selection-by-business-type is the natural follow-on once an agents asset group
+exists at all.
+
