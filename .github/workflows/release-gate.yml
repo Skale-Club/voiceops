@@ -22,11 +22,10 @@ name: Release Gate
 # push to main; duplicating it here would make this gate slow enough that
 # nobody waits for it).
 #
-# Full coverage/exclusion notes, including the deliberately-excluded
-# tests/security-secdef-isolation.test.ts (real cross-org data leak, fix
-# authored but not applied) and the pending idempotency-classification
-# review for 24 write action types, live in docs/agents/release-gate.md --
-# read that before changing this file.
+# Full coverage notes -- what this gate covers, what it deliberately does
+# not (the ~29-file live-database baseline, the 24 write action types still
+# pending idempotency classification), and why -- live in
+# docs/agents/release-gate.md. Read that before changing this file.
 
 on:
   pull_request: {}
@@ -83,8 +82,7 @@ jobs:
       # `npm run workflows:validate`. It exits non-zero if any test fails,
       # any declared member file is missing, any TEST-02 area has zero
       # members, or workflow validation fails -- see the script itself for
-      # the exact exit conditions. See docs/agents/release-gate.md for why
-      # tests/security-secdef-isolation.test.ts is not part of this subset.
+      # the exact exit conditions.
       #
       # Note: tests/agent-schema-rls-smoke.test.ts (one of the members) only
       # runs its real assertions when SUPABASE_DB_URL or DATABASE_URL is

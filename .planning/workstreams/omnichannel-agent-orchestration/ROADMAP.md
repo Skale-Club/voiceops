@@ -13,7 +13,7 @@ This milestone extends the existing text-agent platform into a tenant-safe voice
 - [x] **Phase 131: Trusted Omnichannel Invocation Foundation** - Voice and widget enter the same tenant-resolved agent boundary on a repaired regression baseline.
 - [x] **Phase 132: Authorized Specialist Orchestration** - Agents route and delegate with typed contracts, least privilege, scoped knowledge, and centralized model access.
 - [x] **Phase 133: Idempotent Action and Vapi Safety** - Voice-triggered actions stay fast, replay-safe, timeout-safe, and compatible with the always-200 Vapi contract.
-- [x] **Phase 134: Traceability and Reversible Routing** - Operators can inspect complete invocation trees and switch each channel between legacy and specialist routing without data loss.
+- [~] **Phase 134: Traceability and Reversible Routing** - Operators can inspect complete invocation trees and switch each channel between legacy and specialist routing without data loss.
 - [x] **Phase 135: Release Verification and Hardening** - Automated, timed, build, workflow, and UAT gates prove the orchestration path is safe to expose to production traffic.
 - [ ] **Phase 136: Cuts & Culture Canary Rollout** - The specialist graph is enabled and proven for one tenant without becoming platform-default behavior.
 
@@ -116,10 +116,10 @@ Phases execute in numeric order: 131 → 132 → 133 → 134 → 135 → 136.
 |-------|----------------|--------|-----------|
 | 131. Trusted Omnichannel Invocation Foundation | 3/3 | Complete | 2026-09-03 |
 | 132. Authorized Specialist Orchestration | 4/4 | Complete | 2026-09-03 |
-| 133. Idempotent Action and Vapi Safety | 3/3 | Complete | 2026-09-03 |
-| 134. Traceability and Reversible Routing | 3/3 | Complete | 2026-09-03 |
+| 133. Idempotent Action and Vapi Safety | 3/3 | Complete (SAFE-01 partial) | 2026-09-03 |
+| 134. Traceability and Reversible Routing | 3/3 | Complete (ROLL-02 partial) | 2026-09-03 |
 | 135. Release Verification and Hardening | 3/3 | Complete | 2026-09-03 |
-| 136. Cuts & Culture Canary Rollout | 3/3 | Built, awaiting human gate | 2026-09-03 |
+| 136. Cuts & Culture Canary Rollout | 3/3 | Built; ROLL-01 partial, ROLL-03 blocked | 2026-09-03 |
 
 ---
 

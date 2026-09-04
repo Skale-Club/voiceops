@@ -95,39 +95,20 @@ therefore ignored, which is worse than a smaller gate people trust. If a
 newcomer file fails, check it in isolation before assuming it belongs to the
 pre-existing baseline.
 
-### `tests/security-secdef-isolation.test.ts` — excluded because of a real, unfixed defect
+### `tests/security-secdef-isolation.test.ts` — now a member (was excluded)
 
-**This is the exclusion to read carefully.** `security-secdef-isolation`
-targets the `SECURITY DEFINER` surface and is directly relevant to "Tenant
-isolation." It is not in `GATE_MEMBERS`, and the reason is not scope
-convenience — see
-`.planning/workstreams/omnichannel-agent-orchestration/FINDINGS-OUTSIDE-SCOPE.md`
-item 1 for the full writeup:
+This suite was kept out of the gate while it failed `get_org_member_profiles
+refuses to enumerate members of a foreign org` — a real cross-organization data
+leak, not flakiness: the function is `SECURITY DEFINER`, joins `auth.users`, and
+never checked whether the caller belonged to the organization it was asked about.
 
-- `public.get_org_member_profiles(p_org_id, …)` is `SECURITY DEFINER` and
-  never checked whether the caller belongs to `p_org_id`. Any authenticated
-  user could read any organization's member list, including email and
-  phone — a real cross-organization data leak, not a test-environment
-  artifact.
-- The fix is authored: `supabase/migrations/1295_fix_member_profiles_cross_org_leak.sql`.
-  It is **NOT applied**. Applying a migration is a production action
-  reserved for the human gate (see the migration list below), so the test
-  stays deterministically red — reproduced across repeated runs, not
-  flaky — until someone runs `npx supabase db push`.
-- The three sibling `SECURITY DEFINER` functions in the same suite
-  (`get_current_org_id`, `get_user_org_ids`, `get_tag_usage`) all isolate
-  correctly. This is an isolated defect in one function, not a pattern
-  failure.
+Migration `1295` closed it and is applied. The suite is green and is a declared
+gate member again, which is the point: a defect that hid for four phases inside a
+set of tests everyone treated as pre-existing noise should not be able to hide
+there a second time.
 
-**Action required once 1295 is applied:** add
-`tests/security-secdef-isolation.test.ts` back to `GATE_MEMBERS` in
-`scripts/release-gate.ts` immediately. Until then, "Tenant isolation" is
-still asserted by `agent-partner-edge-authz.test.ts` and
-`agent-schema-rls-smoke.test.ts`, but the gate is knowingly not covering this
-one confirmed-broken function. Do not let this exclusion get old — a
-"pre-existing failing test" framing is exactly how this defect went
-unnoticed before Phase 135 (it had been sitting inside the informal ~30-file
-baseline, treated as environmental noise).
+The lesson generalises. A stable set of failing tests is not background noise, it
+is a place defects live. Audit newcomers to that set rather than assuming.
 
 ### 24 write action types with no idempotency classification
 
