@@ -27,8 +27,10 @@ import {
   checkIdempotency,
   recordIdempotency,
   recordAbandonedIdempotency,
+  requiresIdempotency,
   hashToolArgs,
 } from './idempotency'
+import { extractActionTypeFromDefinition } from '@/lib/workflows/derive-action-type'
 import { resolveServiceLocationMode } from './resolve-service-location-mode'
 import { applyServiceLocationMode, type ServiceLocationMode } from './service-location-schema'
 import { renderServiceLocationBlock } from './service-location-prompt'
@@ -251,13 +253,27 @@ export async function buildWorkflowTools(
           return `Tool execution denied: ${capturedToolName} is not authorized for this delegation.`
         }
 
-        // Idempotency | only for kind='flow' (multi-step side-effecting paths).
-        // kind='tool' already routes through executeAction which has its own
-        // idempotency gate, but we mirror the legacy pattern here for flows so
-        // tool-call replays don't re-execute the whole DAG.
+        // SAFE-02. This gate used to run for kind='flow' only, on the stated
+        // assumption that "kind='tool' already routes through executeAction which
+        // has its own idempotency gate". executeAction has no such gate — grep it —
+        // and all three Xkedule mutations are kind='tool'. So the booking path the
+        // specialist mesh actually uses had no replay protection at all, which is
+        // exactly what SAFE-02 exists to prevent. Phase 133's tests passed because
+        // they covered the Vapi route and run-agent's legacy tool loop, never this
+        // one.
+        //
+        // A flow stays guarded unconditionally: replaying a multi-step DAG is
+        // unsafe whatever its nodes do. A tool is guarded when its action type is
+        // side-effecting, so reads keep paying nothing.
+        const capturedActionType =
+          capturedKind === 'tool' ? extractActionTypeFromDefinition(capturedDefinition) : null
+        const needsIdempotency =
+          capturedKind === 'flow' ||
+          (typeof capturedActionType === 'string' && requiresIdempotency(capturedActionType))
+
         let idempotencyKey = ''
         let idempotencyRequestHash = ''
-        if (capturedKind === 'flow' && invocationId && invocationId !== '' && invocationId !== 'insert-failed') {
+        if (needsIdempotency && invocationId && invocationId !== '' && invocationId !== 'insert-failed') {
           idempotencyKey = deriveIdempotencyKey(invocationId, currentIndex)
           idempotencyRequestHash = hashToolArgs(toolArgs)
           const outcome = await checkIdempotency(orgId, idempotencyKey, idempotencyRequestHash)
