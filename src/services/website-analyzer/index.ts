@@ -5,6 +5,7 @@
 
 import { createServiceRoleClient } from '@/lib/supabase/admin'
 import { analyzeWebsite, calculateLeadScore, normaliseUrl } from './extractor'
+import { AnalyzerBusyError } from './concurrency'
 import { buildWebsiteInsights } from './outreach-insights'
 import type { AnalysisResult } from './types'
 import type { Json } from '@/types/database'
@@ -132,7 +133,16 @@ export async function runAnalysis(opts: {
 
   try {
     // ── 1. Extract ──────────────────────────────────────────────────────────
-    const extraction = await analyzeWebsite(url)
+    // The row was marked 'running' above, but the browser pool may hold this
+    // call in its queue first. reclaim_stale_website_analyses fails any
+    // pending/running row untouched for DEFAULT_STALE_MINUTES, so restart that
+    // clock when the analysis genuinely begins — otherwise a run that merely
+    // waited its turn gets reclaimed out from under itself.
+    const extraction = await analyzeWebsite(url, {
+      onStart: async () => {
+        await wa.update({ updated_at: new Date().toISOString() }).eq('id', analysisId)
+      },
+    })
 
     // ── 2. Upload screenshots ────────────────────────────────────────────────
     const [screenshotDesktopUrl, screenshotMobileUrl] = await Promise.all([
@@ -277,6 +287,20 @@ export async function runAnalysis(opts: {
     // See generatePreviewForAnalysis() + the generateProspectPreview action.
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
+
+    // Saturation is not a failed analysis — the site was never even opened.
+    // Drop the row so the account returns to exactly its pre-tick state and
+    // the next tick can claim it again. Leaving it behind would be worse than
+    // useless: `idx_website_analyses_account_active` is unique over
+    // (account_id) while status is pending/running, so a parked row blocks
+    // every later insert for that account until the stale reclaim finally
+    // marks it 'failed' — burning the account's slot on work never attempted.
+    if (err instanceof AnalyzerBusyError) {
+      console.warn(`[website-analyzer] deferred account=${accountId}: ${message}`)
+      await wa.delete().eq('id', analysisId)
+      return
+    }
+
     console.error(`[website-analyzer] ✗ account=${accountId}:`, message)
     await wa
       .update({

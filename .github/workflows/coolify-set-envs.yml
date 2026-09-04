@@ -37,6 +37,13 @@ jobs:
           XMAIL_SERVICE_KEY: ${{ secrets.XMAIL_SERVICE_KEY }}
           MILLIONVERIFIER_API_KEY: ${{ secrets.MILLIONVERIFIER_API_KEY }}
           NEVERBOUNCE_API_KEY: ${{ secrets.NEVERBOUNCE_API_KEY }}
+          # Ops alerting. The same pair is also read directly by uptime.yml,
+          # which runs on the GitHub runner and therefore does NOT need them
+          # here — these two are for the in-app half (src/lib/obs/alerts.ts),
+          # which runs in the container and only sees Coolify's runtime env.
+          # See docs/ops/TELEGRAM-ALERTS.md.
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_ALERT_CHAT_ID: ${{ secrets.TELEGRAM_ALERT_CHAT_ID }}
         run: |
           set -euo pipefail
           if [ -z "${COOLIFY_TOKEN}" ]; then
@@ -87,6 +94,8 @@ jobs:
           upsert XMAIL_SERVICE_KEY                    "${XMAIL_SERVICE_KEY}"
           upsert MILLIONVERIFIER_API_KEY              "${MILLIONVERIFIER_API_KEY}"
           upsert NEVERBOUNCE_API_KEY                  "${NEVERBOUNCE_API_KEY}"
+          upsert TELEGRAM_BOT_TOKEN                   "${TELEGRAM_BOT_TOKEN}"
+          upsert TELEGRAM_ALERT_CHAT_ID               "${TELEGRAM_ALERT_CHAT_ID}"
 
           echo "==> Triggering redeploy so new env vars take effect"
           curl --fail-with-body -sS --retry 3 --retry-all-errors --request POST \

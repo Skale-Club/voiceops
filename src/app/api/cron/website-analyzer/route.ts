@@ -13,7 +13,8 @@ import { createClient } from '@supabase/supabase-js'
 import { runAnalysis } from '@/services/website-analyzer'
 import { captureApiError } from '@/lib/api-error'
 import { DEFAULT_STALE_MINUTES } from '@/services/website-analyzer/staleness'
-import { selectWebsiteAnalyzerBatch, type AnalyzerCandidate } from '@/services/website-analyzer/scheduling'
+import { selectWebsiteAnalyzerBatch, DEFAULT_BATCH_SIZE, type AnalyzerCandidate } from '@/services/website-analyzer/scheduling'
+import { getAnalyzerLoad } from '@/services/website-analyzer/concurrency'
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL
 const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY
@@ -83,7 +84,32 @@ export async function GET(request: Request): Promise<Response> {
     accountCreatedAt: row.account_created_at,
   }))
 
-  const eligible = selectWebsiteAnalyzerBatch(candidates, { now: new Date() })
+  // ── Backpressure ───────────────────────────────────────────────────────────
+  // Never schedule more than the browser pool can absorb. This tick used to
+  // fire its full batch of 10 regardless of what earlier ticks were still
+  // running; that overlap is what stacked 74 Chromium instances and took the
+  // host down on 2026-08-30. Anything skipped here stays unclaimed and is
+  // picked up later — the candidate query is ordered oldest-first, so
+  // deferring work cannot starve an account.
+  const load = getAnalyzerLoad()
+  if (load.freeCapacity === 0) {
+    console.log(
+      `[cron/website-analyzer] analyzer saturated (${load.active} running, ${load.queued} queued) — skipping this tick`
+    )
+    return Response.json({
+      ok: true,
+      processed: 0,
+      accounts: [],
+      skipped: 'analyzer_busy',
+      load,
+      reclaimed: Array.isArray(reclaimed) ? reclaimed.length : 0,
+    })
+  }
+
+  const eligible = selectWebsiteAnalyzerBatch(candidates, {
+    now: new Date(),
+    batchSize: Math.min(DEFAULT_BATCH_SIZE, load.freeCapacity),
+  })
 
   if (!eligible.length) {
     return Response.json({ ok: true, processed: 0, accounts: [], reclaimed: Array.isArray(reclaimed) ? reclaimed.length : 0 })

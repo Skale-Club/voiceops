@@ -13,6 +13,8 @@
 // Output shape (one line):
 //   {"level":"info","event":"agent_turn_start","time":"2026-...Z","traceId":"...","orgId":"...","agentId":"..."}
 
+import { recordError } from '@/lib/obs/error-spike'
+
 export type LogLevel = 'debug' | 'info' | 'warn' | 'error'
 export type LogContext = Record<string, unknown>
 
@@ -61,13 +63,18 @@ function emit(level: LogLevel, base: LogContext, event: string, fields?: LogCont
   else if (level === 'warn') console.warn(line)
   else console.log(line)
 
-  // Two-layer model: error-level logs are also persisted to the durable
+  // Three-layer model: error-level logs are also persisted to the durable
   // event_logs table (surfaced in /admin/logs) with the shared correlation id,
-  // and to Sentry for error tracking. Fire-and-forget; dynamic imports keep this
-  // module lean for non-error paths.
+  // to Sentry for error tracking, and counted by the error-spike detector,
+  // which alerts on a jump in the RATE rather than on any single error.
+  // Fire-and-forget; dynamic imports keep this module lean for non-error paths.
   if (level === 'error') {
     forwardErrorToEventLogs(base, event, fields)
     forwardErrorToSentry(base, event, fields)
+    // Synchronous by design (see error-spike.ts): it only bumps an in-memory
+    // counter, and the send it may trigger is itself fire-and-forget. The
+    // module has no runtime imports of its own, so this stays Edge-safe.
+    recordError(event)
   }
 }
 
@@ -101,16 +108,21 @@ function forwardErrorToEventLogs(base: LogContext, event: string, fields?: LogCo
     delete f.error // keep the durable payload JSON-safe (Error objects don't serialize)
     void import('@/lib/logger')
       .then(({ log }) =>
-        log({
-          event_type: event,
-          source: typeof base.route === 'string' ? base.route : 'app',
-          severity: 'error',
-          status: 'failed',
-          correlation_id: typeof base.traceId === 'string' ? base.traceId : undefined,
-          org_id: typeof base.orgId === 'string' ? base.orgId : undefined,
-          error_message: errorMessage,
-          payload: { ...base, ...f } as Record<string, unknown>,
-        }),
+        log(
+          {
+            event_type: event,
+            source: typeof base.route === 'string' ? base.route : 'app',
+            severity: 'error',
+            status: 'failed',
+            correlation_id: typeof base.traceId === 'string' ? base.traceId : undefined,
+            org_id: typeof base.orgId === 'string' ? base.orgId : undefined,
+            error_message: errorMessage,
+            payload: { ...base, ...f } as Record<string, unknown>,
+          },
+          // emit() above already forwarded to Sentry and counted this error
+          // toward the spike window; log() must not do either again.
+          { skipErrorFanout: true },
+        ),
       )
       .catch(() => {})
   } catch {

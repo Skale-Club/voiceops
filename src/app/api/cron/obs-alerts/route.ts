@@ -3,7 +3,13 @@
 // cross-org and posts deduped alerts:
 //   1. Agent cost near the daily cap (>= 80%)
 //   2. Google Reviews scrape failures (error / quota_exceeded)
-//   3. High agent error rate in the last hour
+//   3. High agent error rate in the last hour. NOTE: dormant as of 2026-08-30.
+//      agent_invocations saw 9 rows in 30 days (all successful) and peaks at 4
+//      per hour, while errorRateBreached() needs >= 20 in one hour before it
+//      will look at the ratio at all — so this signal cannot currently fire.
+//      Left in place because it is correct and costs nothing; it starts working
+//      on its own if agent traffic grows. Signal 5 is what actually covers
+//      failures at today's volumes.
 //   4. Stale cron heartbeats (a scheduled job stopped ticking, e.g. the VPS
 //      cron container died silently). `cron_heartbeats` is fed by jobs from
 //      several apps that share this ops hub (xphere, xkedule, skaleclub,
@@ -11,18 +17,19 @@
 //      ops-wide Telegram destination (TELEGRAM_BOT_TOKEN_OPS /
 //      TELEGRAM_ALERT_CHAT_ID_OPS) when configured, falling back to this
 //      app's own bot/chat otherwise - see src/lib/obs/alerts.ts.
+//   5. Workflow runs failing, grouped by cause (last 24h)
 //
 // Delivery: each candidate alert is dispatched via deliverAlert() (src/lib/obs/alerts.ts),
 // which tries Telegram first when a destination is configured, then always
 // falls through to email (PLATFORM_ADMIN_EMAIL via sendPlatformEmail) - email
 // is the always-available floor, since it needs no human setup, unlike a
 // Telegram bot/chat. The route only skips entirely when *no* channel at all
-// is configured (anyAlertChannelConfigured() below), so as of 2026-08-21,
-// with PLATFORM_ADMIN_EMAIL set and platform email working, this cron
-// actively evaluates every signal and alerts by email even though no
-// TELEGRAM_* vars exist in production. The JSON response reports which
-// channels were armed for this run (`channels`) so that's verifiable from a
-// plain curl.
+// is configured (anyAlertChannelConfigured() below). As of 2026-08-30 both
+// channels exist in production: TELEGRAM_BOT_TOKEN / TELEGRAM_ALERT_CHAT_ID
+// point at @xphereoppsbot, so Telegram carries the alerts and email is now
+// only the fallback for when Telegram itself fails. The JSON response reports
+// which channels were armed for this run (`channels`) so that's verifiable
+// from a plain curl.
 //
 // Caller sends CRON_SECRET as `Authorization: Bearer`. No-ops cleanly when no
 // alert channel is configured at all, so it is safe to schedule before either
@@ -227,6 +234,63 @@ export async function GET(request: Request): Promise<Response> {
     })
   }
 
+  // 5. Failed workflow runs (last 24h, grouped by cause) ─────────────────────
+  // The gap this closes: over the 30 days to 2026-08-30, 98 of 110 workflow
+  // runs failed — a steady 3/day, every day — and nothing alerted, because no
+  // signal here looked at this table at all. 90 of those were Twilio rejecting
+  // SMS (21408 unenabled region, 21211 invalid number); the rest were an
+  // expired Google token and a missing Telegram bot. All of them silent.
+  //
+  // Deliberately NOT a rate: this table sees ~0.15 runs/hour, so an
+  // errorRateBreached()-style ratio can never accumulate enough volume to fire
+  // (the same reason signal 3 above is currently dormant). What works at this
+  // volume is a COUNT grouped by cause, alerted once per distinct cause per
+  // day. A chronic failure then pages once daily while it is genuinely broken
+  // and goes silent the moment it is fixed, instead of either flooding or
+  // saying nothing.
+  interface WorkflowRunRow {
+    error: string | null
+    workflow_id: string | null
+  }
+
+  const { data: failedRuns } = await dedupe
+    .from('workflow_runs')
+    .select('error, workflow_id')
+    .eq('status', 'failed')
+    .gte('created_at', new Date(now - 24 * 3_600_000).toISOString())
+    .limit(1000)
+
+  // Collapse the variable parts so one broken integration is one cause, not one
+  // per phone number: digits become '#' and the message is capped. Without this
+  // each rejected number would look like a distinct failure and alert
+  // separately — 90 alerts a month instead of one a day.
+  const causeOf = (raw: string | null): string =>
+    (raw ?? 'unknown error').replace(/\d/g, '#').slice(0, 80)
+
+  const runsByCause = new Map<string, { count: number; sample: string }>()
+  for (const r of (failedRuns ?? []) as WorkflowRunRow[]) {
+    const cause = causeOf(r.error)
+    const prev = runsByCause.get(cause)
+    runsByCause.set(cause, {
+      count: (prev?.count ?? 0) + 1,
+      sample: prev?.sample ?? (r.error ?? 'unknown error').slice(0, 180),
+    })
+  }
+
+  for (const [cause, { count, sample }] of runsByCause) {
+    // The cause is already digit-masked and length-capped, so it is a stable
+    // dedupe key across the day without needing a hash.
+    candidates.push({
+      key: `wfrun:${cause}:${today}`,
+      title: 'Workflow runs failing',
+      severity: count >= 10 ? 'critical' : 'warning',
+      fields: {
+        failures_24h: count,
+        error: sample,
+      },
+    })
+  }
+
   // Dedupe + deliver ─────────────────────────────────────────────────────────
   // Window: cost re-alerts at most every 6h; scrape per failure once/24h;
   // error rate once per hour bucket; cron staleness every 3h (long enough
@@ -244,7 +308,7 @@ export async function GET(request: Request): Promise<Response> {
   for (const alert of candidates) {
     const windowMinutes = alert.key.startsWith('cost:')
       ? 360
-      : alert.key.startsWith('scrape:')
+      : alert.key.startsWith('scrape:') || alert.key.startsWith('wfrun:')
         ? 1440
         : alert.key.startsWith('cronstale:')
           ? 180
