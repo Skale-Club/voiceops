@@ -112,3 +112,27 @@ same way and would only surface the way this one did — when a migration collid
 
 **Recommended:** a one-time reconciliation pass comparing the live schema against what the
 migration directory reproduces, before the next schema change lands on a drifted object.
+
+---
+
+## 4. The Vapi webhook secret in Vapi is the PREVIEW value — NOT RECONCILED
+
+Coolify holds two `VAPI_WEBHOOK_SECRET` entries for `xphere-zdt`: a production-scope value
+(64-hex fingerprint `cce78c95c0d7`, 66 chars) and a preview-scope value (`0a3d5b262a02`,
+64 chars). The secret attached to every tool in the Cuts & Culture Vapi assistant
+fingerprints as `0a3d5b262a02` — the **preview** one.
+
+Yet production accepted it: a probe against `https://xphere.app/api/vapi/tools` with that
+secret returned real data, and a control with a wrong secret returned nothing. So either the
+running container was started with the preview value (see the 2026-06-10 scope migration
+note in the Coolify memory), or the 66-char production entry differs only by trailing
+characters and is not what the process compares against. Not investigated further because
+it was not the cause of the failed calls — the payload shape was (fixed in `src/types/vapi.ts`).
+
+**Why it matters anyway:** the next deploy or env sync could rotate the container onto the
+66-char value, at which point every Vapi tool call would be silently rejected with
+`{results: []}` and zero logs — exactly the failure mode just diagnosed, with a different
+root cause. Reconcile so Vapi and production hold one value, and add the rejection path to
+observability: `obs.warn('vapi_secret_rejected')` did not surface in Sentry logs for the
+window in which it must have fired.
+

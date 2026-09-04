@@ -5,15 +5,76 @@
 import { z } from 'zod'
 
 // Individual tool call within a toolCallList
-export const VapiToolCallSchema = z.object({
+// Arguments may arrive as an object or as a JSON-encoded string (the
+// OpenAI-style shape serialises them). Accept both; decode the string form.
+const ToolArgsSchema = z.union([z.record(z.unknown()), z.string()]).optional()
+
+// Flattened shape, as the older Vapi reference documented it.
+const FlatToolCallSchema = z.object({
   id: z.string(),
   name: z.string(),
   // Vapi docs show both 'arguments' (newer) and 'parameters' (older). Accept both defensively.
-  arguments: z.record(z.unknown()).optional(),
-  parameters: z.record(z.unknown()).optional(),
+  arguments: ToolArgsSchema,
+  parameters: ToolArgsSchema,
 })
 
-export type VapiToolCall = z.infer<typeof VapiToolCallSchema>
+// Nested OpenAI-style shape. This is what Vapi ACTUALLY sent on the first real
+// tool call ever to reach production (2026-09-04, call 01a06de4-…): every
+// item in toolCallList was {id, type: 'function', function: {name, arguments}},
+// with `arguments` a JSON string. The flat-only schema rejected it, the route
+// returned an empty results list before logging anything, and Vapi reported
+// "No result returned for <toolCallId>" for both calls in the conversation.
+const NestedToolCallSchema = z.object({
+  id: z.string(),
+  type: z.string().optional(),
+  function: z.object({
+    name: z.string(),
+    arguments: ToolArgsSchema,
+  }),
+})
+
+export const VapiToolCallSchema = z.union([FlatToolCallSchema, NestedToolCallSchema])
+
+/** The single shape the rest of the codebase works with. */
+export interface VapiToolCall {
+  id: string
+  name: string
+  arguments?: Record<string, unknown>
+  parameters?: Record<string, unknown>
+}
+
+function decodeArgs(v: unknown): Record<string, unknown> | undefined {
+  if (v == null) return undefined
+  if (typeof v === 'string') {
+    if (!v.trim()) return {}
+    try {
+      const parsed: unknown = JSON.parse(v)
+      return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+        ? (parsed as Record<string, unknown>)
+        : {}
+    } catch {
+      return {}
+    }
+  }
+  return v as Record<string, unknown>
+}
+
+/**
+ * Normalise either accepted wire shape into the flat VapiToolCall used
+ * downstream, so the route, logging and idempotency code never has to know
+ * which one Vapi chose to send.
+ */
+export function normalizeVapiToolCall(raw: z.infer<typeof VapiToolCallSchema>): VapiToolCall {
+  if ('function' in raw) {
+    return { id: raw.id, name: raw.function.name, arguments: decodeArgs(raw.function.arguments) }
+  }
+  return {
+    id: raw.id,
+    name: raw.name,
+    arguments: decodeArgs(raw.arguments),
+    parameters: decodeArgs(raw.parameters),
+  }
+}
 
 // Full tool-call message envelope
 export const VapiToolCallMessageSchema = z.object({

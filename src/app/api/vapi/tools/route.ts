@@ -41,7 +41,7 @@
 
 import { after } from 'next/server'
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { VapiToolCallMessageSchema, getToolArguments, type VapiToolCall } from '@/types/vapi'
+import { VapiToolCallMessageSchema, getToolArguments, normalizeVapiToolCall, type VapiToolCall } from '@/types/vapi'
 import { resolveOrgForCall } from '@/lib/vapi/end-of-call'
 import { resolveTool } from '@/lib/action-engine/resolve-tool'
 import { executeAction } from '@/lib/action-engine/execute-action'
@@ -131,7 +131,12 @@ export async function POST(request: Request): Promise<Response> {
       return Response.json({ results: [] }, { status: 200 })
     }
 
-    const { call, toolCallList } = parsed.data.message
+    const { call } = parsed.data.message
+    // Vapi sends either the flattened item shape or the nested OpenAI-style one
+    // ({id, type, function:{name, arguments:"…"}}) - the latter is what the first
+    // real production tool call carried. Normalise once here so nothing downstream
+    // has to know which shape arrived.
+    const toolCallList = parsed.data.message.toolCallList.map(normalizeVapiToolCall)
     if (!toolCallList || toolCallList.length === 0) {
       return Response.json({ results: [] }, { status: 200 })
     }
