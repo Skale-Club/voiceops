@@ -14,7 +14,7 @@ ROLL-03 cannot be satisfied without a live canary and is blocked on a human.
 
 | Check | Result |
 |---|---|
-| Full suite | 30 failing files / 51 failing tests — **exactly the pre-existing baseline, zero beyond it** |
+| Full suite | 30 failing files at the time of measurement — exactly the pre-existing baseline, zero beyond it. Applying migration 1295 afterwards turned `security-secdef-isolation` green, so the baseline is now 29. |
 | Passing | 2898 |
 | Release gate (`npm run release-gate`) | exit 0 — 8 suites, 206 tests, 33 workflow validations |
 | Typecheck | zero errors under `src/` |
@@ -80,12 +80,13 @@ from `SIDE_EFFECTING_ACTIONS`, so a Vapi retry created a second booking. Every P
 passed because each tested the guard's behavior and none tested which action types reach it.
 Fixed in `d0a162bf`.
 
-**A cross-organization data leak was hiding inside the "pre-existing baseline".**
+**A cross-organization data leak was hiding inside the "pre-existing baseline" — now fixed.**
 `get_org_member_profiles` is `SECURITY DEFINER`, joins `auth.users`, and never checked
 whether the caller belongs to the organization it was asked about — any authenticated user
 could enumerate any organization's members with their emails and phones. The test had been
 failing on exactly this case since before Phase 132, inside the 30-file set this workstream
-treated as environmental noise. Fix authored as migration 1295, **unapplied**.
+treated as environmental noise. Fixed by migration 1295, applied 2026-09-04; the suite is
+green and is a gate member again.
 
 That second one changed how the baseline should be read: a stable set of failing tests is
 where real defects hide. It was found only because Phase 135 forced an audit of what the
@@ -93,8 +94,10 @@ gate actually covers.
 
 ## Still open
 
-- **Migrations 1290-1295 are authored and none are applied.** 1295 is a security fix
-  independent of the canary and should be applied regardless.
+- **The migration directory has drifted from production.** `get_org_member_profiles` was
+  changed in the database without a migration in this repo — caught only because 1295
+  collided with it. One function was reconciled; nothing else was audited. See
+  `FINDINGS-OUTSIDE-SCOPE.md` item 3.
 - **24 write action types are unclassified** — `send_whatsapp_message`, `send_email`, the
   pipeline surface and others bypass the idempotency guard the way Xkedule did. Deliberately
   not fixed autonomously: the change spans most of the product's integration surface and the

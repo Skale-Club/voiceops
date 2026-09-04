@@ -59,8 +59,8 @@ Any authenticated user could enumerate any organization's members, with email an
 
 `tests/security-secdef-isolation.test.ts` had been failing on exactly this case, inside the
 30-file set this workstream carried as environmental noise from Phase 132 onward. It was
-not noise. Fix authored as migration `1295`, **not applied** — the test runs against the
-live database and stays red until `npx supabase db push`.
+not noise. Fixed by migration `1295`, **applied 2026-09-04** on the user's explicit instruction. The
+suite is green and back in the gate.
 
 Both are recorded in `FINDINGS-OUTSIDE-SCOPE.md`, along with a third: 24 write action types
 (email, WhatsApp, ManyChat, Telegram, Google Contacts, tasks, notes, the whole pipeline
@@ -75,8 +75,8 @@ grows.
 Stated in `docs/agents/release-gate.md` rather than left implicit:
 
 - The ~30-file live-database and module-resolution baseline. `npm test` is never run whole.
-- `tests/security-secdef-isolation.test.ts`, excluded while red on the leak above, with an
-  explicit instruction to re-add it the moment migration 1295 is applied.
+- ~~`tests/security-secdef-isolation.test.ts`~~ — was excluded while red on the leak above;
+  1295 is applied and the suite is a gate member again.
 - The 24 unclassified write action types.
 - `npm run build`, with its rationale.
 
@@ -96,6 +96,7 @@ profile defines.
 
 ## Production boundary — held
 
-- Migrations 1290-1295 are all authored and **unapplied**.
+- Migrations 1290-1295 were authored during this phase and **applied on 2026-09-04**, after
+  the phase closed, on the user's explicit instruction.
 - The CI gate does not touch `build-deploy.yml`; the live deploy path is unchanged.
 - Nothing was enabled, bound, flipped, or cut over.

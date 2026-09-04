@@ -99,7 +99,8 @@ reviewing 134-01's report and folded into 134-03 as migration 1294 before that p
 
 ## Production boundary — held
 
-- Migrations 1290, 1291, 1292, 1293 and 1294 are all authored and **unapplied**.
+- Migrations 1290-1294 were authored here and **applied on 2026-09-04**, after the phase
+  closed, on the user's explicit instruction.
 - The 134-02 routing-mode resolver is built and tested but **wired into nothing**. No
   route reads it yet.
 

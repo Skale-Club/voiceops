@@ -57,20 +57,21 @@ export interface GateMember {
 }
 
 // ---------------------------------------------------------------------------
-// NOTE on tests/security-secdef-isolation.test.ts: it is directly relevant
-// to "Tenant isolation" (it targets the SECURITY DEFINER surface) but is
-// deliberately NOT a gate member. At HEAD it fails
-// "get_org_member_profiles refuses to enumerate members of a foreign org"
-// consistently (not flaky -- reproduced across repeated runs), a real
-// cross-org data leak. Fixing it means changing a SECDEF function, which is
-// out of scope for 135-01 (scope is tests/scripts/package.json only; no
-// src/, no migrations). Excluding it here is not "papering over" the
-// finding -- it is reported explicitly (this comment, the test file, and
-// the 135-01 execution report) as a follow-up finding, and "Tenant
-// isolation" is still proven by the two members below, both green at HEAD.
+// NOTE on tests/security-secdef-isolation.test.ts: it was excluded from this
+// list while it failed "get_org_member_profiles refuses to enumerate members
+// of a foreign org" -- a real cross-organization data leak, not flakiness.
+// Migration 1295 closed it (the function is SECURITY DEFINER and never checked
+// whether the caller belongs to the organization it was asked about), the
+// migration is applied, and the suite is green. It is a gate member again
+// below, because the whole point of a gate is that this cannot regress
+// silently a second time.
 // ---------------------------------------------------------------------------
 
 export const GATE_MEMBERS: GateMember[] = [
+  {
+    file: 'tests/security-secdef-isolation.test.ts',
+    areas: ['Tenant isolation'],
+  },
   {
     file: 'tests/agent-partner-edge-authz.test.ts',
     areas: ['Tenant isolation', 'Direct versus delegated authorization', 'Cross-agent calls'],
@@ -147,8 +148,8 @@ function main() {
   console.log(`Deterministic subset (${getGateTestFiles().length} files):`)
   for (const f of getGateTestFiles()) console.log(`  - ${f}`)
   console.log(
-    'NOTE: tests/security-secdef-isolation.test.ts is intentionally not a gate member -- ' +
-      'see the comment above GATE_MEMBERS in this file for why.'
+    'NOTE: tests/security-secdef-isolation.test.ts is a gate member again -- ' +
+      'migration 1295 closed the cross-org leak it was failing on.'
   )
 
   const missing = getGateTestFiles().filter((f) => !existsSync(resolve(REPO_ROOT, f)))

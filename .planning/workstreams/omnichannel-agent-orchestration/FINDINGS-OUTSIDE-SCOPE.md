@@ -6,13 +6,13 @@ workstream: omnichannel-agent-orchestration
 
 # Findings Outside This Workstream's Scope
 
-Two defects surfaced while building the Phase 135 release gate. Neither is caused by this
-workstream, and neither is covered by its 32 requirements. Both are recorded here rather
-than fixed silently or dropped.
+Three defects surfaced while building the Phase 135 release gate and applying its
+migrations. None is caused by this workstream, and none is covered by its 32 requirements.
+All are recorded here rather than fixed silently or dropped.
 
 ---
 
-## 1. Cross-organization leak in `get_org_member_profiles` — FIX AUTHORED, NOT APPLIED
+## 1. Cross-organization leak in `get_org_member_profiles` — FIXED AND APPLIED (2026-09-04)
 
 **Severity: high.** Any authenticated user could read any organization's full member list,
 including each member's email and phone.
@@ -38,14 +38,23 @@ was the outlier.
 membership check. A non-member receives an empty result rather than an error, which the
 existing UI already handles and which avoids leaking whether an organization id exists.
 
-**Status: authored, NOT applied.** The test runs against the live database and stays red
-until someone runs `npx supabase db push`. Applying it is a production action and is on the
-human gate list along with migrations 1290-1294.
+**Status: applied 2026-09-04**, on the user's explicit instruction, via `npx supabase db push`
+together with 1290-1294. `tests/security-secdef-isolation.test.ts` is green (4/4) and has been
+returned to `GATE_MEMBERS` in `scripts/release-gate.ts`.
+
+**The first attempt failed, and the failure was load-bearing.** Postgres rejected it with
+42P13, "cannot change return type of existing function". The deployed function returns an
+`avatar_url` column and resolves `phone` as
+`NULLIF(TRIM(COALESCE(raw_user_meta_data->>'phone', au.phone)), '')`; migration 1037 in this
+repository has neither. Production had drifted from the repo — see finding 3 below. Because
+the first version of 1295 was transcribed from 1037, it would have dropped `avatar_url`, and
+`src/app/(dashboard)/members/actions.ts` consumes that field. Postgres caught what review did
+not. The applied version is the live definition with the membership predicate added and
+nothing else changed.
 
 **Lesson for this workstream:** the "pre-existing baseline" framing was load-bearing and
-partly wrong. A stable set of failing tests is a place real defects hide. The Phase 135
-release gate deliberately does not include this suite while it is red — that exclusion must
-be removed once 1295 is applied.
+partly wrong. A stable set of failing tests is a place real defects hide. The suite is now a
+gate member precisely so this cannot regress unnoticed a second time.
 
 ---
 
@@ -82,3 +91,24 @@ invisible.
 
 **Recommended next step:** classify them in a dedicated phase, one integration family at a
 time, checking for each whether a repeat is a bug or a legitimate re-send.
+
+---
+
+## 3. The repository's migration history had drifted from production — NOT RECONCILED
+
+`get_org_member_profiles` is defined in `supabase/migrations/091_member_profiles_fn.sql` and
+`1037_member_profiles_fn.sql`, and in no other migration — a `grep` over the whole directory
+confirms it. Yet the deployed function differs from 1037: it returns an extra `avatar_url`
+column and resolves `phone` through the user's metadata before falling back to `auth.users`.
+
+Someone changed that function in production without leaving a migration in this repository.
+That is precisely what `CLAUDE.md` warns the Supabase MCP `apply_migration` tool and the
+dashboard SQL editor cause, and it means a fresh `supabase db reset` would not have
+reproduced production.
+
+Migration 1295 repairs this one function by transcribing the live body, so the repo and the
+database now agree on it. **Nothing else was audited.** Other objects may have drifted the
+same way and would only surface the way this one did — when a migration collides with them.
+
+**Recommended:** a one-time reconciliation pass comparing the live schema against what the
+migration directory reproduces, before the next schema change lands on a drifted object.

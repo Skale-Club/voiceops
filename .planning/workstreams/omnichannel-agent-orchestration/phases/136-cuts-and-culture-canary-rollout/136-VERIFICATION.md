@@ -75,5 +75,6 @@ milestone — the first was `src/types/database.ts` between 134-01 and 134-02.
 
 ## Production boundary — held
 
-Migrations 1290-1295 authored, **none applied**. No assistant bound. No routing row
+Migrations 1290-1295 were **applied on 2026-09-04** on the user's explicit instruction —
+the only production action taken in this milestone. Everything else below still holds. No assistant bound. No routing row
 flipped. No ingress route rewired. No booking placed. No organization changed.
