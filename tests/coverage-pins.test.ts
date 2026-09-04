@@ -27,6 +27,16 @@ import {
   requiresIdempotency,
 } from '@/lib/agent-runtime/idempotency'
 
+// These pins parse production source as text. Read through this helper, never
+// readFileSync directly: on a Windows checkout git materialises files with CRLF,
+// and a pattern anchored on a blank line silently stops matching, which takes the
+// whole file down with a collection error rather than a useful failure.
+// Normalising here keeps the pins about what the source SAYS, not how the
+// checkout happens to store it.
+function readSource(path: string): string {
+  return readFileSync(path, 'utf8').replace(/\r\n/g, '\n')
+}
+
 const EXECUTE_ACTION_PATH = join(process.cwd(), 'src/lib/action-engine/execute-action.ts')
 const RESOLVE_PARTNER_EDGE_PATH = join(process.cwd(), 'src/lib/agent-runtime/resolve-partner-edge.ts')
 const DATABASE_TYPES_PATH = join(process.cwd(), 'src/types/database.ts')
@@ -40,7 +50,7 @@ const DATABASE_TYPES_PATH = join(process.cwd(), 'src/types/database.ts')
 // again just walk past the guard the way the Xkedule mutations did.
 
 function deriveActionEngineTypes(): string[] {
-  const src = readFileSync(EXECUTE_ACTION_PATH, 'utf8')
+  const src = readSource(EXECUTE_ACTION_PATH)
   return [...src.matchAll(/case '([a-z0-9_]+)':/g)].map((m) => m[1])
 }
 
@@ -257,7 +267,7 @@ describe('coverage-pins: COMMERCE_WRITE_ACTIONS full membership (CRT-02)', () =>
 // ---------------------------------------------------------------------------
 
 function derivePartnerEdgeDenialReasons(): string[] {
-  const src = readFileSync(RESOLVE_PARTNER_EDGE_PATH, 'utf8')
+  const src = readSource(RESOLVE_PARTNER_EDGE_PATH)
   const unionMatch = src.match(/export type PartnerEdgeDenialReason =\s*([\s\S]*?)\n\nexport type/)
   if (!unionMatch) {
     throw new Error(
@@ -299,7 +309,7 @@ describe('coverage-pins: PartnerEdgeDenialReason full membership (AUTHZ-01/AUTHZ
 // ---------------------------------------------------------------------------
 
 function deriveAgentChannels(): string[] {
-  const src = readFileSync(DATABASE_TYPES_PATH, 'utf8')
+  const src = readSource(DATABASE_TYPES_PATH)
   const lineMatch = src.match(/export type AgentChannel = ((?:'[a-z_]+'(?: \| )?)+)/)
   if (!lineMatch) {
     throw new Error('Could not locate the AgentChannel type alias in database.ts -- has it moved or been renamed?')
