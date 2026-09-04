@@ -1,5 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { Database } from '@/types/database'
+import { renderPromptTemplate, resolveTenantFacts } from './prompt-template'
 import {
   emptyCounts,
   type ChecklistItem,
@@ -53,6 +54,10 @@ export async function installSnapshotIntoOrg(
 
   if (want.has('workflows') && snapshot.workflows?.length) {
     await installWorkflows(admin, targetOrgId, snapshot, createdBy, counts)
+  }
+
+  if (want.has('agents') && snapshot.agents?.length) {
+    await installAgents(admin, targetOrgId, snapshot, createdBy, counts)
   }
 
   return { counts, checklist: buildChecklist(groups, counts) }
@@ -259,6 +264,259 @@ async function installWorkflows(
   }
 }
 
+/**
+ * Install the agent mesh: agents, their rendered prompt (as a real, active
+ * `agent_prompt_versions` row — see the module-level note below), direct tool
+ * grants, partner edges, delegated workflow grants, and channel defaults.
+ *
+ * Binds exclusively by stable keys captured in the snapshot (`slug`,
+ * `tool_name`) — never by id, since ids differ per organization.
+ *
+ * THE BUG THIS FUNCTION EXISTS TO MAKE IMPOSSIBLE (139-CONTEXT.md): the first
+ * hand-run provisioning of the Cuts & Culture mesh created six agents and no
+ * `agent_prompt_versions` rows, and `resolveAgent()` refuses to load an agent
+ * with no active prompt version — all six were inert until repaired by hand.
+ * Every agent upsert below is immediately followed, in the same pass, by a
+ * prompt-version insert and an `active_prompt_version_id` update, unless an
+ * equivalent (content-identical) active version already exists. There is no
+ * code path that creates or upserts an `agents` row without also ensuring it
+ * points at a real, matching prompt version.
+ *
+ * Install never activates: `agent_channel_defaults` is only INSERTed when no
+ * row exists for that channel yet (never upserted, never repointed), and
+ * `agent_channel_routing_modes` is never referenced anywhere in this file —
+ * its absence for a freshly installed org resolves to 'legacy' via the
+ * resolver's own fail-closed default.
+ */
+async function installAgents(
+  admin: Admin,
+  orgId: string,
+  snapshot: OrgTemplateSnapshot,
+  createdBy: string | null,
+  counts: InstallCounts
+): Promise<void> {
+  const facts = await resolveTenantFacts(admin, orgId)
+  const agentIdBySlug = new Map<string, string>()
+
+  // 1-2. Agents + prompt versions.
+  for (const a of snapshot.agents ?? []) {
+    const renderedPrompt = renderPromptTemplate(a.system_prompt, facts)
+
+    const { data: agent, error: agentErr } = await admin
+      .from('agents')
+      .upsert(
+        {
+          organization_id: orgId,
+          slug: a.slug,
+          name: a.name,
+          description: a.description,
+          model: a.model,
+          temperature: a.temperature,
+          max_tokens: a.max_tokens,
+          max_history: a.max_history,
+          fallback_message: a.fallback_message,
+          allowed_channels: a.allowed_channels as Database['public']['Tables']['agents']['Insert']['allowed_channels'],
+          kb_scope: a.kb_scope,
+          is_active: a.is_active,
+          // NOT NULL and unused by the runtime (resolveAgent() always reads
+          // the active agent_prompt_versions row instead — see 139-01's
+          // context note), but must hold a valid, rendered value.
+          system_prompt: renderedPrompt,
+        },
+        { onConflict: 'organization_id,slug' }
+      )
+      .select('id, active_prompt_version_id')
+      .single()
+
+    if (agentErr || !agent) {
+      console.warn(`[org-templates] agent import failed (${a.slug}):`, agentErr?.message)
+      continue
+    }
+    agentIdBySlug.set(a.slug, agent.id)
+    counts.agents += 1
+
+    let currentPrompt: string | null = null
+    if (agent.active_prompt_version_id) {
+      const { data: activeVersion } = await admin
+        .from('agent_prompt_versions')
+        .select('system_prompt')
+        .eq('id', agent.active_prompt_version_id)
+        .maybeSingle()
+      currentPrompt = activeVersion?.system_prompt ?? null
+    }
+
+    // Idempotent no-op: the active version already holds this exact rendered
+    // text, so re-running the install creates nothing further for this agent.
+    if (currentPrompt === renderedPrompt) continue
+
+    const { data: maxVersionRow } = await admin
+      .from('agent_prompt_versions')
+      .select('version')
+      .eq('agent_id', agent.id)
+      .order('version', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+    const nextVersion = (maxVersionRow?.version ?? 0) + 1
+
+    const { data: newVersion, error: versionErr } = await admin
+      .from('agent_prompt_versions')
+      .insert({
+        organization_id: orgId,
+        agent_id: agent.id,
+        version: nextVersion,
+        system_prompt: renderedPrompt,
+        created_by: createdBy,
+      })
+      .select('id')
+      .single()
+    if (versionErr || !newVersion) {
+      console.warn(`[org-templates] prompt version import failed (${a.slug}):`, versionErr?.message)
+      continue
+    }
+
+    // THE STEP scripts/provision-canary-graph.ts is missing — never skippable
+    // for an agent that reaches this line.
+    await admin.from('agents').update({ active_prompt_version_id: newVersion.id }).eq('id', agent.id)
+  }
+
+  // 3. Direct tool grants (agent_tools), resolved by workflow tool_name.
+  for (const a of snapshot.agents ?? []) {
+    const agentId = agentIdBySlug.get(a.slug)
+    if (!agentId) continue
+
+    for (const toolName of a.direct_tools ?? []) {
+      const { data: workflow } = await admin
+        .from('workflows')
+        .select('id')
+        .eq('org_id', orgId)
+        .eq('tool_name', toolName)
+        .maybeSingle()
+      if (!workflow) {
+        console.warn(
+          `[org-templates] direct tool grant skipped, no workflow with tool_name "${toolName}" in target org (agent "${a.slug}")`
+        )
+        continue
+      }
+
+      const { data: existing } = await admin
+        .from('agent_tools')
+        .select('id')
+        .eq('agent_id', agentId)
+        .eq('workflow_id', workflow.id)
+        .maybeSingle()
+      if (existing) continue
+
+      const { error: grantErr } = await admin
+        .from('agent_tools')
+        .insert({ organization_id: orgId, agent_id: agentId, workflow_id: workflow.id })
+      if (grantErr) {
+        console.warn(`[org-templates] direct tool grant failed ("${a.slug}" -> "${toolName}"):`, grantErr.message)
+        continue
+      }
+      counts.agent_direct_tool_grants += 1
+    }
+  }
+
+  // 4-5. Partner edges + delegated workflow grants, resolved by slug/tool_name.
+  for (const e of snapshot.agent_partner_edges ?? []) {
+    const agentId = agentIdBySlug.get(e.agent_slug)
+    const partnerAgentId = agentIdBySlug.get(e.partner_agent_slug)
+    if (!agentId || !partnerAgentId) {
+      console.warn(
+        `[org-templates] partner edge skipped, unresolved agent slug ("${e.agent_slug}" -> "${e.partner_agent_slug}")`
+      )
+      continue
+    }
+
+    const { data: edge, error: edgeErr } = await admin
+      .from('agent_partners')
+      .upsert(
+        {
+          organization_id: orgId,
+          agent_id: agentId,
+          partner_agent_id: partnerAgentId,
+          invocation_description: e.invocation_description,
+          allowed_channels: e.allowed_channels as Database['public']['Tables']['agent_partners']['Insert']['allowed_channels'],
+          max_calls_per_turn: e.max_calls_per_turn,
+          max_depth: e.max_depth,
+          timeout_ms: e.timeout_ms,
+        },
+        { onConflict: 'agent_id,partner_agent_id' }
+      )
+      .select('id')
+      .single()
+    if (edgeErr || !edge) {
+      console.warn(
+        `[org-templates] partner edge import failed ("${e.agent_slug}" -> "${e.partner_agent_slug}"):`,
+        edgeErr?.message
+      )
+      continue
+    }
+    counts.agent_partner_edges += 1
+
+    for (const toolName of e.workflow_grants ?? []) {
+      const { data: workflow } = await admin
+        .from('workflows')
+        .select('id')
+        .eq('org_id', orgId)
+        .eq('tool_name', toolName)
+        .maybeSingle()
+      if (!workflow) {
+        console.warn(
+          `[org-templates] delegated grant skipped, no workflow with tool_name "${toolName}" in target org (edge "${e.agent_slug}" -> "${e.partner_agent_slug}")`
+        )
+        continue
+      }
+
+      const { error: grantErr } = await admin
+        .from('agent_partner_workflow_grants')
+        .upsert(
+          { organization_id: orgId, partner_edge_id: edge.id, workflow_id: workflow.id },
+          { onConflict: 'partner_edge_id,workflow_id' }
+        )
+      if (grantErr) {
+        console.warn(`[org-templates] delegated grant failed ("${toolName}"):`, grantErr.message)
+        continue
+      }
+      counts.agent_delegated_workflow_grants += 1
+    }
+  }
+
+  // 6. Channel defaults — INSERT ONLY IF ABSENT. Never upsert: doing so could
+  // silently repoint an operator's existing choice, which is exactly the
+  // "install never activates" locked decision.
+  for (const cd of snapshot.agent_channel_defaults ?? []) {
+    const agentId = agentIdBySlug.get(cd.agent_slug)
+    if (!agentId) continue
+
+    const { data: existing } = await admin
+      .from('agent_channel_defaults')
+      .select('id')
+      .eq('organization_id', orgId)
+      .eq('channel', cd.channel as Database['public']['Tables']['agent_channel_defaults']['Insert']['channel'])
+      .maybeSingle()
+    if (existing) continue
+
+    const { error: insertErr } = await admin
+      .from('agent_channel_defaults')
+      .insert({
+        organization_id: orgId,
+        channel: cd.channel as Database['public']['Tables']['agent_channel_defaults']['Insert']['channel'],
+        agent_id: agentId,
+      })
+    if (insertErr) {
+      console.warn(`[org-templates] channel default import failed ("${cd.channel}"):`, insertErr.message)
+      continue
+    }
+    counts.agent_channel_defaults += 1
+  }
+
+  // 7. `agent_channel_routing_modes` is deliberately never referenced above,
+  // or anywhere else in this file — its absence for a freshly installed org
+  // IS the desired state (the resolver's own fail-closed default is
+  // 'legacy'). Do not add a write to that table here.
+}
+
 function buildChecklist(
   groups: OrgTemplateAssetGroup[],
   counts: InstallCounts
@@ -296,6 +554,13 @@ function buildChecklist(
     items.push({
       id: 'custom_fields',
       label: 'Verify custom field definitions and mappings.',
+      done: false,
+    })
+  }
+  if (want.has('agents') && counts.agents > 0) {
+    items.push({
+      id: 'agents',
+      label: `Review the ${counts.agents} imported agent(s)' prompts and connect the integrations they call before enabling any channel.`,
       done: false,
     })
   }
