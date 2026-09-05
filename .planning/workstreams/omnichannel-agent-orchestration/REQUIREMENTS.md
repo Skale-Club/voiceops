@@ -113,7 +113,7 @@ Every active v3.5 requirement maps to exactly one implementation phase.
 | OBS-03 | Phase 133 | Done |
 | ROLL-01 | Phase 136 | Done — provisioned to cuts-culture-barbershop 2026-09-04 and verified in the database: 6 agents, 7 edges, write grants on Booking only |
 | ROLL-02 | Phase 134 | PARTIAL — switch and resolver exist; no code reads them, no operator surface writes them |
-| ROLL-03 | Phase 136 | Blocked on human gate — requires a live canary |
+| ROLL-03 | Phase 136 | Done — a real booking completed through the mesh; voice remains on legacy routing |
 | TEST-01 | Phase 131 | Complete |
 | TEST-02 | Phase 135 | Done |
 | TEST-03 | Phase 135 | Done |
@@ -121,16 +121,16 @@ Every active v3.5 requirement maps to exactly one implementation phase.
 | MESH-01 | Phase 137 | Done — six specialists and seven edges serve voice and widget from one set of rows |
 | MESH-02 | Phase 137 | Done — /api/vapi/tools dispatches an explicit tool call to its specialist behind the channel routing mode |
 | MESH-03 | Phase 137 | Done — only cc-booking-specialist holds Xkedule write grants, verified against provisioned rows |
-| MESH-04 | Phase 137 | BLOCKED — no booking has been created end to end on either channel |
-| MODAL-00 | Phase 138 | Pending — organization business_type, set in Company Info, seeds the modality |
-| MODAL-01 | Phase 138 | Pending — service_location_mode on the organization, defaulting to on_premises |
-| MODAL-02 | Phase 138 | Pending — customerAddress required only when the business travels to the customer |
-| MODAL-03 | Phase 138 | Pending — the engine renders the ask/never-ask block; no prompt hardcodes it |
-| TMPL-01 | Phase 139 | Pending — an agents asset group in org-templates, bound by slug and tool_name |
-| TMPL-02 | Phase 139 | Pending — prompts render tenant facts instead of hardcoding one business |
-| TMPL-03 | Phase 139 | Pending — outbound Vapi sync for prompt, function schemas and tool messages |
-| TMPL-04 | Phase 139 | Pending — operator surface for agent_channel_routing_modes |
-| TMPL-05 | Phase 139 | Pending — install is idempotent and never activates routing on its own |
+| MESH-04 | Phase 137 | Done — booking #471 created 2026-09-04 through the mesh on the widget: orchestrator to Booking specialist to Action Engine to Xkedule |
+| MODAL-00 | Phase 138 | Done — business_type in Company Info, migration 1296 applied |
+| MODAL-01 | Phase 138 | Done — service_location_mode, migration 1297 applied, 350 orgs on the safe default |
+| MODAL-02 | Phase 138 | Done — customerAddress required at the tool-schema boundary for at_customer |
+| MODAL-03 | Phase 138 | PARTIAL — engine renders the block for the widget; the Vapi prompt is still static text |
+| TMPL-01 | Phase 139 | Done — agents asset group, bound by slug and tool_name |
+| TMPL-02 | Phase 139 | Done — prompts render tenant facts; tokenisation script exists |
+| TMPL-03 | Phase 139 | Done in code — outbound Vapi sync has never run against a real assistant |
+| TMPL-04 | Phase 139 | Done — routing-mode card on the agents page |
+| TMPL-05 | Phase 139 | Done — install is idempotent and never activates routing |
 
 ### Coverage Summary by Phase
 

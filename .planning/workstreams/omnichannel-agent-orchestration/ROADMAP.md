@@ -15,7 +15,7 @@ This milestone extends the existing text-agent platform into a tenant-safe voice
 - [x] **Phase 133: Idempotent Action and Vapi Safety** - Voice-triggered actions stay fast, replay-safe, timeout-safe, and compatible with the always-200 Vapi contract.
 - [~] **Phase 134: Traceability and Reversible Routing** - Operators can inspect complete invocation trees and switch each channel between legacy and specialist routing without data loss.
 - [x] **Phase 135: Release Verification and Hardening** - Automated, timed, build, workflow, and UAT gates prove the orchestration path is safe to expose to production traffic.
-- [ ] **Phase 136: Cuts & Culture Canary Rollout** - The specialist graph is enabled and proven for one tenant without becoming platform-default behavior.
+- [x] **Phase 136: Cuts & Culture Canary Rollout** - The specialist graph is enabled and proven for one tenant without becoming platform-default behavior.
 
 ## Phase Details
 
@@ -119,10 +119,10 @@ Phases execute in numeric order: 131 → 132 → 133 → 134 → 135 → 136.
 | 133. Idempotent Action and Vapi Safety | 3/3 | Complete (SAFE-01 partial) | 2026-09-03 |
 | 134. Traceability and Reversible Routing | 3/3 | Complete (ROLL-02 partial) | 2026-09-03 |
 | 135. Release Verification and Hardening | 3/3 | Complete | 2026-09-03 |
-| 136. Cuts & Culture Canary Rollout | 3/3 | ROLL-01 done; ROLL-03 blocked on a real booking | 2026-09-04 |
-| 137. Shared Specialist Mesh | 3/3 | Mesh live on the widget; booking unproven (MESH-04) | 2026-09-04 |
-| 138. Booking Modality | 0/3 | Planned - business type seeds the modality | - |
-| 139. Agent Mesh as a Template | 0/8 | Planned - agents asset group + outbound Vapi sync | - |
+| 136. Cuts & Culture Canary Rollout | 3/3 | Complete - ROLL-03 closed by booking #471 | 2026-09-04 |
+| 137. Shared Specialist Mesh | 3/3 | Complete - booking #471 proved the path end to end | 2026-09-04 |
+| 138. Booking Modality | 3/3 | Complete - migrations applied; voice prompt still static | 2026-09-04 |
+| 139. Agent Mesh as a Template | 8/8 | Complete in code; live walkthrough outstanding | 2026-09-04 |
 
 ---
 

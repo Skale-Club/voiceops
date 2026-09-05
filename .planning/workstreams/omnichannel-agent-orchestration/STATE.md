@@ -2,17 +2,17 @@
 gsd_state_version: 1.0
 milestone: v3.5
 milestone_name: milestone
-status: executing
-stopped_at: GSD artifacts complete through phase 139; every phase blocked on one real booking
-last_updated: "2026-09-04T21:30:00.000Z"
+status: complete_pending_live_walkthrough
+stopped_at: Phases 131-139 executed and verified; a real booking proved the mesh; one live template walkthrough outstanding
+last_updated: "2026-09-05T00:10:00.000Z"
 last_activity: 2026-09-04
 progress:
   total_phases: 9
-  completed_phases: 6
+  completed_phases: 9
   total_plans: 32
-  completed_plans: 21
-  percent: 66
-  phase_note: 131-136 are the closed v3.5 milestone; 137 shipped and is unverified on its own goal; 138 and 139 are planned and unstarted
+  completed_plans: 32
+  percent: 100
+  phase_note: 131-136 are the closed v3.5 milestone; 137-139 were opened afterwards from production findings and the duplicability requirement, and are executed and verified
 ---
 
 # Project State
@@ -22,12 +22,12 @@ progress:
 See: `.planning/PROJECT.md` (last updated 2026-07-03)
 
 **Core value:** Voice and text must reach the correct tenant-scoped specialist and execute business actions through the Action Engine quickly, safely, and observably.
-**Current focus:** MESH-04 / ROLL-03 — a real booking on either channel. Phases 138 and 139 are planned and unstarted.
+**Current focus:** nothing autonomous remains. Two human items: install the mesh into a real second tenant, and push a rendered config to the Vapi assistant so voice stops carrying static prompt text.
 
 ## Current Position
 
-Phase: 137 (shared-specialist-mesh) — mesh live on the widget, booking unproven
-Next: 138 (3 plans) and 139 (8 plans) are written and unstarted. Both are downstream of proving a booking works.
+Phase: 139 (agent-mesh-as-a-template) — 8 of 8 plans executed and verified
+Next: the live walkthrough. Everything below that line is built, tested and deployed.
 **Milestone:** v3.5 Omnichannel Agent Orchestration
 **Phase:** 132 of 136 (2 of 6) — Authorized Specialist Orchestration
 **Plan:** 0 of 4 in current phase
