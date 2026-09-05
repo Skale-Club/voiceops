@@ -68,7 +68,7 @@ export async function checkXkeduleAvailability(
   params: Record<string, unknown>,
   credentials: XkeduleCredentials,
 ): Promise<string> {
-  const p = params as AvailabilityParams
+  let p = params as AvailabilityParams
 
   const ids = normalizeServiceIds(p)
   if (ids.length === 0) {
@@ -78,6 +78,15 @@ export async function checkXkeduleAvailability(
   const staffId = p.staffId ?? p.staffMemberId
 
   // ── Range shape: "when is the next opening?" ────────────────────────────────
+  // A one-day "range" (startDate === endDate, or no endDate) is a single-date
+  // question asked with the other field names. Fold it into the single-date
+  // path so it hits the cache a quote just pre-warmed; the range path is
+  // uncached by design and was costing the widget's day turn the provider's
+  // full cold cost twice (measured 2026-09-05: 12.8s + 13.0s in one turn).
+  if (!p.date && p.startDate && (!p.endDate || p.endDate === p.startDate)) {
+    p = { ...p, date: p.startDate }
+  }
+
   if (!p.date && p.startDate && p.endDate) {
     const query = new URLSearchParams({ startDate: p.startDate, endDate: p.endDate, serviceIds })
     if (staffId) query.set('staffId', String(Number(staffId)))
