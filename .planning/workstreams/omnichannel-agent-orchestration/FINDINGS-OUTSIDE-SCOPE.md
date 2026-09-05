@@ -362,3 +362,16 @@ Two more things the same measurement settled:
 Voice, final numbers through production as Vapi calls it (warm run): `lookup_customer`
 0.17s (warmed at pickup), `business_info` 0.46s, `list_services` 0.86s, `get_quote` 2.3s,
 `check_availability` 0.56s. The provider's quote endpoint is the one thing left that is slow.
+
+## 14. No agent knew what day it was — FIXED (2026-09-05)
+
+The availability turn kept timing out after items 9 and 13. `workflow_tool_logs` showed the
+Availability specialist asking the provider for **2024**-09-08, then 09 and 10 — three cold
+calls, ~21s, for a year nobody is in. The orchestrator on Haiku had skipped the `datetime`
+tool and passed "September 8th" through the handoff; the specialist guessed the year.
+
+`runAgent` now appends one line to every agent's system prompt on both paths — "Today is
+Friday, 2026-09-05 (America/New_York). Resolve every relative day to a full YYYY-MM-DD date
+in this year before using it." — from `organizations.timezone` (memoised 10 minutes, UTC when
+absent). This replaces relying on the model to remember a tool call. Pinned by
+`tests/agent-today-line.test.ts`.
