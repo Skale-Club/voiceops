@@ -439,3 +439,22 @@ not code:**
    connection; the seeded confirmation is an email, and a phone caller gives no email. Connect
    an SMS number to the organization and add a "booking confirmed → SMS to
    `{{meeting.booker_phone}}`" workflow (the builder has `send_sms`), or connect WhatsApp.
+
+## 18. The synthetic event type could not be created for the demo org — FIXED (2026-09-05); notification proven end to end
+
+`event_types` is unique on **(user_id, slug)**, not per organization. The demo org's owner
+already held `xkedule` in Skale Club (created by the webhook mirror there), so every
+`getOrCreateEventType()` in the demo org failed on a duplicate key, the emitter warned
+"no org member to own the synthetic Xkedule event type" — the wrong cause — and bookings
+#480 and #481 produced no `meeting.requested` and no SMS. New rows now use `xkedule-<org8>`
+(`78f2c89e`); organizations already holding the plain slug keep matching on it.
+
+**Proof, in production, on the phone robot's own path:** booking #482 through
+`/api/vapi/tools` → `meeting.requested` dispatched at 19:15:23 to "Booking request received"
+→ `send_sms` executed and completed at 19:15:25–26 from +1 866 724 0005 to the phone that
+made the day's call. Bookings #480–#482 were then cancelled directly at the provider (no
+events, no cancellation texts).
+
+What a real customer now gets: "we received your request" the moment they book, on either
+channel; "you're confirmed" when the shop confirms (or immediately, once the Xkedule demo
+tenant is set to auto-confirm). Still an operator setting: that auto-confirm flag.
