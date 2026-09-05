@@ -136,7 +136,7 @@ function baseParams(overrides: Partial<Parameters<typeof buildWorkflowTools>[0]>
     orgId: ORG_ID,
     channel: 'web_widget' as const,
     currentChain: [AGENT_ID],
-    invocationId: 'invocation-1',
+    getInvocationId: () => 'invocation-1',
     traceId: 'trace-1',
     conversationId: undefined,
     serviceClient: makeServiceClient([workflowRow()]),
@@ -274,6 +274,67 @@ describe('buildWorkflowTools: execute() authorization (AUTHZ-01/AUTHZ-02)', () =
     // never for any ancestor in currentChain.
     expect(resolveAgentTool).toHaveBeenCalledTimes(1)
     expect(resolveAgentTool).toHaveBeenCalledWith(AGENT_ID, TOOL_NAME, 'web_widget')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Perf (2026-09-05 re-analysis, FINDINGS-OUTSIDE-SCOPE.md item 9):
+// getInvocationId() must be read live, at execute() time — never captured
+// once when buildWorkflowTools() is called — because run-agent.ts now runs
+// the invocation INSERT concurrently with buildWorkflowTools() instead of
+// awaiting it first. A plain `invocationId: string` param would freeze
+// whatever optimistic id was current at construction time into every
+// closure below, permanently — even after the INSERT settles (or fails) a
+// moment later.
+// ---------------------------------------------------------------------------
+
+describe('buildWorkflowTools: getInvocationId is read live at execute() time (perf item 9)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.mocked(resolveAgentTool).mockResolvedValue(resolvedWorkflowTool())
+    vi.mocked(executeWorkflowTool).mockResolvedValue({ ok: true, result: 'Booked.' })
+  })
+
+  function contextFromLastCall(): { agentInvocationId?: string } {
+    const call = vi.mocked(executeWorkflowTool).mock.calls.at(-1)
+    return (call?.[0] as { context: { agentInvocationId?: string } }).context
+  }
+
+  it('threads the getter value current AT EXECUTE TIME, not at buildWorkflowTools() construction time', async () => {
+    let currentInvocationId = 'optimistic-client-generated-id'
+    const params = baseParams({ incomingEdge: null, getInvocationId: () => currentInvocationId })
+    const { toolSet } = await buildWorkflowTools(params)
+
+    // The INSERT (run concurrently with the construction above, per
+    // run-agent.ts's Promise.all) settles to a real id AFTER construction —
+    // simulated here by mutating the value the getter closes over.
+    currentInvocationId = 'settled-real-invocation-id'
+    await toolSet[TOOL_NAME].execute!({}, {} as never)
+
+    expect(contextFromLastCall().agentInvocationId).toBe('settled-real-invocation-id')
+  })
+
+  it('sees the insert-failed sentinel if the INSERT fails after construction — never the stale optimistic id', async () => {
+    let currentInvocationId = 'optimistic-client-generated-id'
+    const params = baseParams({ incomingEdge: null, getInvocationId: () => currentInvocationId })
+    const { toolSet } = await buildWorkflowTools(params)
+
+    // The INSERT failed — run-agent.ts's `.then()` corrects the outer
+    // variable to the sentinel before any tool actually executes.
+    currentInvocationId = 'insert-failed'
+    await toolSet[TOOL_NAME].execute!({}, {} as never)
+
+    // agentInvocationId must be undefined, not the sentinel string itself
+    // and not the stale optimistic id — see the 'insert-failed' guard in
+    // build-workflow-tools.ts.
+    expect(contextFromLastCall().agentInvocationId).toBeUndefined()
+  })
+
+  it('a settled real id is threaded through as agentInvocationId (control case)', async () => {
+    const params = baseParams({ incomingEdge: null, getInvocationId: () => 'already-settled-id' })
+    const { toolSet } = await buildWorkflowTools(params)
+    await toolSet[TOOL_NAME].execute!({}, {} as never)
+    expect(contextFromLastCall().agentInvocationId).toBe('already-settled-id')
   })
 })
 

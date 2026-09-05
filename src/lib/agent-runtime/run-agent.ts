@@ -21,6 +21,7 @@ import { createOpenRouter } from '@openrouter/ai-sdk-provider'
 import { jsonSchema } from 'ai'
 import { after } from 'next/server'
 import { createServiceRoleClient } from '@/lib/supabase/admin'
+import { memoTtl } from '@/lib/cache/ttl-memo'
 import { queryKnowledge } from '@/lib/knowledge/query-knowledge'
 import { executeAction } from '@/lib/action-engine/execute-action'
 import { getProviderKey } from '@/lib/integrations/get-provider-key'
@@ -192,6 +193,17 @@ function thinkingLlmExtras(
 
 type LlmProviderChoice = { kind: 'openrouter'; apiKey: string }
 
+// Perf (2026-09-05 re-analysis, FINDINGS-OUTSIDE-SCOPE.md item 9): measured
+// 278-659ms in production — two sequential lookups (org integration row,
+// then platform_settings) on every invocation. Which key an org resolves to
+// changes only on an explicit integration connect/disconnect or a platform
+// key rotation, so a 60s memo is safe: a rotation reaching a live turn up to
+// 60s late is an acceptable trade against paying this twice per widget turn.
+// A thrown `no_llm_key` (no key configured anywhere) is NEVER cached —
+// memoTtl already never caches a rejected fn, so this needs no special
+// handling beyond throwing instead of returning a sentinel.
+const LLM_PROVIDER_TTL_MS = 60_000
+
 /**
  * One provider, two places to hold the key: the org's own OpenRouter
  * integration wins (so an org can be billed for its own usage), otherwise the
@@ -201,15 +213,54 @@ async function resolveLlmProvider(
   orgId: string,
   serviceClient: ReturnType<typeof createServiceRoleClient>,
 ): Promise<LlmProviderChoice> {
-  const { getPlatformSetting } = await import('@/lib/platform-settings')
+  return memoTtl(`llm-provider:${orgId}`, LLM_PROVIDER_TTL_MS, async () => {
+    const { getPlatformSetting } = await import('@/lib/platform-settings')
 
-  const orgOpenRouterKey = await getProviderKey('openrouter', orgId, serviceClient)
-  if (orgOpenRouterKey) return { kind: 'openrouter', apiKey: orgOpenRouterKey }
+    const orgOpenRouterKey = await getProviderKey('openrouter', orgId, serviceClient)
+    if (orgOpenRouterKey) return { kind: 'openrouter' as const, apiKey: orgOpenRouterKey }
 
-  const platformOpenRouterKey = await getPlatformSetting('OPENROUTER_API_KEY', serviceClient)
-  if (platformOpenRouterKey) return { kind: 'openrouter', apiKey: platformOpenRouterKey }
+    const platformOpenRouterKey = await getPlatformSetting('OPENROUTER_API_KEY', serviceClient)
+    if (platformOpenRouterKey) return { kind: 'openrouter' as const, apiKey: platformOpenRouterKey }
 
-  throw new Error('no_llm_key')
+    throw new Error('no_llm_key')
+  })
+}
+
+// Perf (2026-09-05 re-analysis, FINDINGS-OUTSIDE-SCOPE.md item 9): the
+// measured ~200ms `knowledge_ms` on an agent with kb_scope=null and zero
+// knowledge_sources rows is queryKnowledge's own getProviderKey round
+// trip — paid even though a null (full-org) scope over an empty knowledge
+// base can never return a chunk. `null` legitimately means "search the
+// whole org" (never "disabled" — that's an empty array, and queryKnowledge
+// already short-circuits it before any network call), so the only safe
+// short-circuit here is the org-wide fact "has this org uploaded anything
+// at all", which cannot go stale in a way that matters: `documents` rows
+// are FK'd to `knowledge_sources`, so zero source rows guarantees zero
+// vector chunks for every query, not just this one. Memoised 60s per org —
+// a newly-uploaded source appearing up to 60s late in this specific
+// short-circuit is acceptable (queryKnowledge itself is still called, and
+// still correct, for every other case). A failed/inconclusive read must
+// never suppress a real lookup, so it is never cached and defaults to
+// "assume documents exist" (skipKnowledge stays false) rather than to the
+// cheaper wrong answer.
+const KB_HAS_DOCS_TTL_MS = 60_000
+
+async function orgHasKnowledgeDocuments(
+  orgId: string,
+  serviceClient: ReturnType<typeof createServiceRoleClient>,
+): Promise<boolean> {
+  try {
+    return await memoTtl(`kb-has-docs:${orgId}`, KB_HAS_DOCS_TTL_MS, async () => {
+      const { count, error } = await serviceClient
+        .from('knowledge_sources')
+        .select('id', { count: 'exact', head: true })
+        .eq('organization_id', orgId)
+      if (error) throw error
+      return (count ?? 0) > 0
+    })
+  } catch {
+    return true
+  }
 }
 
 /**
@@ -423,7 +474,17 @@ async function buildPartnerTools(params: {
   _depth: number
   visitedAgentIds: Set<string>
   delegationChain: string[]
-  parentInvocationId: string
+  /**
+   * Perf (2026-09-05 re-analysis, item 9): a live getter — see the
+   * identical rationale on BuildWorkflowToolsParams.getInvocationId in
+   * build-workflow-tools.ts. runAgentBlocking now starts
+   * insertInvocationStart() concurrently with buildPartnerTools() rather
+   * than awaiting it first, so this must be read fresh inside execute(),
+   * never captured at construction time, or a failed insert's
+   * 'insert-failed' sentinel would never reach the child call's
+   * parentInvocationId.
+   */
+  getParentInvocationId: () => string
   traceId: string
   conversationId?: string
   sessionId?: string
@@ -446,7 +507,7 @@ async function buildPartnerTools(params: {
 }): Promise<Record<string, ReturnType<typeof dynamicTool>>> {
   const {
     agentId, orgId, channel, _depth, visitedAgentIds, delegationChain,
-    parentInvocationId, traceId, conversationId, sessionId,
+    getParentInvocationId, traceId, conversationId, sessionId,
     serviceClient, emit, partnerBudget, partnerCallsLog,
   } = params
 
@@ -641,7 +702,9 @@ async function buildPartnerTools(params: {
             userMessage: handoffMessage,
             mode: 'production',
             _depth: _depth + 1,
-            parentInvocationId,
+            // Read fresh, not captured at construction time — see
+            // getParentInvocationId's doc comment above.
+            parentInvocationId: getParentInvocationId(),
             _visitedAgentIds: updatedVisited,
             _delegationChain: updatedChain,
             _incomingEdge: edgeDecision,
@@ -875,9 +938,17 @@ async function runAgentBlocking(opts: InternalAgentRunOptions): Promise<AgentRun
   const knowledgeStart = Date.now()
   try {
     const kbClient = createServiceRoleClient()
-    const kbContext = await queryKnowledge(userMessage, orgId, kbClient, { rawMode: true, kbScope: resolvedAgent.kbScope })
-    if (kbContext && kbContext !== FALLBACK_KB_RESPONSE) {
-      systemPrompt = `${systemPrompt}\n\nRelevant knowledge base content:\n${kbContext}`
+    // Perf (2026-09-05 re-analysis, item 9): a null scope over an org with
+    // zero knowledge_sources rows can never match anything — skip the
+    // network/DB round trip inside queryKnowledge entirely rather than pay
+    // it just to get FALLBACK_KB_RESPONSE back. See orgHasKnowledgeDocuments().
+    const skipKnowledge =
+      resolvedAgent.kbScope === null && !(await orgHasKnowledgeDocuments(orgId, kbClient))
+    if (!skipKnowledge) {
+      const kbContext = await queryKnowledge(userMessage, orgId, kbClient, { rawMode: true, kbScope: resolvedAgent.kbScope })
+      if (kbContext && kbContext !== FALLBACK_KB_RESPONSE) {
+        systemPrompt = `${systemPrompt}\n\nRelevant knowledge base content:\n${kbContext}`
+      }
     }
     // Per-invocation extra instructions (workflow agent node passes its own prompt).
     if (opts.extraInstructions?.trim()) {
@@ -889,10 +960,26 @@ async function runAgentBlocking(opts: InternalAgentRunOptions): Promise<AgentRun
     timings.knowledge_ms = Date.now() - knowledgeStart
   }
 
-  // Step 8: INSERT invocation row with status='running' (D-34-03)
+  // Step 8: generate the invocation id CLIENT-SIDE and fire the INSERT
+  // without awaiting it yet (D-34-03, perf 2026-09-05 re-analysis item 9).
+  // Previously this was a ~220-266ms sequential prefix to the Promise.all
+  // group below purely because buildWorkflowTools/buildPartnerTools need
+  // an invocation id as a constructor param. Generating the id up front
+  // (crypto.randomUUID(), written explicitly as the row's `id` by
+  // insertInvocationStart) means that requirement is already satisfied the
+  // instant the INSERT is fired, so it can run INSIDE that Promise.all
+  // instead of gating it. `invocationId` stays a `let`: the `.then()`
+  // below corrects it to the 'insert-failed' sentinel the moment the write
+  // actually fails, and every reader — the tokenCapDenial branch, the
+  // parallel group's getInvocationId()/getParentInvocationId() closures,
+  // and the top of `finally` — either runs after that correction or
+  // explicitly awaits `insertInvocationSettled` first, so nothing ever
+  // observes the optimistic id before the insert has settled.
   const startedAt = Date.now()
+  let invocationId = crypto.randomUUID()
   const invocationInsertStart = Date.now()
-  const invocationId = await insertInvocationStart({
+  const insertInvocationSettled: Promise<string> = insertInvocationStart({
+    id: invocationId,
     organizationId: orgId,
     agentId: resolvedAgentId,
     traceId,
@@ -904,8 +991,11 @@ async function runAgentBlocking(opts: InternalAgentRunOptions): Promise<AgentRun
     conversationId,
     sessionId,
     parentInvocationId,
+  }).then((settledId) => {
+    invocationId = settledId
+    timings.invocation_insert_ms = Date.now() - invocationInsertStart
+    return settledId
   })
-  timings.invocation_insert_ms = Date.now() - invocationInsertStart
 
   // Step 9: Token cap check | estimate history tokens (RUNTIME-06)
   const cumulativeHistoryTokens = Math.ceil(
@@ -913,6 +1003,9 @@ async function runAgentBlocking(opts: InternalAgentRunOptions): Promise<AgentRun
   )
   const tokenCapDenial = checkTokenCap(cumulativeHistoryTokens, orgId, resolvedAgentId)
   if (tokenCapDenial) {
+    // This early-return path never reaches the Promise.all group below, so
+    // it must wait for the insert itself before writing/returning the id.
+    await insertInvocationSettled
     await updateInvocationEnd({
       invocationId,
       agentId: resolvedAgentId,
@@ -974,16 +1067,17 @@ async function runAgentBlocking(opts: InternalAgentRunOptions): Promise<AgentRun
       let commerceWrites = 0
 
       // Perf (2026-09-05 re-analysis, FINDINGS-OUTSIDE-SCOPE.md item 9): these
-      // four reads/builds don't consume each other's results — none of
+      // five reads/writes don't consume each other's results — none of
       // resolveLlmProvider, the legacy agent_tools row fetch, buildWorkflowTools,
-      // or buildPartnerTools reads a value the others produce (verified by
-      // reading each: they only close over resolvedAgentId/orgId/channel/
-      // invocationId/serviceClient, all already resolved above). Running them
-      // via Promise.all instead of four sequential awaits collapses their
+      // buildPartnerTools, or the invocation INSERT reads a value another
+      // one produces (buildWorkflowTools/buildPartnerTools take a live
+      // getInvocationId()/getParentInvocationId() getter rather than the
+      // insert's settled id — see their param doc comments). Running them
+      // via Promise.all instead of five sequential awaits collapses their
       // wall-clock cost to the slowest one instead of the sum. checkDailyCostCap
-      // is deliberately NOT in this group: it gates whether invocationId (which
-      // buildWorkflowTools/buildPartnerTools require as a constructor param) is
-      // ever created, so it stays a sequential pre-condition above, not a peer.
+      // is deliberately NOT in this group: it gates whether this invocation
+      // is even allowed to proceed, so it stays a sequential pre-condition
+      // above, not a peer.
       const [
         { value: llmProviderChoice, ms: llmProviderMs },
         { value: agentToolRowsResult, ms: agentToolRowsMs },
@@ -1018,7 +1112,7 @@ async function runAgentBlocking(opts: InternalAgentRunOptions): Promise<AgentRun
             orgId,
             channel,
             currentChain,
-            invocationId,
+            getInvocationId: () => invocationId,
             traceId,
             conversationId,
             serviceClient,
@@ -1036,7 +1130,7 @@ async function runAgentBlocking(opts: InternalAgentRunOptions): Promise<AgentRun
             _depth,
             visitedAgentIds,
             delegationChain: currentChain,
-            parentInvocationId: invocationId,
+            getParentInvocationId: () => invocationId,
             traceId,
             conversationId,
             sessionId,
@@ -1046,6 +1140,13 @@ async function runAgentBlocking(opts: InternalAgentRunOptions): Promise<AgentRun
             partnerCallsLog,
           })
         ),
+        // The INSERT fired in Step 8, now folded into this same parallel
+        // group instead of gating it — see the Step 8 comment. Its own
+        // `.then()` (attached at creation) already updates `invocationId`
+        // and `timings.invocation_insert_ms`; this member's only job is to
+        // make Promise.all actually wait for that to happen before any code
+        // past this block runs.
+        insertInvocationSettled,
       ])
       timings.llm_provider_ms = llmProviderMs
       // Both ran concurrently above — the wall-clock cost this stage actually
@@ -1376,6 +1477,16 @@ async function runAgentBlocking(opts: InternalAgentRunOptions): Promise<AgentRun
   } finally {
     if (timeoutId) clearTimeout(timeoutId)
 
+    // The callCountCheck (max_llm_calls_exceeded) branch above returns
+    // without ever reaching the Promise.all group that folds in
+    // insertInvocationSettled, so `invocationId` may still be the
+    // optimistic client-generated id at this point. Awaiting an
+    // already-settled promise resolves immediately and re-runs nothing —
+    // this is the one place guaranteed to run on every path that reaches
+    // here, so it is the correct spot to guarantee settlement before the
+    // sentinel/id is written or returned.
+    await insertInvocationSettled
+
     // Phase 134 Plan 03 (OBS-02): a nested specialist that genuinely failed
     // (not merely denied) must not be swallowed behind an otherwise-'success'
     // parent status.
@@ -1480,6 +1591,14 @@ function runAgentStreaming(
       // agents this turn, populated by buildPartnerTools()'s execute() closure.
       const partnerCallsLog: Json[] = []
       let invocationId = ''
+      // Perf (2026-09-05 re-analysis, item 9): assigned once the INSERT
+      // below is fired; the after()-block finally at the bottom awaits it
+      // (when defined) before reading `invocationId`, since — like the
+      // blocking path — that INSERT now runs inside a Promise.all instead
+      // of being awaited immediately. Undefined means an early guard
+      // returned before the INSERT section was ever reached, matching
+      // `invocationId` staying ''.
+      let insertInvocationSettled: Promise<string> | undefined
       let capturedModel = 'unknown'
       let finalResolvedAgentId = opts.agentId ?? ''
 
@@ -1571,9 +1690,15 @@ function runAgentStreaming(
         const knowledgeStart = Date.now()
         try {
           const kbClient = createServiceRoleClient()
-          const kbContext = await queryKnowledge(userMessage, orgId, kbClient, { rawMode: true, kbScope: resolvedAgent.kbScope })
-          if (kbContext && kbContext !== FALLBACK_KB_RESPONSE) {
-            systemPrompt = `${systemPrompt}\n\nRelevant knowledge base content:\n${kbContext}`
+          // Perf (2026-09-05 re-analysis, item 9): see the identical guard in
+          // the blocking path above / orgHasKnowledgeDocuments() below.
+          const skipKnowledgeStream =
+            resolvedAgent.kbScope === null && !(await orgHasKnowledgeDocuments(orgId, kbClient))
+          if (!skipKnowledgeStream) {
+            const kbContext = await queryKnowledge(userMessage, orgId, kbClient, { rawMode: true, kbScope: resolvedAgent.kbScope })
+            if (kbContext && kbContext !== FALLBACK_KB_RESPONSE) {
+              systemPrompt = `${systemPrompt}\n\nRelevant knowledge base content:\n${kbContext}`
+            }
           }
         } catch {
           // KB failure non-fatal
@@ -1603,9 +1728,17 @@ function runAgentStreaming(
           return
         }
 
-        // INSERT invocation row
+        // INSERT invocation row — id generated client-side and the write
+        // folded into the Promise.all group below instead of gating it
+        // (perf 2026-09-05 re-analysis item 9; see the mirrored comment on
+        // the blocking path's Step 8). `invocationId` is corrected to the
+        // 'insert-failed' sentinel by the `.then()` below the moment the
+        // write actually fails; the outer after()-block finally awaits
+        // `insertInvocationSettled` before ever reading `invocationId`.
         const invocationInsertStart = Date.now()
-        invocationId = await insertInvocationStart({
+        invocationId = crypto.randomUUID()
+        insertInvocationSettled = insertInvocationStart({
+          id: invocationId,
           organizationId: orgId,
           agentId: resolvedAgentId,
           traceId,
@@ -1617,8 +1750,11 @@ function runAgentStreaming(
           conversationId,
           sessionId,
           parentInvocationId,
+        }).then((settledId) => {
+          invocationId = settledId
+          timings.invocation_insert_ms = Date.now() - invocationInsertStart
+          return settledId
         })
-        timings.invocation_insert_ms = Date.now() - invocationInsertStart
 
         // AbortController (RUNTIME-08) | timeout SCHEDULED later (before streamText)
         // once the toolSet is assembled and the tool tier is known.
@@ -1678,7 +1814,7 @@ function runAgentStreaming(
                 orgId,
                 channel,
                 currentChain,
-                invocationId,
+                getInvocationId: () => invocationId,
                 traceId,
                 conversationId,
                 serviceClient,
@@ -1687,6 +1823,11 @@ function runAgentStreaming(
                 incomingEdge,
               })
             ),
+            // The INSERT fired just above is folded into this same parallel
+            // group instead of gating it. Its own `.then()` already updates
+            // `invocationId`/`timings.invocation_insert_ms`; this member's
+            // job is only to make Promise.all actually wait for that.
+            insertInvocationSettled,
           ])
           timings.llm_provider_ms = llmProviderMs
           timings.agent_tools_rows_ms = agentToolRowsMs
@@ -1829,7 +1970,13 @@ function runAgentStreaming(
               _depth,
               visitedAgentIds,
               delegationChain: currentChain,
-              parentInvocationId: invocationId,
+              // This call happens sequentially AFTER the Promise.all group
+              // above (it needs delegationVisible), which already includes
+              // insertInvocationSettled — invocationId is guaranteed settled
+              // by this point, so a getter isn't load-bearing here the way
+              // it is inside that group, but the shared buildPartnerTools
+              // signature takes one regardless.
+              getParentInvocationId: () => invocationId,
               traceId,
               conversationId,
               sessionId,
@@ -1984,6 +2131,18 @@ function runAgentStreaming(
         // Post-stream side effects via after() (D-35-03)
         after(async () => {
           try {
+            // The INSERT above now runs inside a Promise.all instead of
+            // being awaited immediately (perf 2026-09-05 re-analysis item
+            // 9) — `invocationId` may still be the optimistic
+            // client-generated id (or, on an exception that short-circuited
+            // that Promise.all before it settled, stale) unless this is
+            // awaited first. Awaiting an already-settled promise resolves
+            // immediately; `insertInvocationSettled` stays undefined only
+            // when an early guard returned before the INSERT was ever
+            // fired, matching `invocationId` staying ''.
+            if (insertInvocationSettled) {
+              invocationId = await insertInvocationSettled
+            }
             if (conversationId && accumulatedText) {
               await persistMessage({
                 dbSessionId: conversationId,

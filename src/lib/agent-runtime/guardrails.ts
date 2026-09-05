@@ -7,6 +7,7 @@ import { createServiceRoleClient } from '@/lib/supabase/admin'
 import { createLogger } from '@/lib/obs/logger'
 import type { AgentChannel, AgentRunResult } from './types'
 import { getChannelLatencyPolicy } from './channel-policy'
+import { memoTtl } from '@/lib/cache/ttl-memo'
 
 // ---------------------------------------------------------------------------
 // Cap constants (read from env with documented defaults)
@@ -140,7 +141,7 @@ export function checkTokenCap(
 // Call this AFTER inserting the invocation row (so the current invocation doesn't
 // double-count | it hasn't been updated with cost yet).
 
-export async function checkDailyCostCap(
+async function checkDailyCostCapUncached(
   orgId: string,
   agentId: string
 ): Promise<string | null> {
@@ -180,6 +181,42 @@ export async function checkDailyCostCap(
   createLogger({ orgId, agentId }).warn('guardrail_tripped', { cap: 'daily_cost_cap_usd', value: dailyTotal, limit: capUsd })
 
   return 'Daily cost limit reached | service temporarily restricted'
+}
+
+/** Carries a denial string through memoTtl's fn without letting it be cached. */
+class DailyCostCapDenial extends Error {
+  constructor(public readonly denialMessage: string) {
+    super(denialMessage)
+  }
+}
+
+// Perf (2026-09-05 re-analysis, FINDINGS-OUTSIDE-SCOPE.md item 9): measured
+// 414-820ms in production — two sequential reads (the org's cap settings,
+// then a 24h sum over agent_invocations) on every single invocation, twice
+// per widget turn. Spend and the on/off switch move slowly enough that a
+// short memo window is safe, but a DENIAL must not outlive the query that
+// produced it: once an org is over cap, every subsequent invocation across
+// every agent needs its own fresh read so the cap lifts the moment spend
+// (or the switch) actually changes, not up to 30s later. The uncached
+// function's `null` (not denied) is the only result ever memoised — a
+// non-null denial is thrown past memoTtl (which never caches a rejection)
+// and unwrapped back into its original string below.
+const COST_CAP_TTL_MS = 30_000
+
+export async function checkDailyCostCap(
+  orgId: string,
+  agentId: string
+): Promise<string | null> {
+  try {
+    return await memoTtl(`daily-cost-cap:${orgId}:${agentId}`, COST_CAP_TTL_MS, async () => {
+      const result = await checkDailyCostCapUncached(orgId, agentId)
+      if (result !== null) throw new DailyCostCapDenial(result)
+      return null
+    })
+  } catch (err) {
+    if (err instanceof DailyCostCapDenial) return err.denialMessage
+    throw err
+  }
 }
 
 // ---------------------------------------------------------------------------

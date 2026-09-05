@@ -23,6 +23,7 @@ vi.mock('@/lib/org-templates/prompt-template', async (importOriginal) => {
 import { createServiceRoleClient } from '@/lib/supabase/admin'
 import { resolveTenantFacts } from '@/lib/org-templates/prompt-template'
 import { resolveAgent } from '@/lib/agent-runtime/resolve-agent'
+import { clearMemo } from '@/lib/cache/ttl-memo'
 
 function clientReturningPrompt(systemPrompt: string) {
   const agentRow = {
@@ -55,6 +56,12 @@ beforeEach(() => {
     businessName: 'Acme Cuts',
     businessAddress: '1 Main Street, Springfield',
   })
+  // resolveAgent() now memoises a successful resolution for 30s keyed by
+  // (orgId, agentId, channel) — see src/lib/agent-runtime/resolve-agent.ts.
+  // Every case below reuses agent-1/org-1 with a differently-mocked prompt,
+  // so a stale cache entry from an earlier test would silently answer with
+  // the wrong rendered prompt instead of exercising this test's own mock.
+  clearMemo()
 })
 
 describe('resolveAgent renders tenant-fact tokens at runtime', () => {

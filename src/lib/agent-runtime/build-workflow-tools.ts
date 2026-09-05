@@ -93,7 +93,24 @@ export interface BuildWorkflowToolsParams {
   orgId: string
   channel: AgentChannel
   currentChain: string[]
-  invocationId: string
+  /**
+   * Perf (2026-09-05 re-analysis, FINDINGS-OUTSIDE-SCOPE.md item 9): a
+   * live getter rather than a plain string. run-agent.ts now runs
+   * insertInvocationStart() concurrently with buildWorkflowTools() (both
+   * in the same Promise.all) instead of awaiting it first, so at the
+   * moment THIS function is called the insert may not have settled yet —
+   * a plain `invocationId: string` parameter would freeze whatever
+   * optimistic value was passed at call time into every tool's execute()
+   * closure below, permanently, even if the insert later fails and the
+   * caller corrects its own `invocationId` variable to the
+   * 'insert-failed' sentinel. Every read in this file happens inside an
+   * execute() callback — i.e. at actual tool-call time, always after that
+   * Promise.all (and therefore the insert) has settled — so calling
+   * `getInvocationId()` fresh each time is what makes those closures see
+   * the corrected sentinel on a failed insert instead of a stale
+   * optimistic id that no row in agent_invocations actually backs.
+   */
+  getInvocationId: () => string
   traceId: string
   conversationId?: string
   serviceClient: SupabaseClient<Database>
@@ -118,7 +135,7 @@ export async function buildWorkflowTools(
     orgId,
     channel,
     currentChain,
-    invocationId,
+    getInvocationId,
     traceId,
     conversationId,
     serviceClient,
@@ -222,6 +239,9 @@ export async function buildWorkflowTools(
       execute: async (args: unknown) => {
         const toolArgs = (args as Record<string, unknown>) ?? {}
         const currentIndex = getNextToolCallIndex()
+        // Read fresh, not captured at construction time — see
+        // getInvocationId's doc comment on BuildWorkflowToolsParams above.
+        const invocationId = getInvocationId()
 
         // Re-verify authorization at call time (same gate as tool_configs).
         const resolved = await resolveAgentTool(agentId, capturedToolName, channel)

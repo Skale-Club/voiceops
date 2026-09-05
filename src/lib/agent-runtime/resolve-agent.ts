@@ -6,13 +6,31 @@
 import { createServiceRoleClient } from '@/lib/supabase/admin'
 import { hasTenantFactTokens, renderPromptTemplate, resolveTenantFacts } from '@/lib/org-templates/prompt-template'
 import { createLogger } from '@/lib/obs/logger'
+import { memoTtl } from '@/lib/cache/ttl-memo'
 import type { AgentChannel, ResolvedAgent } from './types'
 
-export async function resolveAgent(
+// Perf (2026-09-05 re-analysis, FINDINGS-OUTSIDE-SCOPE.md item 9): this is
+// the single seam every runtime path (blocking, streaming, every partner
+// call) resolves an agent through, and it was measured at 200-230ms in
+// production (1358ms on a cold facts lookup) — a join plus, for a
+// templatized prompt, the tenant-facts round trip in
+// resolveTenantFacts(). Every one of those is read-only and does not
+// change from one turn to the next, so it is safe to memoise for a short
+// window: a prompt edit (new active_prompt_version_id, a flipped
+// is_active, a channel_overrides change) reaching a live conversation up
+// to 30s late is an acceptable trade against paying this cost twice per
+// widget turn (orchestrator at depth 0, specialist at depth 1) and again
+// on every follow-up turn. A failed/null resolution is NEVER cached —
+// resolveAgentUncached() throws in that case so memoTtl's own
+// never-cache-a-rejection contract keeps every caller retrying on the very
+// next turn instead of being stuck behind a transient failure for 30s.
+const RESOLVE_AGENT_TTL_MS = 30_000
+
+async function resolveAgentUncached(
   agentId: string,
   orgId: string,
   channel: AgentChannel
-): Promise<ResolvedAgent | null> {
+): Promise<ResolvedAgent> {
   const supabase = createServiceRoleClient()
 
   // Fetch agent + active prompt version in one query (D-34-06: join via active_prompt_version_id)
@@ -41,7 +59,7 @@ export async function resolveAgent(
     .eq('organization_id', orgId)
     .single()
 
-  if (error || !agent) return null
+  if (error || !agent) throw new Error('agent_resolve_not_found')
 
   // Phase 41 (AGENT-12): runtime MUST use active_prompt_version_id; never reads agents.system_prompt directly.
   // If active_prompt_version_id is null, resolveAgent returns null | caller falls back to fallback_message.
@@ -52,7 +70,7 @@ export async function resolveAgent(
   if (!promptVersionRow?.system_prompt) {
     createLogger({ agentId, orgId })
       .error('agent_prompt_version_missing', { active_prompt_version_id: agent.active_prompt_version_id, resolution: 'returning_null_to_caller' })
-    return null
+    throw new Error('agent_prompt_version_missing')
   }
   // A stored prompt may be a template: scripts/templatize-agent-prompts.ts
   // (139-06) turns a live tenant's prompts into ones carrying
@@ -131,5 +149,31 @@ export async function resolveAgent(
     allowedChannels: (agent.allowed_channels ?? []) as AgentChannel[],
     isActive: agent.is_active ?? false,
     kbScope: (agent.kb_scope as string[] | null) ?? null,
+  }
+}
+
+/**
+ * Public entry point. Memoises a successful resolution for
+ * RESOLVE_AGENT_TTL_MS, keyed by the exact (orgId, agentId, channel) triple
+ * — a different channel can carry different channel_overrides, so it is
+ * never folded into the same cache entry. Every failure path in
+ * resolveAgentUncached() throws rather than returning null specifically so
+ * memoTtl's "a rejected fn caches nothing" contract applies here without
+ * any extra bookkeeping; this function is the only place that turns that
+ * rejection back into the documented `null` return contract callers rely on.
+ */
+export async function resolveAgent(
+  agentId: string,
+  orgId: string,
+  channel: AgentChannel
+): Promise<ResolvedAgent | null> {
+  try {
+    return await memoTtl(
+      `resolve-agent:${orgId}:${agentId}:${channel}`,
+      RESOLVE_AGENT_TTL_MS,
+      () => resolveAgentUncached(agentId, orgId, channel)
+    )
+  } catch {
+    return null
   }
 }

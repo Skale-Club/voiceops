@@ -21,6 +21,18 @@ export interface InvocationStartParams {
   conversationId?: string
   sessionId?: string
   parentInvocationId?: string
+  /**
+   * Perf (2026-09-05 re-analysis, FINDINGS-OUTSIDE-SCOPE.md item 9): when
+   * provided, this exact UUID is written as the row's `id` instead of
+   * letting the column's `gen_random_uuid()` default pick one. This lets
+   * run-agent.ts generate the id client-side (crypto.randomUUID()) BEFORE
+   * calling this function, so the id is already known to callers that need
+   * it as a constructor param — allowing this INSERT to run concurrently
+   * with them in the same Promise.all instead of gating them. Omit to keep
+   * the previous DB-generated-id behavior (still exercised by every
+   * existing caller/test that doesn't pass it).
+   */
+  id?: string
 }
 
 export interface InvocationEndParams {
@@ -55,6 +67,7 @@ export async function insertInvocationStart(
   const { data, error } = await supabase
     .from('agent_invocations')
     .insert({
+      ...(params.id ? { id: params.id } : {}),
       organization_id: params.organizationId,
       agent_id: params.agentId,
       trace_id: params.traceId,
