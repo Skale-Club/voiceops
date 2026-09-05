@@ -41,8 +41,10 @@ import {
 /** Where the assistant-level messages (status updates, end-of-call report) go. */
 export const CALLS_SERVER_URL = 'https://xphere.app/api/vapi/calls'
 
-export const FIRST_MESSAGE_TEMPLATE =
-  'Hi there! Thanks for calling {{business_name}}. Which service would you like to book today?'
+// Names the business and stops: the first thing the model says is the
+// caller's name (known from the number) or a request for it - the
+// operator's rule for a call that feels attended to, not processed.
+export const FIRST_MESSAGE_TEMPLATE = 'Hi there! Thanks for calling {{business_name}}.'
 
 /**
  * Voice and turn-taking, provisioned rather than left to Vapi's defaults.
@@ -79,12 +81,15 @@ export const DEFAULT_STOP_SPEAKING_PLAN = {
   voiceSeconds: 0.3,
   backoffSeconds: 1,
 }
-// OpenAI's realtime transcription (the streaming successor of Whisper), on the
-// operator's choice after Deepgram's default chopped a caller into fragments.
+// Deepgram nova-3, explicitly. OpenAI's realtime transcriber was tried on the
+// operator's request (third call, 2026-09-05 21:13): the greeting moved from
+// 1.4-1.9s to 6.2s after pickup and the caller's words came through no better
+// ("Yamakube", "Huh? tubing"). Deepgram streams from the first packet.
 export const DEFAULT_TRANSCRIBER = {
-  provider: 'openai',
-  model: 'gpt-4o-transcribe',
+  provider: 'deepgram',
+  model: 'nova-3',
   language: 'en',
+  smartFormat: true,
 }
 
 export interface PushAssistantConfigResult {
@@ -411,7 +416,11 @@ export async function pushAssistantConfig(
     const voice = currentVoice && currentVoice.provider && currentVoice.provider !== 'vapi' ? currentVoice : DEFAULT_VOICE
     const patch = {
       model,
-      firstMessageMode: 'assistant-speaks-first',
+      // The model speaks first, so the very first thing the caller hears
+      // after the business name is their own name (the lookup is warmed at
+      // pickup, ~0.2-0.9s) or a request for it. `firstMessage` stays set as
+      // the fallback Vapi uses if the model has nothing to say.
+      firstMessageMode: 'assistant-speaks-first-with-model-generated-message',
       firstMessage,
       voice,
       startSpeakingPlan: DEFAULT_START_SPEAKING_PLAN,
