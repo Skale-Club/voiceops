@@ -79,13 +79,14 @@ Recent decisions affecting current work:
 
 ### Pending Todos
 
-Both are human-gated and outward-facing; neither is autonomous work.
-
-- Install the mesh into a real second organization through `Settings → Organization Templates`.
-  Every guarantee is proven against in-memory fakes; none of it substitutes for one real install.
-- ~~Push a rendered config to the Vapi assistant~~ Done 2026-09-04 from a dry-run-first script;
-  the assistant now carries the engine-rendered service location rule. The operator button
-  (139-07) remains the way to re-push after a settings change.
+- ~~Install the mesh into a real second organization~~ Done 2026-09-05 on the real database
+  through the product's own capture → install into `ZZ Template Test (scratch)`; the UI
+  click-through itself is still a human item (FINDINGS item 11, `docs/agents/tenant-replication-runbook.md`).
+- ~~Push a rendered config to the Vapi assistant~~ Done; the push now owns prompt, schemas,
+  messages, per-tool routing, the assistant-level server and the fixed opening line.
+- A real test call after the 2026-09-05 changes: instant greeting, first reply greets a known
+  caller by name (lookup warmed at pickup), price before availability, booking read back.
+- Classify the 24 unguarded write action types (item 2), one integration family at a time.
 
 ### Blockers/Concerns
 
@@ -98,9 +99,13 @@ Both are human-gated and outward-facing; neither is autonomous work.
 - Test booking #471 (2026-09-08 10:30) is real and sits in the demo calendar.
 - The widget mesh cannot answer a cold availability question inside its 30s turn budget
   (measured 31s; `check_availability` 13.9s cold, ~6s of unmeasured runtime overhead before the
-  first delegation). Levers ranked in `FINDINGS-OUTSIDE-SCOPE.md` item 9; nothing changed yet.
-- Vapi still carries a hardcoded, currently inert `firstMessage`; transcriber and speaking plans
-  are Vapi defaults (items 6-7).
+  first delegation). Levers ranked in `FINDINGS-OUTSIDE-SCOPE.md` item 9; in progress
+  2026-09-05 (runAgent stage timings + parallel pre-model reads; availability cache with
+  prefetch at quote time).
+- Voice, in production: our route is ~0.5s cold / ~0 warm; the Xkedule demo provider is the
+  whole remaining cost (lookup 3–4.5s, quote 3.4s, availability 9.4s cold / 0.7s warm).
+- Transcriber and speaking plans are Vapi defaults (item 7). `firstMessage` is now owned by the
+  push (item 6 closed).
 
 ## Session Continuity
 
