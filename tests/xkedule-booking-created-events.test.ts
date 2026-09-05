@@ -64,13 +64,13 @@ import { emitCalendarEvent } from '@/lib/calendar/transition'
 import { createXkeduleBooking } from '@/lib/xkedule/actions/create-booking'
 import { emitXkeduleBookingCreatedEvents } from '@/lib/action-engine/executors/xkedule-booking-events'
 import { executeAction } from '@/lib/action-engine/execute-action'
-import { getXkeduleCredentialsForOrg } from '@/lib/xkedule/credentials'
+import { getXkeduleCredentialsForOrgCached } from '@/lib/xkedule/credentials'
 import type { GhlCredentials } from '@/lib/ghl/client'
 import { CALENDAR_EVENTS } from '@/lib/calendar/events'
 import { TRIGGERS } from '@/lib/workflows/spec'
 
 vi.mock('@/lib/xkedule/credentials', () => ({
-  getXkeduleCredentialsForOrg: vi.fn(),
+  getXkeduleCredentialsForOrgCached: vi.fn(),
 }))
 
 const CREDS: XkeduleCredentials = { tenantBaseUrl: 'https://tenant.xkedule.com', apiKey: 'xph_test', organizationId: 'org-1' }
@@ -383,7 +383,7 @@ describe("executeAction('xkedule_create_booking', ...) wiring", () => {
 
   it('a successful booking returns the normal confirmation string even when the downstream emitter rejects (fire-and-forget, never awaited into the result)', async () => {
     const { client } = buildFakeClient()
-    vi.mocked(getXkeduleCredentialsForOrg).mockResolvedValueOnce(CREDS)
+    vi.mocked(getXkeduleCredentialsForOrgCached).mockResolvedValueOnce(CREDS)
     vi.mocked(xkeduleFetchJson).mockResolvedValueOnce({ id: 42, status: 'confirmed', bookingDate: '2026-08-01', startTime: '10:00' })
     vi.mocked(emitCalendarEvent).mockRejectedValue(new Error('emitter exploded'))
 
@@ -406,7 +406,7 @@ describe("executeAction('xkedule_create_booking', ...) wiring", () => {
 
   it('throws when Xkedule is not configured for the org, without ever calling Xkedule', async () => {
     const { client } = buildFakeClient()
-    vi.mocked(getXkeduleCredentialsForOrg).mockResolvedValueOnce(null)
+    vi.mocked(getXkeduleCredentialsForOrgCached).mockResolvedValueOnce(null)
     await expect(
       executeAction('xkedule_create_booking', bookingInput(), ghlCreds, { organizationId: ORG_ID, supabase: client }),
     ).rejects.toThrow('Xkedule integration not configured for this organization')

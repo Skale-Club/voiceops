@@ -48,7 +48,7 @@ import { executeSendEmailTemplate } from '@/lib/action-engine/executors/send-ema
 import { executeSendTenantEmail } from '@/lib/action-engine/executors/send-tenant-email'
 import { executeSendPlatformEmail } from '@/lib/action-engine/executors/send-platform-email'
 import { executeSendZernioDm } from '@/lib/action-engine/executors/send-zernio-dm'
-import { getXkeduleCredentialsForOrg } from '@/lib/xkedule/credentials'
+import { getXkeduleCredentialsForOrgCached } from '@/lib/xkedule/credentials'
 import { getXkeduleServices } from '@/lib/xkedule/actions/get-services'
 import { checkXkeduleAvailability } from '@/lib/xkedule/actions/check-availability'
 import { createXkeduleBooking } from '@/lib/xkedule/actions/create-booking'
@@ -501,11 +501,24 @@ async function _executeActionInner(
       }
       return executeSendZernioDm(params, ctx)
     }
+    // All 8 xkedule_* cases below build credentials through
+    // getXkeduleCredentialsForOrgCached, never a locally-assembled
+    // `{ apiKey, locationId }` shape: getXkeduleCredentialsForOrg already
+    // stamps `organizationId` on the XkeduleCredentials it returns (see
+    // src/lib/xkedule/credentials.ts), which is what lets quote.ts's
+    // fire-and-forget prefetch (src/lib/xkedule/availability-cache.ts) scope
+    // its cache key by org and actually run instead of skipping silently.
+    // Routing every case through the SAME helper is the cheapest correct fix
+    // here -- no case needs its own organizationId plumbing. The only real
+    // gap was the extra DB round trip on every single tool call in a
+    // conversation; *Cached wraps the raw lookup in a 60s per-org memo
+    // (never memoising a `null`/not-configured result) to close that without
+    // changing what any case receives.
     case 'xkedule_get_services': {
       if (!ctx?.organizationId || !ctx?.supabase) {
         throw new Error('xkedule_get_services requires ctx.organizationId and ctx.supabase')
       }
-      const xkCreds = await getXkeduleCredentialsForOrg(ctx.organizationId, ctx.supabase)
+      const xkCreds = await getXkeduleCredentialsForOrgCached(ctx.organizationId, ctx.supabase)
       if (!xkCreds) throw new Error('Xkedule integration not configured for this organization')
       return getXkeduleServices(params, xkCreds)
     }
@@ -513,7 +526,7 @@ async function _executeActionInner(
       if (!ctx?.organizationId || !ctx?.supabase) {
         throw new Error('xkedule_check_availability requires ctx.organizationId and ctx.supabase')
       }
-      const xkCreds = await getXkeduleCredentialsForOrg(ctx.organizationId, ctx.supabase)
+      const xkCreds = await getXkeduleCredentialsForOrgCached(ctx.organizationId, ctx.supabase)
       if (!xkCreds) throw new Error('Xkedule integration not configured for this organization')
       return checkXkeduleAvailability(params, xkCreds)
     }
@@ -521,7 +534,7 @@ async function _executeActionInner(
       if (!ctx?.organizationId || !ctx?.supabase) {
         throw new Error('xkedule_create_booking requires ctx.organizationId and ctx.supabase')
       }
-      const xkCreds = await getXkeduleCredentialsForOrg(ctx.organizationId, ctx.supabase)
+      const xkCreds = await getXkeduleCredentialsForOrgCached(ctx.organizationId, ctx.supabase)
       if (!xkCreds) throw new Error('Xkedule integration not configured for this organization')
       const orgId = ctx.organizationId
       const supabase = ctx.supabase
@@ -551,7 +564,7 @@ async function _executeActionInner(
       if (!ctx?.organizationId || !ctx?.supabase) {
         throw new Error('xkedule_cancel_booking requires ctx.organizationId and ctx.supabase')
       }
-      const xkCreds = await getXkeduleCredentialsForOrg(ctx.organizationId, ctx.supabase)
+      const xkCreds = await getXkeduleCredentialsForOrgCached(ctx.organizationId, ctx.supabase)
       if (!xkCreds) throw new Error('Xkedule integration not configured for this organization')
       return cancelXkeduleBooking(params, xkCreds)
     }
@@ -559,7 +572,7 @@ async function _executeActionInner(
       if (!ctx?.organizationId || !ctx?.supabase) {
         throw new Error('xkedule_reschedule_booking requires ctx.organizationId and ctx.supabase')
       }
-      const xkCreds = await getXkeduleCredentialsForOrg(ctx.organizationId, ctx.supabase)
+      const xkCreds = await getXkeduleCredentialsForOrgCached(ctx.organizationId, ctx.supabase)
       if (!xkCreds) throw new Error('Xkedule integration not configured for this organization')
       return rescheduleXkeduleBooking(params, xkCreds)
     }
@@ -567,7 +580,7 @@ async function _executeActionInner(
       if (!ctx?.organizationId || !ctx?.supabase) {
         throw new Error('xkedule_quote requires ctx.organizationId and ctx.supabase')
       }
-      const xkCreds = await getXkeduleCredentialsForOrg(ctx.organizationId, ctx.supabase)
+      const xkCreds = await getXkeduleCredentialsForOrgCached(ctx.organizationId, ctx.supabase)
       if (!xkCreds) throw new Error('Xkedule integration not configured for this organization')
       return getXkeduleQuote(params, xkCreds)
     }
@@ -575,7 +588,7 @@ async function _executeActionInner(
       if (!ctx?.organizationId || !ctx?.supabase) {
         throw new Error('xkedule_lookup_customer requires ctx.organizationId and ctx.supabase')
       }
-      const xkCreds = await getXkeduleCredentialsForOrg(ctx.organizationId, ctx.supabase)
+      const xkCreds = await getXkeduleCredentialsForOrgCached(ctx.organizationId, ctx.supabase)
       if (!xkCreds) throw new Error('Xkedule integration not configured for this organization')
       return lookupXkeduleCustomer(params, xkCreds)
     }
@@ -583,7 +596,7 @@ async function _executeActionInner(
       if (!ctx?.organizationId || !ctx?.supabase) {
         throw new Error('xkedule_business_info requires ctx.organizationId and ctx.supabase')
       }
-      const xkCreds = await getXkeduleCredentialsForOrg(ctx.organizationId, ctx.supabase)
+      const xkCreds = await getXkeduleCredentialsForOrgCached(ctx.organizationId, ctx.supabase)
       if (!xkCreds) throw new Error('Xkedule integration not configured for this organization')
       return getXkeduleBusinessInfo(params, xkCreds)
     }

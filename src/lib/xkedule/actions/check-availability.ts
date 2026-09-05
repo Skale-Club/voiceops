@@ -84,6 +84,13 @@ export async function checkXkeduleAvailability(
   // path so it hits the cache a quote just pre-warmed; the range path is
   // uncached by design and was costing the widget's day turn the provider's
   // full cold cost twice (measured 2026-09-05: 12.8s + 13.0s in one turn).
+  //
+  // `p.startDate`/`p.endDate` empty strings ("", the shape the model sends
+  // when `date` is what it actually means to answer) are falsy in JS, so
+  // both `!p.date` guards above and the `p.startDate` checks here already
+  // treat "" exactly like undefined -- no separate empty-string branch
+  // needed, but see tests/xkedule-availability-cache.test.ts for coverage
+  // pinning this so it can't regress silently.
   if (!p.date && p.startDate && (!p.endDate || p.endDate === p.startDate)) {
     p = { ...p, date: p.startDate }
   }

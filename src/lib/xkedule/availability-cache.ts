@@ -23,6 +23,7 @@
 
 import { xkeduleFetchJson, type XkeduleCredentials } from './client'
 import { memoTtl } from '@/lib/cache/ttl-memo'
+import { log } from '@/lib/logger'
 
 // 60s: mirrors the provider's own warm window (measured: ~150ms when hit
 // within ~60s of a prior call, 8-14s cold). Caching longer would risk
@@ -64,6 +65,18 @@ export interface AvailabilityCacheKeyParams {
  * staffId / includeStaff when given). Sorted + de-duped service ids so
  * `serviceIds=5,7` and `serviceIds=7,5` are the same lookup — the provider
  * treats the set of services, not their order, as the input.
+ *
+ * staffId 0 is treated the SAME as an absent/undefined staffId (no `:staff=`
+ * suffix at all), matching check-availability.ts's own `if (staffId) ...`
+ * falsy-check that decides whether staffId is even sent to the provider —
+ * and matching what the model actually sends: `staffId: 0` is its "no staff
+ * pinned" shape, not staff id zero (ids are 1-based). Without this, a
+ * check_availability call with staffId 0 built a key one segment longer than
+ * prefetchXkeduleAvailability's key for the exact same date, so a date the
+ * quote-triggered prefetch had already warmed still missed — this is the bug
+ * behind the 2026-09-05 production cold-hit (measured 7.8-8.0s instead of
+ * ~0.5s). includeStaff needs no equivalent fix: `false` and `undefined` are
+ * both already falsy, so `params.includeStaff ? ... : ''` treats them alike.
  */
 export function buildAvailabilityCacheKey(params: AvailabilityCacheKeyParams): string {
   const ids = [...new Set(params.serviceIds.map((id) => Number(id)))]
@@ -71,7 +84,8 @@ export function buildAvailabilityCacheKey(params: AvailabilityCacheKeyParams): s
     .sort((a, b) => a - b)
     .join(',')
   const org = params.organizationId ?? 'no-org'
-  const staffPart = params.staffId != null ? `:staff=${Number(params.staffId)}` : ''
+  const staffId = params.staffId != null ? Number(params.staffId) : NaN
+  const staffPart = Number.isFinite(staffId) && staffId > 0 ? `:staff=${staffId}` : ''
   const includeStaffPart = params.includeStaff ? ':withStaff' : ''
   return `xk-avail:${org}:${params.tenantBaseUrl}:${ids}:${params.date}${staffPart}${includeStaffPart}`
 }
@@ -149,18 +163,39 @@ export function datesFromToday(tz: string, count: number): string[] {
  * cache a real check_availability call goes through. Call this right after a
  * successful get_quote — never await it.
  *
- * Skips silently (no throw, no log) when there's no org id to scope the
- * cache key by, or no valid service ids to prefetch. Every failure past that
- * point (timezone lookup, each availability fetch) is swallowed internally —
- * a prefetch miss just means the next real check_availability call pays the
- * normal cold-path cost, exactly as if prefetch didn't exist.
+ * Never throws when there's no org id to scope the cache key by, or no valid
+ * service ids to prefetch -- it just doesn't run. That skip used to be
+ * completely silent, which is exactly how the 2026-09-05 production incident
+ * went unnoticed: it now fires ONE structured `warn` through the shared
+ * logger (src/lib/logger.ts) so a missing organizationId can never again
+ * hide behind "the prefetch just didn't happen, nobody would know." Every
+ * failure PAST that point (timezone lookup, each availability fetch) is
+ * still swallowed internally by design — a prefetch miss just means the next
+ * real check_availability call pays the normal cold-path cost, exactly as if
+ * prefetch didn't exist, and that path doesn't need the same loud treatment
+ * because it degrades gracefully rather than silently doing nothing.
  */
 export function prefetchXkeduleAvailability(
   credentials: XkeduleCredentials,
   serviceIds: Array<number | string>,
 ): void {
   const ids = [...new Set(serviceIds.map((id) => Number(id)))].filter((n) => Number.isFinite(n) && n > 0)
-  if (!credentials.organizationId || ids.length === 0) return
+  if (!credentials.organizationId || ids.length === 0) {
+    void log({
+      event_type: 'xkedule.prefetch_availability_skipped',
+      source: 'xkedule-availability-cache',
+      severity: 'warn',
+      status: 'skipped',
+      org_id: credentials.organizationId,
+      actor_type: 'system',
+      payload: {
+        reason: !credentials.organizationId ? 'missing_organization_id' : 'no_valid_service_ids',
+        tenantBaseUrl: credentials.tenantBaseUrl,
+        rawServiceIdsCount: serviceIds.length,
+      },
+    })
+    return
+  }
 
   const organizationId = credentials.organizationId
 

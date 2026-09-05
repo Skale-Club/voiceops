@@ -23,7 +23,28 @@ vi.mock('@/lib/xkedule/client', async (importOriginal) => {
   }
 })
 
+// The loud-skip warning (see availability-cache.ts's prefetchXkeduleAvailability)
+// goes through this shared logger. Mocked here (not left to hit a real
+// Supabase client) purely so tests can assert on it, mirroring the same mock
+// in tests/action-engine.test.ts and tests/xkedule-booking-created-events.test.ts.
+vi.mock('@/lib/logger', () => ({
+  log: vi.fn().mockResolvedValue(undefined),
+}))
+
+// Only needed for the "executeAction level" describe block at the bottom of
+// this file: execute-action.ts imports the full executor catalog, including
+// Medusa modules that import the Redis singleton (see the same mock and
+// comment in tests/action-engine.test.ts). Keeping it hermetic here too.
+vi.mock('@/lib/redis', () => ({
+  default: {
+    isReady: false,
+    on: vi.fn(),
+    connect: vi.fn(),
+  },
+}))
+
 import { xkeduleFetchJson, type XkeduleCredentials } from '@/lib/xkedule/client'
+import { log } from '@/lib/logger'
 import { clearMemo } from '@/lib/cache/ttl-memo'
 import {
   AVAILABILITY_CACHE_TTL_MS,
@@ -87,6 +108,40 @@ describe('buildAvailabilityCacheKey', () => {
       k({ organizationId: 'org-1', includeStaff: true }),
     ])
     expect(keys.size).toBe(5)
+  })
+
+  // The model's own "no staff pinned" / "no staff attribution" shapes are
+  // staffId: 0 and includeStaff: false, not undefined -- see
+  // check-availability.ts's `staffId = p.staffId ?? p.staffMemberId` (0 ??
+  // x stays 0) and the args a real check_availability tool call carries.
+  // prefetchXkeduleAvailability never knows a staffId or includeStaff at
+  // all, so its key must collapse to the SAME string as those "meaningless"
+  // values, or a prefetched date never gets hit by the real lookup that
+  // follows it (2026-09-05 production incident: cold at 7.8s/8.0s).
+  describe('staffId 0 / includeStaff false collapse to the same key as absent (matches the prefetch key)', () => {
+    const base = { organizationId: 'org-1', tenantBaseUrl: 'https://t.example', serviceIds: [333], date: '2026-09-06' }
+
+    it('staffId: 0 produces the same key as no staffId at all', () => {
+      expect(buildAvailabilityCacheKey({ ...base, staffId: 0 })).toBe(buildAvailabilityCacheKey(base))
+    })
+
+    it('staffId: "0" (string) produces the same key as no staffId at all', () => {
+      expect(buildAvailabilityCacheKey({ ...base, staffId: '0' })).toBe(buildAvailabilityCacheKey(base))
+    })
+
+    it('includeStaff: false produces the same key as no includeStaff at all', () => {
+      expect(buildAvailabilityCacheKey({ ...base, includeStaff: false })).toBe(buildAvailabilityCacheKey(base))
+    })
+
+    it('staffId: 0 AND includeStaff: false together still match the bare key', () => {
+      expect(buildAvailabilityCacheKey({ ...base, staffId: 0, includeStaff: false })).toBe(
+        buildAvailabilityCacheKey(base),
+      )
+    })
+
+    it('a real, positive staffId still produces a DIFFERENT key (not collapsed)', () => {
+      expect(buildAvailabilityCacheKey({ ...base, staffId: 3 })).not.toBe(buildAvailabilityCacheKey(base))
+    })
   })
 })
 
@@ -190,6 +245,42 @@ describe('checkXkeduleAvailability + prefetch integration', () => {
 
     expect(vi.mocked(xkeduleFetchJson)).toHaveBeenCalledTimes(1)
   })
+
+  // The EXACT argument shape a voice/widget model sends for check_availability
+  // once it already knows a date: serviceIds as a comma string (single value
+  // here), staffId explicitly 0 ("no staff pinned"), includeStaff explicitly
+  // false, and startDate/endDate present but empty (leftover from the tool's
+  // shared schema, not meant to select the range shape). Every one of those
+  // must still land on the SAME cache key prefetchXkeduleAvailability warmed,
+  // or this is the exact cold-hit regression measured in production on
+  // 2026-09-05 (7.8s / 8.0s instead of ~0.5s).
+  it('is a cache hit for the exact model argument shape (serviceIds string, staffId 0, includeStaff false, empty startDate/endDate)', async () => {
+    vi.mocked(xkeduleFetchJson).mockResolvedValueOnce({ timezone: 'UTC' })
+    vi.mocked(xkeduleFetchJson).mockResolvedValue(SLOTS)
+
+    const dates = datesFromToday('UTC', PREFETCH_WINDOW_DAYS)
+    prefetchXkeduleAvailability(CREDS, [333])
+    await flush()
+
+    const callsFromPrefetch = vi.mocked(xkeduleFetchJson).mock.calls.length
+    expect(callsFromPrefetch).toBe(1 + PREFETCH_WINDOW_DAYS)
+
+    const result = await checkXkeduleAvailability(
+      {
+        serviceIds: '333',
+        staffId: 0,
+        includeStaff: false,
+        date: dates[1],
+        startDate: '',
+        endDate: '',
+      },
+      CREDS,
+    )
+
+    // No new network call: the exact model shape hit the prefetch-warmed entry.
+    expect(vi.mocked(xkeduleFetchJson)).toHaveBeenCalledTimes(callsFromPrefetch)
+    expect(result).toBe('Available slots on ' + dates[1] + ': 09:00')
+  })
 })
 
 describe('getXkeduleQuote prefetch', () => {
@@ -283,5 +374,112 @@ describe('getXkeduleQuote prefetch', () => {
 describe('AVAILABILITY_CACHE_TTL_MS', () => {
   it('is 60s', () => {
     expect(AVAILABILITY_CACHE_TTL_MS).toBe(60_000)
+  })
+})
+
+// The prefetch's "no org id / no service ids" skip used to be completely
+// silent -- exactly how the 2026-09-05 production incident went unnoticed
+// (a quote's prefetch just never ran, and nothing said so). It must now be
+// LOUD: one structured warn through the shared logger every time it skips,
+// and NO warning at all on the normal path where it actually runs.
+describe('prefetchXkeduleAvailability loud skip', () => {
+  it('logs one structured warning when organizationId is missing, and never calls the provider', async () => {
+    const credsNoOrg: XkeduleCredentials = { tenantBaseUrl: 'https://tenant.xkedule.com', apiKey: 'xph_test' }
+
+    prefetchXkeduleAvailability(credsNoOrg, [5])
+    await flush()
+
+    expect(vi.mocked(xkeduleFetchJson)).not.toHaveBeenCalled()
+    expect(vi.mocked(log)).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(log)).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event_type: 'xkedule.prefetch_availability_skipped',
+        source: 'xkedule-availability-cache',
+        severity: 'warn',
+        status: 'skipped',
+        payload: expect.objectContaining({
+          reason: 'missing_organization_id',
+          tenantBaseUrl: 'https://tenant.xkedule.com',
+        }),
+      }),
+    )
+  })
+
+  it('logs one structured warning when there are no valid service ids, and never calls the provider', async () => {
+    prefetchXkeduleAvailability(CREDS, [0, -1, Number.NaN])
+    await flush()
+
+    expect(vi.mocked(xkeduleFetchJson)).not.toHaveBeenCalled()
+    expect(vi.mocked(log)).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(log)).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event_type: 'xkedule.prefetch_availability_skipped',
+        org_id: CREDS.organizationId,
+        payload: expect.objectContaining({ reason: 'no_valid_service_ids' }),
+      }),
+    )
+  })
+
+  it('does not log a skip warning when the prefetch actually runs', async () => {
+    vi.mocked(xkeduleFetchJson).mockResolvedValueOnce({ timezone: 'UTC' })
+    vi.mocked(xkeduleFetchJson).mockResolvedValue(SLOTS)
+
+    prefetchXkeduleAvailability(CREDS, [5])
+    await flush()
+
+    expect(vi.mocked(log)).not.toHaveBeenCalled()
+  })
+})
+
+// execute-action.ts level: proves the wiring documented in
+// src/lib/action-engine/execute-action.ts's xkedule_* comment actually
+// holds -- running xkedule_quote through executeAction() with a ctx that
+// carries organizationId reaches getXkeduleQuote with credentials that
+// carry organizationId too, so the fire-and-forget prefetch actually fires
+// instead of skipping silently.
+describe('executeAction("xkedule_quote", ...) triggers the availability prefetch', () => {
+  const QUOTE_RESPONSE = {
+    items: [{ serviceId: 5, serviceName: 'Deep Clean', price: '120.00' }],
+    subtotal: '120.00',
+    totalDurationMinutes: 90,
+    requiresConfirmation: false,
+    currency: 'usd',
+  }
+
+  beforeEach(() => {
+    vi.resetModules()
+  })
+
+  it('with ctx.organizationId set, the prefetch runs (no skip warning, provider hit PREFETCH_WINDOW_DAYS+ times)', async () => {
+    vi.doMock('@/lib/xkedule/credentials', () => ({
+      getXkeduleCredentialsForOrgCached: vi.fn().mockResolvedValue({
+        tenantBaseUrl: 'https://tenant.xkedule.com',
+        apiKey: 'xph_test',
+        organizationId: 'org-1',
+      }),
+    }))
+
+    const { executeAction } = await import('@/lib/action-engine/execute-action')
+    const { xkeduleFetchJson: mockedFetch } = await import('@/lib/xkedule/client')
+    const { log: mockedLog } = await import('@/lib/logger')
+
+    vi.mocked(mockedFetch).mockResolvedValueOnce(QUOTE_RESPONSE) // /api/v1/quote
+    vi.mocked(mockedFetch).mockResolvedValueOnce({ timezone: 'UTC' }) // resolveOrgTimezone
+    vi.mocked(mockedFetch).mockResolvedValue(SLOTS) // each prefetched date
+
+    const result = await executeAction(
+      'xkedule_quote',
+      { serviceId: 5 },
+      { apiKey: '', locationId: '' }, // the GHL-shaped credentials param -- ignored for xkedule_* cases
+      { organizationId: 'org-1', supabase: {} as never },
+    )
+    expect(result).toContain('Deep Clean: $120.00')
+
+    await flush()
+
+    expect(vi.mocked(mockedFetch)).toHaveBeenCalledTimes(2 + PREFETCH_WINDOW_DAYS)
+    expect(vi.mocked(mockedLog)).not.toHaveBeenCalledWith(
+      expect.objectContaining({ event_type: 'xkedule.prefetch_availability_skipped' }),
+    )
   })
 })

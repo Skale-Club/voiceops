@@ -136,8 +136,13 @@ vi.mock('@/lib/agent-runtime/run-agent', () => ({ runAgent: runAgentMock }))
 // avoid unrelated crypto.ts key setup — the profile documents this choice.
 // ---------------------------------------------------------------------------
 
+// execute-action.ts's xkedule_* cases call getXkeduleCredentialsForOrgCached
+// (a 60s per-org memo over the same DB read, added so a conversation's
+// second/third xkedule tool call doesn't repeat this round trip) -- mocked
+// here in full replacement of the module, so this file's own DB_ROUND_TRIP_MS
+// simulation is what runs, not the real memo.
 vi.mock('@/lib/xkedule/credentials', () => ({
-  getXkeduleCredentialsForOrg: vi.fn(() =>
+  getXkeduleCredentialsForOrgCached: vi.fn(() =>
     delay(DB_ROUND_TRIP_MS, { tenantBaseUrl: 'https://tenant.example.xkedule.test', apiKey: 'test-key' }),
   ),
 }))
