@@ -227,6 +227,43 @@ function buildLanguageModel(providerChoice: LlmProviderChoice, modelId: string) 
 }
 
 // ---------------------------------------------------------------------------
+// Per-turn latency instrumentation (2026-09-05 re-analysis,
+// FINDINGS-OUTSIDE-SCOPE.md item 9): the web widget measured 6-7s of runtime
+// overhead between invocation start and the first specialist starting, on
+// top of the raw ~2.0s model decision. `timed()` and `logTurnTimings()` give
+// both runAgentBlocking and runAgentStreaming a cheap, dependency-free way to
+// record where that time actually goes — one `agent_turn_timings` structured
+// log per turn, emitted from the existing createLogger() already used
+// throughout this module.
+// ---------------------------------------------------------------------------
+
+/** Awaits `fn()`, returning its value alongside how long it took in ms. */
+async function timed<T>(fn: () => PromiseLike<T>): Promise<{ value: T; ms: number }> {
+  const start = Date.now()
+  const value = await fn()
+  return { value, ms: Date.now() - start }
+}
+
+/**
+ * Emits exactly one `agent_turn_timings` log line per turn. `timings` only
+ * ever holds the stages actually reached this turn (an early denial before
+ * the model call simply has fewer keys) — never coerced to 0, so a missing
+ * stage in the log means "never reached", not "instant".
+ */
+function logTurnTimings(params: {
+  traceId: string
+  orgId: string
+  agentId: string
+  channel: string
+  depth: number
+  path: 'blocking' | 'streaming'
+  timings: Record<string, number | undefined>
+}): void {
+  const { traceId, orgId, agentId, channel, depth, path, timings } = params
+  createLogger({ traceId, orgId }).info('agent_turn_timings', { agentId, channel, depth, path, ...timings })
+}
+
+// ---------------------------------------------------------------------------
 // Tool description lookup (action_type → default description)
 // ---------------------------------------------------------------------------
 
@@ -697,6 +734,12 @@ async function runAgentBlocking(opts: InternalAgentRunOptions): Promise<AgentRun
   const incomingEdge: PartnerEdgeDecision | null = _incomingEdge ?? null
   const partnerBudget: PartnerBudget = _partnerBudget ?? createPartnerBudget()
 
+  // Per-turn latency instrumentation (see logTurnTimings() above). Populated
+  // incrementally as stages are reached; emitted once, in the main try's
+  // `finally` below, alongside `total_ms` measured from here.
+  const turnTimingStart = Date.now()
+  const timings: Record<string, number | undefined> = {}
+
   // Resolve agentId from agent_channel_defaults when not explicitly provided (D-35-06)
   let resolvedAgentId = opts.agentId
   if (!resolvedAgentId) {
@@ -730,7 +773,10 @@ async function runAgentBlocking(opts: InternalAgentRunOptions): Promise<AgentRun
   if (killSwitchResult) return killSwitchResult
 
   // Step 3: Resolve agent row + apply channel_overrides
-  const resolvedAgent = await resolveAgent(resolvedAgentId, orgId, channel)
+  const { value: resolvedAgent, ms: resolveAgentMs } = await timed(() =>
+    resolveAgent(resolvedAgentId, orgId, channel)
+  )
+  timings.resolve_agent_ms = resolveAgentMs
   if (!resolvedAgent) {
     createLogger({ traceId, orgId, channel }).error('agent_resolve_failed', { agentId: resolvedAgentId })
     return {
@@ -805,7 +851,8 @@ async function runAgentBlocking(opts: InternalAgentRunOptions): Promise<AgentRun
   const currentChain = [...delegationChain, resolvedAgentId]
 
   // Step 7: Daily cost cap check (D-34-05 / RUNTIME-07)
-  const costCapDenial = await checkDailyCostCap(orgId, resolvedAgentId)
+  const { value: costCapDenial, ms: costCapMs } = await timed(() => checkDailyCostCap(orgId, resolvedAgentId))
+  timings.cost_cap_ms = costCapMs
   if (costCapDenial) {
     return {
       text: costCapDenial,
@@ -825,6 +872,7 @@ async function runAgentBlocking(opts: InternalAgentRunOptions): Promise<AgentRun
   // output — never from a handoff payload or channel/ingress metadata.
   let systemPrompt = resolvedAgent.systemPrompt
   const FALLBACK_KB_RESPONSE = "I don't have information about that in my knowledge base."
+  const knowledgeStart = Date.now()
   try {
     const kbClient = createServiceRoleClient()
     const kbContext = await queryKnowledge(userMessage, orgId, kbClient, { rawMode: true, kbScope: resolvedAgent.kbScope })
@@ -837,10 +885,13 @@ async function runAgentBlocking(opts: InternalAgentRunOptions): Promise<AgentRun
     }
   } catch {
     // KB failure is non-fatal | continue without context (matches stream.ts behavior)
+  } finally {
+    timings.knowledge_ms = Date.now() - knowledgeStart
   }
 
   // Step 8: INSERT invocation row with status='running' (D-34-03)
   const startedAt = Date.now()
+  const invocationInsertStart = Date.now()
   const invocationId = await insertInvocationStart({
     organizationId: orgId,
     agentId: resolvedAgentId,
@@ -854,6 +905,7 @@ async function runAgentBlocking(opts: InternalAgentRunOptions): Promise<AgentRun
     sessionId,
     parentInvocationId,
   })
+  timings.invocation_insert_ms = Date.now() - invocationInsertStart
 
   // Step 9: Token cap check | estimate history tokens (RUNTIME-06)
   const cumulativeHistoryTokens = Math.ceil(
@@ -912,26 +964,6 @@ async function runAgentBlocking(opts: InternalAgentRunOptions): Promise<AgentRun
     } else {
       const serviceClient = createServiceRoleClient()
 
-      // Resolve LLM credential + provider: org OpenRouter → platform
-      // org OpenRouter key → platform OpenRouter key (throws no_llm_key
-      // if none configured). Per-call provider bound to this org's key avoids
-      // mutating any process.env credential, which would race across
-      // concurrent requests from different orgs.
-      const llmProviderChoice = await resolveLlmProvider(orgId, serviceClient)
-
-      // Pre-fetch the agent's attached tools to build the ToolSet
-      const { data: agentToolRows } = await serviceClient
-        .from('agent_tools')
-        .select(`
-          _legacy_tool_configs!inner (
-            tool_name,
-            action_type,
-            config
-          )
-        `)
-        .eq('agent_id', resolvedAgentId)
-        .eq('_legacy_tool_configs.is_active', true)
-
       // Build ai@^6 ToolSet dynamically using dynamicTool()
       // dynamicTool accepts execute: ToolExecuteFunction<unknown, unknown> | no overload conflicts
       const toolSet: Record<string, ReturnType<typeof dynamicTool>> = {}
@@ -940,6 +972,87 @@ async function runAgentBlocking(opts: InternalAgentRunOptions): Promise<AgentRun
       let toolCallIndex = 0
       // Phase 134 CRT-02: per-turn commerce-write counter (checkCommerceWritesPerTurn)
       let commerceWrites = 0
+
+      // Perf (2026-09-05 re-analysis, FINDINGS-OUTSIDE-SCOPE.md item 9): these
+      // four reads/builds don't consume each other's results — none of
+      // resolveLlmProvider, the legacy agent_tools row fetch, buildWorkflowTools,
+      // or buildPartnerTools reads a value the others produce (verified by
+      // reading each: they only close over resolvedAgentId/orgId/channel/
+      // invocationId/serviceClient, all already resolved above). Running them
+      // via Promise.all instead of four sequential awaits collapses their
+      // wall-clock cost to the slowest one instead of the sum. checkDailyCostCap
+      // is deliberately NOT in this group: it gates whether invocationId (which
+      // buildWorkflowTools/buildPartnerTools require as a constructor param) is
+      // ever created, so it stays a sequential pre-condition above, not a peer.
+      const [
+        { value: llmProviderChoice, ms: llmProviderMs },
+        { value: agentToolRowsResult, ms: agentToolRowsMs },
+        { value: workflowToolsResult, ms: workflowBuildMs },
+        { value: partnerTools, ms: partnerBuildMs },
+      ] = await Promise.all([
+        // Resolve LLM credential + provider: org OpenRouter → platform
+        // org OpenRouter key → platform OpenRouter key (throws no_llm_key
+        // if none configured). Per-call provider bound to this org's key avoids
+        // mutating any process.env credential, which would race across
+        // concurrent requests from different orgs.
+        timed(() => resolveLlmProvider(orgId, serviceClient)),
+        // Pre-fetch the agent's attached tools to build the ToolSet
+        timed(() =>
+          serviceClient
+            .from('agent_tools')
+            .select(`
+              _legacy_tool_configs!inner (
+                tool_name,
+                action_type,
+                config
+              )
+            `)
+            .eq('agent_id', resolvedAgentId)
+            .eq('_legacy_tool_configs.is_active', true)
+        ),
+        // SEED-033: workflow tools (kind='tool' or kind='flow') attached via
+        // agent_tools.workflow_id. Injected alongside legacy tool_configs.
+        timed(() =>
+          buildWorkflowTools({
+            agentId: resolvedAgentId,
+            orgId,
+            channel,
+            currentChain,
+            invocationId,
+            traceId,
+            conversationId,
+            serviceClient,
+            toolCallsLog,
+            getNextToolCallIndex: () => toolCallIndex++,
+            incomingEdge,
+          })
+        ),
+        // DELEG-02: Inject synthetic partner tools for each configured partner agent
+        timed(() =>
+          buildPartnerTools({
+            agentId: resolvedAgentId,
+            orgId,
+            channel,
+            _depth,
+            visitedAgentIds,
+            delegationChain: currentChain,
+            parentInvocationId: invocationId,
+            traceId,
+            conversationId,
+            sessionId,
+            serviceClient,
+            // No emit in blocking path | SSE events only in streaming path
+            partnerBudget,
+            partnerCallsLog,
+          })
+        ),
+      ])
+      timings.llm_provider_ms = llmProviderMs
+      // Both ran concurrently above — the wall-clock cost this stage actually
+      // added to the turn is the slower of the two, not their sum.
+      timings.tool_build_ms = Math.max(workflowBuildMs, partnerBuildMs)
+      timings.agent_tools_rows_ms = agentToolRowsMs
+      const { data: agentToolRows } = agentToolRowsResult
 
       for (const row of agentToolRows ?? []) {
         const tc = (row as Record<string, unknown>)._legacy_tool_configs as {
@@ -1155,21 +1268,8 @@ async function runAgentBlocking(opts: InternalAgentRunOptions): Promise<AgentRun
         })
       }
 
-      // SEED-033: workflow tools (kind='tool' or kind='flow') attached via
-      // agent_tools.workflow_id. Injected alongside legacy tool_configs.
-      const workflowToolsResult = await buildWorkflowTools({
-        agentId: resolvedAgentId,
-        orgId,
-        channel,
-        currentChain,
-        invocationId,
-        traceId,
-        conversationId,
-        serviceClient,
-        toolCallsLog,
-        getNextToolCallIndex: () => toolCallIndex++,
-        incomingEdge,
-      })
+      // workflowToolsResult and partnerTools were already built above,
+      // concurrently with resolveLlmProvider and the legacy agent_tools fetch.
       Object.assign(toolSet, workflowToolsResult.toolSet)
 
       // Append "## Available Workflows" block to the system prompt only when
@@ -1178,23 +1278,6 @@ async function runAgentBlocking(opts: InternalAgentRunOptions): Promise<AgentRun
         systemPrompt = `${systemPrompt}${buildWorkflowSystemPromptSuffix(workflowToolsResult.summaries, workflowToolsResult.modalityBlock)}`
       }
 
-      // DELEG-02: Inject synthetic partner tools for each configured partner agent
-      const partnerTools = await buildPartnerTools({
-        agentId: resolvedAgentId,
-        orgId,
-        channel,
-        _depth,
-        visitedAgentIds,
-        delegationChain: currentChain,
-        parentInvocationId: invocationId,
-        traceId,
-        conversationId,
-        sessionId,
-        serviceClient,
-        // No emit in blocking path | SSE events only in streaming path
-        partnerBudget,
-        partnerCallsLog,
-      })
       Object.assign(toolSet, partnerTools)
 
       // Built-in primitive tools (calculator, think, datetime, handoff) |
@@ -1232,6 +1315,7 @@ async function runAgentBlocking(opts: InternalAgentRunOptions): Promise<AgentRun
       const hasTools = Object.keys(toolSet).length > 0
       timeoutId = setTimeout(() => controller.abort(), turnTimeoutFor(thinkingBudget, hasTools))
 
+      const modelCallStart = Date.now()
       const llmResult = await generateText({
         model: buildLanguageModel(llmProviderChoice, resolvedAgent.model),
         system: systemPrompt,
@@ -1247,6 +1331,7 @@ async function runAgentBlocking(opts: InternalAgentRunOptions): Promise<AgentRun
           ? { providerOptions: thinkingExtras.providerOptions }
           : {}),
       })
+      timings.model_first_call_ms = Date.now() - modelCallStart
 
       finalText = llmResult.text
       tokensIn = llmResult.usage.inputTokens ?? 0
@@ -1310,6 +1395,17 @@ async function runAgentBlocking(opts: InternalAgentRunOptions): Promise<AgentRun
       errorDetail,
       startedAt,
     })
+
+    timings.total_ms = Date.now() - turnTimingStart
+    logTurnTimings({
+      traceId,
+      orgId,
+      agentId: resolvedAgentId,
+      channel,
+      depth: _depth,
+      path: 'blocking',
+      timings,
+    })
   }
 
   // Step 14: Return AgentRunResult (D-34-02)
@@ -1369,6 +1465,11 @@ function runAgentStreaming(
       const traceId = opts.traceId ?? crypto.randomUUID()
       const startedAt = Date.now()
 
+      // Per-turn latency instrumentation (see logTurnTimings() above, mirrors
+      // the blocking path). Populated incrementally as stages are reached;
+      // emitted once, in the inner try's `finally` below.
+      const timings: Record<string, number | undefined> = {}
+
       let accumulatedText = ''
       let finalStatus: 'success' | 'error' | 'aborted' | 'skipped' = 'success'
       let tokensIn = 0
@@ -1417,7 +1518,10 @@ function runAgentStreaming(
         }
 
         // Resolve agent + channel overrides
-        const resolvedAgent = await resolveAgent(resolvedAgentId, orgId, channel)
+        const { value: resolvedAgent, ms: resolveAgentMs } = await timed(() =>
+          resolveAgent(resolvedAgentId, orgId, channel)
+        )
+        timings.resolve_agent_ms = resolveAgentMs
         if (!resolvedAgent || !resolvedAgent.isActive) {
           const fallback = resolvedAgent?.fallbackMessage ?? "I'm unable to process your request right now."
           emit({ event: 'token', text: fallback })
@@ -1437,7 +1541,8 @@ function runAgentStreaming(
         }
 
         // Daily cost cap check
-        const costCapDenial = await checkDailyCostCap(orgId, resolvedAgentId)
+        const { value: costCapDenial, ms: costCapMs } = await timed(() => checkDailyCostCap(orgId, resolvedAgentId))
+        timings.cost_cap_ms = costCapMs
         if (costCapDenial) {
           emit({ event: 'token', text: costCapDenial })
           emit({ event: 'done' })
@@ -1463,6 +1568,7 @@ function runAgentStreaming(
         // output — never from a handoff payload or channel/ingress metadata.
         let systemPrompt = resolvedAgent.systemPrompt
         const FALLBACK_KB_RESPONSE = "I don't have information about that in my knowledge base."
+        const knowledgeStart = Date.now()
         try {
           const kbClient = createServiceRoleClient()
           const kbContext = await queryKnowledge(userMessage, orgId, kbClient, { rawMode: true, kbScope: resolvedAgent.kbScope })
@@ -1471,6 +1577,8 @@ function runAgentStreaming(
           }
         } catch {
           // KB failure non-fatal
+        } finally {
+          timings.knowledge_ms = Date.now() - knowledgeStart
         }
 
         // Update conversation with agent_id (D-35-05 | new conversations need agent association)
@@ -1496,6 +1604,7 @@ function runAgentStreaming(
         }
 
         // INSERT invocation row
+        const invocationInsertStart = Date.now()
         invocationId = await insertInvocationStart({
           organizationId: orgId,
           agentId: resolvedAgentId,
@@ -1509,6 +1618,7 @@ function runAgentStreaming(
           sessionId,
           parentInvocationId,
         })
+        timings.invocation_insert_ms = Date.now() - invocationInsertStart
 
         // AbortController (RUNTIME-08) | timeout SCHEDULED later (before streamText)
         // once the toolSet is assembled and the tool tier is known.
@@ -1517,28 +1627,7 @@ function runAgentStreaming(
         let timeoutId: ReturnType<typeof setTimeout> | undefined
 
         try {
-          // Resolve LLM credential + provider: org OpenRouter → platform
-          // org OpenRouter key → platform OpenRouter key (throws
-          // no_llm_key if none configured). Per-call provider bound to this
-          // org's key avoids mutating any process.env credential, which
-          // would race across concurrent requests from different orgs.
           const serviceClient = createServiceRoleClient()
-          const llmProviderChoice = await resolveLlmProvider(orgId, serviceClient)
-
-          // Pre-fetch agent tools
-          const { data: agentToolRows } = await serviceClient
-            .from('agent_tools')
-            .select(`_legacy_tool_configs!inner (tool_name, action_type, config)`)
-            .eq('agent_id', resolvedAgentId)
-            .eq('_legacy_tool_configs.is_active', true)
-
-          // DELEG-08: Check delegation_visibility for this org before building partner tools
-          const { data: orgVisRow } = await serviceClient
-            .from('organizations')
-            .select('delegation_visibility')
-            .eq('id', orgId)
-            .single()
-          const delegationVisible = (orgVisRow?.delegation_visibility ?? 'visible') === 'visible'
 
           // Build ToolSet (same logic as blocking path)
           const toolSet: Record<string, ReturnType<typeof dynamicTool>> = {}
@@ -1547,6 +1636,64 @@ function runAgentStreaming(
           let toolCallIndex = 0
           // Phase 134 CRT-02: per-turn commerce-write counter (checkCommerceWritesPerTurn)
           let commerceWrites = 0
+
+          // Perf (2026-09-05 re-analysis, FINDINGS-OUTSIDE-SCOPE.md item 9):
+          // mirrors the blocking path's parallel group. buildPartnerTools is
+          // NOT in this group — unlike blocking, it needs delegationVisible
+          // (derived from the orgVisRow read below) as a constructor param,
+          // so it stays a sequential step right after this group resolves.
+          const [
+            { value: llmProviderChoice, ms: llmProviderMs },
+            { value: agentToolRowsResult, ms: agentToolRowsMs },
+            { value: orgVisRowResult, ms: orgVisibilityMs },
+            { value: workflowToolsStream, ms: workflowBuildMs },
+          ] = await Promise.all([
+            // Resolve LLM credential + provider: org OpenRouter → platform
+            // org OpenRouter key → platform OpenRouter key (throws
+            // no_llm_key if none configured). Per-call provider bound to this
+            // org's key avoids mutating any process.env credential, which
+            // would race across concurrent requests from different orgs.
+            timed(() => resolveLlmProvider(orgId, serviceClient)),
+            // Pre-fetch agent tools
+            timed(() =>
+              serviceClient
+                .from('agent_tools')
+                .select(`_legacy_tool_configs!inner (tool_name, action_type, config)`)
+                .eq('agent_id', resolvedAgentId)
+                .eq('_legacy_tool_configs.is_active', true)
+            ),
+            // DELEG-08: Check delegation_visibility for this org before building partner tools
+            timed(() =>
+              serviceClient
+                .from('organizations')
+                .select('delegation_visibility')
+                .eq('id', orgId)
+                .single()
+            ),
+            // SEED-033: workflow tools (kind='tool' or kind='flow') attached
+            // via agent_tools.workflow_id, same as the blocking path.
+            timed(() =>
+              buildWorkflowTools({
+                agentId: resolvedAgentId!,
+                orgId,
+                channel,
+                currentChain,
+                invocationId,
+                traceId,
+                conversationId,
+                serviceClient,
+                toolCallsLog,
+                getNextToolCallIndex: () => toolCallIndex++,
+                incomingEdge,
+              })
+            ),
+          ])
+          timings.llm_provider_ms = llmProviderMs
+          timings.agent_tools_rows_ms = agentToolRowsMs
+          timings.org_visibility_ms = orgVisibilityMs
+          const { data: agentToolRows } = agentToolRowsResult
+          const { data: orgVisRow } = orgVisRowResult
+          const delegationVisible = (orgVisRow?.delegation_visibility ?? 'visible') === 'visible'
 
           for (const row of agentToolRows ?? []) {
             const tc = (row as Record<string, unknown>)._legacy_tool_configs as { tool_name: string; action_type: string; config: Json } | null
@@ -1663,43 +1810,39 @@ function runAgentStreaming(
             })
           }
 
-          // SEED-033: workflow tools (kind='tool' or kind='flow') attached
-          // via agent_tools.workflow_id, same as the blocking path.
-          const workflowToolsStream = await buildWorkflowTools({
-            agentId: resolvedAgentId!,
-            orgId,
-            channel,
-            currentChain,
-            invocationId,
-            traceId,
-            conversationId,
-            serviceClient,
-            toolCallsLog,
-            getNextToolCallIndex: () => toolCallIndex++,
-            incomingEdge,
-          })
+          // workflowToolsStream was already built above, concurrently with
+          // resolveLlmProvider, the legacy agent_tools fetch, and the
+          // delegation_visibility read.
           Object.assign(toolSet, workflowToolsStream.toolSet)
           if (workflowToolsStream.summaries.length > 0) {
             systemPrompt = `${systemPrompt}${buildWorkflowSystemPromptSuffix(workflowToolsStream.summaries, workflowToolsStream.modalityBlock)}`
           }
 
-          // DELEG-02: Inject synthetic partner tools for each configured partner agent
-          const partnerToolsStream = await buildPartnerTools({
-            agentId: resolvedAgentId!,
-            orgId,
-            channel,
-            _depth,
-            visitedAgentIds,
-            delegationChain: currentChain,
-            parentInvocationId: invocationId,
-            traceId,
-            conversationId,
-            sessionId,
-            serviceClient,
-            emit: delegationVisible ? emit : undefined,
-            partnerBudget,
-            partnerCallsLog,
-          })
+          // DELEG-02: Inject synthetic partner tools for each configured
+          // partner agent. Sequential (not in the group above): it needs
+          // delegationVisible, which depends on the orgVisRow read.
+          const { value: partnerToolsStream, ms: partnerBuildMs } = await timed(() =>
+            buildPartnerTools({
+              agentId: resolvedAgentId!,
+              orgId,
+              channel,
+              _depth,
+              visitedAgentIds,
+              delegationChain: currentChain,
+              parentInvocationId: invocationId,
+              traceId,
+              conversationId,
+              sessionId,
+              serviceClient,
+              emit: delegationVisible ? emit : undefined,
+              partnerBudget,
+              partnerCallsLog,
+            })
+          )
+          // Unlike the blocking path these two don't overlap (partnerTools
+          // needs delegationVisible from the group above), so the wall-clock
+          // cost here is additive, not the max of the two.
+          timings.tool_build_ms = workflowBuildMs + partnerBuildMs
           Object.assign(toolSet, partnerToolsStream)
 
           // Built-in primitive tools (calculator, think, datetime, handoff) |
@@ -1736,6 +1879,7 @@ function runAgentStreaming(
           const hasTools = Object.keys(toolSet).length > 0
           timeoutId = setTimeout(() => abortController.abort(), turnTimeoutFor(thinkingBudget, hasTools))
 
+          const modelCallStart = Date.now()
           const result = streamText({
             model: buildLanguageModel(llmProviderChoice, resolvedAgent.model),
             system: systemPrompt,
@@ -1756,7 +1900,12 @@ function runAgentStreaming(
             },
           })
 
+          let firstStreamPartSeen = false
           for await (const part of result.fullStream) {
+            if (!firstStreamPartSeen) {
+              firstStreamPartSeen = true
+              timings.model_first_call_ms = Date.now() - modelCallStart
+            }
             if (part.type === 'text-delta') {
               emit({ event: 'token', text: part.text })
               accumulatedText += part.text
@@ -1802,6 +1951,16 @@ function runAgentStreaming(
           }
         } finally {
           if (timeoutId) clearTimeout(timeoutId)
+          timings.total_ms = Date.now() - startedAt
+          logTurnTimings({
+            traceId,
+            orgId,
+            agentId: resolvedAgentId ?? '',
+            channel,
+            depth: _depth,
+            path: 'streaming',
+            timings,
+          })
         }
 
         emit({ event: 'done' })
