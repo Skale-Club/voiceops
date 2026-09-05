@@ -8,9 +8,12 @@
 // idempotent logic both routes call.
 
 import { after } from 'next/server'
-import { VapiEndOfCallMessageSchema } from '@/types/vapi'
+import { VapiEndOfCallMessageSchema, VapiStatusUpdateMessageSchema } from '@/types/vapi'
 import { verifyVapiSecret } from '@/lib/vapi/verify-signature'
 import { createServiceRoleClient } from '@/lib/supabase/admin'
+import { memoTtl } from '@/lib/cache/ttl-memo'
+import { resolveOrgForCall } from '@/lib/vapi/end-of-call'
+import { warmCustomerLookup } from '@/lib/vapi/customer-lookup-cache'
 import { persistCallRecord, updateCampaignContactFromReport, getCampaignContactId } from '@/lib/vapi/end-of-call'
 import { buildVapiCallEventPayload, emitVapiCallEndedEvent } from '@/lib/vapi/events'
 import { log } from '@/lib/logger'
@@ -51,6 +54,28 @@ export async function POST(request: Request): Promise<Response> {
     try {
       body = await request.json()
     } catch {
+      return new Response(null, { status: 200 })
+    }
+
+    // Call answered: start the customer lookup now, keyed the way the tool
+    // route reads it, so the robot's first reply is not waiting on the
+    // provider. Fire-and-forget after the response; never affects the 200.
+    const statusUpdate = VapiStatusUpdateMessageSchema.safeParse(body)
+    if (statusUpdate.success) {
+      const su = statusUpdate.data.message
+      const number = su.call?.customer?.number
+      if (su.status === 'in-progress' && number && su.call) {
+        const callIdentity = { assistantId: su.call.assistantId, phoneNumberId: su.call.phoneNumberId }
+        after(async () => {
+          const supabase = createServiceRoleClient()
+          const { organizationId } = await memoTtl(
+            `vapi:org:${callIdentity.assistantId ?? ''}:${callIdentity.phoneNumberId ?? ''}`,
+            30_000,
+            () => resolveOrgForCall(callIdentity, supabase)
+          )
+          if (organizationId) await warmCustomerLookup(organizationId, number, supabase)
+        })
+      }
       return new Response(null, { status: 200 })
     }
 

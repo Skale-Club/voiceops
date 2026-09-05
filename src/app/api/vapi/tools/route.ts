@@ -63,6 +63,7 @@ import { resolveSpecialistForTool } from '@/lib/agent-runtime/resolve-specialist
 import { invokeInternalSpecialist } from '@/lib/agent-runtime/invocation-gateway'
 import type { Database } from '@/types/database'
 import { memoTtl } from '@/lib/cache/ttl-memo'
+import { CUSTOMER_LOOKUP_ACTION, CUSTOMER_LOOKUP_TTL_MS, customerLookupKey } from '@/lib/vapi/customer-lookup-cache'
 
 export const runtime = 'nodejs'
 
@@ -380,13 +381,22 @@ async function executeOneToolCall(params: {
           ? { apiKey: await decrypt(integration.encrypted_api_key), locationId: integration.location_id ?? '' }
           : { apiKey: '', locationId: '' }
         const tExec = Date.now()
-        result = await executeAction(toolConfig.action_type, args, credentials, {
-          organizationId: orgId,
-          supabase,
-          toolConfig: toolConfig.config,
-          integrationProvider: integration?.provider,
-          callerNumber: call.customer?.number,
-        })
+        const run = () =>
+          executeAction(toolConfig.action_type, args, credentials, {
+            organizationId: orgId,
+            supabase,
+            toolConfig: toolConfig.config,
+            integrationProvider: integration?.provider,
+            callerNumber: call.customer?.number,
+          })
+        // The customer lookup is a read the calls route may already have
+        // started when the call was answered (status-update). Same key, so
+        // this either finds the answer waiting or joins the in-flight request.
+        const lookupPhone =
+          toolConfig.action_type === CUSTOMER_LOOKUP_ACTION && typeof args.phone === 'string' ? args.phone : null
+        result = lookupPhone
+          ? await memoTtl(customerLookupKey(orgId, lookupPhone), CUSTOMER_LOOKUP_TTL_MS, run)
+          : await run()
         executeMs = Date.now() - tExec
 
         if (idempotencyNeeded && idempotencyKey) {

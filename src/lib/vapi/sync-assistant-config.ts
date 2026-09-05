@@ -37,6 +37,9 @@ import {
  * the one directive question the conversation design opens with; the prompt
  * takes over from the caller's first turn.
  */
+/** Where the assistant-level messages (status updates, end-of-call report) go. */
+export const CALLS_SERVER_URL = 'https://xphere.app/api/vapi/calls'
+
 export const FIRST_MESSAGE_TEMPLATE =
   'Thank you for calling {{business_name}}. Which service would you like to book today?'
 
@@ -334,10 +337,32 @@ export async function pushAssistantConfig(
     // name - never a hardcoded greeting inside Vapi again.
     const firstMessage = renderPromptTemplate(FIRST_MESSAGE_TEMPLATE, facts)
 
+    // Assistant-level server: where Vapi sends everything that is not a tool
+    // call - the end-of-call report and the status updates that let the
+    // customer lookup start the moment the call is answered. Provisioned from
+    // the same secret the tools carry, so a new tenant's assistant gets it
+    // from the push rather than from a dashboard setting nobody can see.
+    // Only set when the shared secret is known; never invented.
+    const sharedSecret = typeof sharedServer?.secret === 'string' ? sharedServer.secret : undefined
+    const assistantServer = sharedSecret
+      ? {
+          // serverMessages is deliberately NOT set: Vapi's default list already
+          // includes status-update, end-of-call-report and tool-calls, and each
+          // tool keeps its own server block for its calls. Narrowing the list is
+          // how a working phone line gets broken by a config push.
+          server: {
+            url: CALLS_SERVER_URL,
+            timeoutSeconds: 20,
+            headers: { 'x-vapi-secret': sharedSecret },
+          },
+        }
+      : {}
+
     const patch = {
       model,
       firstMessageMode: 'assistant-speaks-first',
       firstMessage,
+      ...assistantServer,
     }
 
     // 7. PATCH -- unless this is a dry run, in which case the caller gets the

@@ -194,3 +194,24 @@ export const VapiEndOfCallMessageSchema = z.object({
 })
 
 export type VapiEndOfCallMessage = z.infer<typeof VapiEndOfCallMessageSchema>
+
+// Vapi `status-update`: sent to the assistant's server when a call changes
+// state. The one that matters here is `in-progress` — it arrives the moment
+// the call is answered and already carries the caller's number, so the voice
+// path can start looking the customer up before anyone has spoken.
+export const VapiStatusUpdateMessageSchema = z.object({
+  message: z.object({
+    type: z.literal('status-update'),
+    status: z.string(),
+    call: z.object({
+      id: z.string(),
+      assistantId: z.string().optional(),
+      phoneNumberId: z.string().optional(),
+      customer: z.object({
+        number: z.string().optional(),
+      }).passthrough().optional(),
+    }).passthrough().optional(),
+  }).passthrough(),
+})
+
+export type VapiStatusUpdateMessage = z.infer<typeof VapiStatusUpdateMessageSchema>

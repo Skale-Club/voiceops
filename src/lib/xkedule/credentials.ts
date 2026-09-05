@@ -26,5 +26,8 @@ export async function getXkeduleCredentialsForOrg(
   if (error || !data || !data.location_id || !data.encrypted_api_key) return null
 
   const apiKey = await decrypt(data.encrypted_api_key as string)
-  return { tenantBaseUrl: data.location_id as string, apiKey }
+  // orgId is already a parameter here, so this costs nothing extra — it's
+  // what lets availability-cache.ts scope its cache keys and prefetch by org
+  // (see src/lib/xkedule/availability-cache.ts).
+  return { tenantBaseUrl: data.location_id as string, apiKey, organizationId: orgId }
 }

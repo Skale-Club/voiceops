@@ -253,6 +253,25 @@ Voice is unaffected by this budget: it runs on legacy routing with Vapi calling
 inside Vapi's 30s per-tool timeout (item 5). The widget is where the mesh's inference hops
 stack up.
 
+**Voice, measured in production (2026-09-05, after the route cache in `496dff9b`).** Each
+tool through `https://xphere.app/api/vapi/tools` as Vapi calls it, two runs; `vapi_tool_timings`
+from the container log for the last pair:
+
+| Tool | Before cache (1st / 2nd) | After cache (1st / 2nd) | Stage split (after) |
+|---|---|---|---|
+| `lookup_customer` | 5.4 / 3.5s | 4.5 / 3.2s | provider ≈ all of it (two sequential Xkedule calls) |
+| `business_info` | 2.2 / 1.8s | 2.0 / 1.4s | |
+| `list_services` | 3.6 / 1.5s | 2.0 / 1.4s | |
+| `get_quote` | 3.8 / 3.4s | 3.4 / 3.6s | provider |
+| `check_availability` | 9.6 / 10.0s | 9.4 / **0.74s** | cold: resolve 687ms + provider 7938ms of 9188; warm: resolve 0 + provider 570 of 574 |
+
+So our route now costs ~0.5s cold and ~0 warm; **the provider is the whole remaining cost**.
+The second `check_availability` at 0.74s is the provider's own warm window, which is exactly
+what the prefetch-at-quote lever exploits. `lookup_customer` at 3–4.5s now sits between the
+caller's first sentence and the robot's first reply (the opening line is fixed and instant),
+so warming it at call start is the next voice lever: Vapi's `status-update` at
+`in-progress` carries the caller's number before anyone has spoken.
+
 ## 10. `captureOrgSnapshot()` through a service-role client captured every tenant — FIXED (2026-09-05)
 
 Every query in `src/lib/org-templates/snapshot.ts` relied on RLS alone for its tenant scope.

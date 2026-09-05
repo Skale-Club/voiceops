@@ -13,6 +13,7 @@
 // `includeStaff` (AGT-06) adds per-slot attribution so "who's free at 3?" is
 // one call instead of one call per staff member.
 import { xkeduleFetchJson, type XkeduleCredentials } from '../client'
+import { fetchXkeduleAvailabilityCached } from '../availability-cache'
 
 interface AvailabilityParams {
   date?: string
@@ -125,11 +126,22 @@ export async function checkXkeduleAvailability(
   const wantsStaff = isTruthy(p.includeStaff) && !staffId
   if (wantsStaff) query.set('includeStaff', 'true')
 
-  const data = await xkeduleFetchJson<SlotsResponse>(
-    `/api/v1/availability?${query.toString()}`,
-    'GET',
-    null,
-    credentials,
+  // Routed through the shared TTL memo (60s, mirroring the provider's own
+  // warm window) so a date already prefetched off a successful get_quote
+  // call — see src/lib/xkedule/availability-cache.ts — is an in-process hit
+  // instead of paying the 8-14s cold path again. The range shape above isn't
+  // cached: a prefetch can't guess an arbitrary startDate/endDate window.
+  const data = await fetchXkeduleAvailabilityCached<SlotsResponse>(
+    {
+      organizationId: credentials.organizationId,
+      tenantBaseUrl: credentials.tenantBaseUrl,
+      serviceIds: ids,
+      date,
+      staffId,
+      includeStaff: wantsStaff,
+    },
+    () =>
+      xkeduleFetchJson<SlotsResponse>(`/api/v1/availability?${query.toString()}`, 'GET', null, credentials),
   )
 
   const available = (data.slots ?? []).filter((s) => s.available)

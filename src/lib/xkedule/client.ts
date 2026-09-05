@@ -23,6 +23,13 @@ export const WRITE_TIMEOUT_MS = 30000
 export interface XkeduleCredentials {
   tenantBaseUrl: string
   apiKey: string
+  /**
+   * Set by getXkeduleCredentialsForOrg (it already has this in scope, at no
+   * extra cost). Optional because a couple of test fixtures build
+   * XkeduleCredentials by hand without it; those callers just don't get
+   * availability prefetch/caching scoped by org (see availability-cache.ts).
+   */
+  organizationId?: string
 }
 
 async function xkeduleFetch(

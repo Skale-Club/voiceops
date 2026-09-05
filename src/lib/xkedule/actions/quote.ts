@@ -5,6 +5,7 @@
 // (quantity 1 each) rather than exposing the full options/frequency/area
 // cart-item schema to the LLM.
 import { xkeduleFetchJson, type XkeduleCredentials } from '../client'
+import { prefetchXkeduleAvailability } from '../availability-cache'
 
 interface QuoteParams {
   serviceId?: number | string
@@ -54,6 +55,17 @@ export async function getXkeduleQuote(
 
   try {
     const quote = await xkeduleFetchJson<QuoteResponse>('/api/v1/quote', 'POST', { items }, credentials)
+
+    // The conversation design guarantees a human confirms this price BEFORE
+    // the customer is asked for a day — a 5-10s window where the likely
+    // dates' availability can already be warming up. Fire-and-forget: never
+    // awaited, never lets a prefetch failure touch this response. See
+    // src/lib/xkedule/availability-cache.ts for the cache/prefetch itself.
+    prefetchXkeduleAvailability(
+      credentials,
+      items.map((i) => i.serviceId),
+    )
+
     const lines = quote.items.map((i) => `${i.serviceName}: $${i.price}`).join('\n')
     const confirmNote = quote.requiresConfirmation ? ' (this booking will need owner confirmation)' : ''
     return `Quote:\n${lines}\nSubtotal: $${quote.subtotal} ${quote.currency.toUpperCase()}${confirmNote}`
