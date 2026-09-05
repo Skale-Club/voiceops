@@ -493,3 +493,33 @@ Widget on it: 7.2s / 15.3s / 22.6s for the demo's three turns, all correct.
 
 One thing it exposed: the prompts' example line named this shop's own services, and gpt-5.1
 recited it without calling the catalogue. Example made generic; names come from the tool.
+
+## 20. The desk rehearsal, and what it changed before the next call — 2026-09-05
+
+`tests/manual/voice-call-simulation.test.ts` drives the live Vapi assistant's own prompt,
+model and function schemas turn by turn through OpenRouter exactly as Vapi does, executing
+every read tool against production and letting `book_appointment` through only until the
+engine's two-phase gate answers; the confirmed call is intercepted. Script-independent gates:
+booking only after "anything else?" was asked and answered, never in the read-back turn, only
+at a slot the tool listed, never before the name is settled.
+
+Found in the first rehearsals (all on gpt-5.1) and fixed:
+
+| Seen | Fix |
+|---|---|
+| Booked on the answer to the NAME question, twice; once chose 9:00 itself | **Engine two-phase gate**: the first `book_appointment` never writes and returns the read-back; only `confirmed: true` books (`081b3c2c`). Holds on both channels and with any model |
+| Offered "one", booked 13:20 | Prompt: exact listed slot |
+| "the 8th" resolved to October | Voice prompt had no date; the push now appends a per-call `Today is …` via Vapi's Liquid date filter in the tenant's timezone |
+| Invented `unknown@example.com` | Schema descriptions (never invent), prompt rule |
+| Empty reply after an unneeded `business_info` call | Prompt: after availability, the next words are the times, no other tool, never an empty reply |
+| Fetched the catalogue before the first words (4s of pickup silence) | Prompt: only the lookup before speaking |
+| Stacked price + staff question; "you're all set" before booking; repeated a sentence; asked a known customer's last name | Prompt: one thing per turn, the last three turns spelled out, confirm the known name |
+| Availability cold despite the quote prefetch | `staffId: 0` was in the cache key and the prefetch's key had none — a guaranteed miss (`324eaebd`). After: 252ms on the prefetched day |
+
+Final rehearsals, known and unknown caller: every gate passes; model steps 0.8–1.7s; the
+only residue is eagerness — the model sometimes checks availability for today/tomorrow before
+the caller names a day (an extra 4–9s once per call). That is prompt-resistant on gpt-5.1
+and harmless to correctness.
+
+**Not exercised by the rehearsal, by construction:** audio, transcription, TTS and
+endpointing. Those only a real call proves.
