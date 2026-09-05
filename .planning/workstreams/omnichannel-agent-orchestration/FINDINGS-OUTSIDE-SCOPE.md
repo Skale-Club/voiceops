@@ -136,3 +136,39 @@ root cause. Reconcile so Vapi and production hold one value, and add the rejecti
 observability: `obs.warn('vapi_secret_rejected')` did not surface in Sentry logs for the
 window in which it must have fired.
 
+## 5. Vapi's tool timeout is shorter than our booking write timeout — NOT RECONCILED
+
+Found 2026-09-05 while re-analysing the voice path. Neither the assistant
+(`99518fa7-…`) nor the phone number (`+1 224 551 6131`) carries a `server` block; tool calls
+route through the Vapi **organization-level** server URL, which the API does not expose, so
+the effective per-tool timeout is Vapi's default of **20 seconds**. Our Xkedule client waits
+up to **30 seconds** on a write (`WRITE_TIMEOUT_MS`, raised after the widget-side abort that
+told a customer their booking failed while it succeeded).
+
+**Why it matters:** a booking that takes 20–30s completes on our side while Vapi has already
+spoken the `request-failed` line — the exact defect fixed on the widget, reproduced on the
+phone. Measured writes today run well under 20s, so this is latent, not active.
+
+**Fix path:** set `server: { url: 'https://xphere.app/api/vapi/tools', timeoutSeconds: 30 }`
+on the assistant through `pushAssistantConfig()`, so the timeout is provisioned rather than
+inherited. Not done autonomously because the org-level URL (and any secret it carries) is
+invisible through the API, and moving routing onto an assistant-level block is an
+outward-facing change to a live line that should be made with the Vapi dashboard open.
+
+## 6. The assistant still carries a hardcoded `firstMessage` — INERT, NOT FIXED
+
+`firstMessage` on the live assistant is `"Cuts and Culture, this is the front desk - how can
+I help?"` — tenant text, and the open question the prompt itself forbids. It is inert
+because `firstMessageMode` is `assistant-speaks-first-with-model-generated-message`, so the
+model generates the opening from the prompt and never reads this string. It becomes live the
+moment someone switches the mode in the Vapi dashboard. `pushAssistantConfig()` does not
+manage either field; it should own `firstMessageMode` and null the message, one line each.
+Left as is to keep the push's blast radius to `model.messages` and `model.tools` until the
+operator has seen the first pushes behave.
+
+## 7. Transcriber and speaking plans are Vapi defaults — OBSERVATION
+
+`transcriber: null`, `startSpeakingPlan: null`, `stopSpeakingPlan: null`. The voice path has
+never been tuned at the Vapi layer; every latency measurement in this workstream is of our
+side only. If the demo feels slow to respond after the caller stops talking, the first lever
+is here, not in Xphere.

@@ -203,6 +203,10 @@ async function captureAgents(supabase: Client): Promise<{
     .select(
       'id, slug, name, description, model, temperature, max_tokens, max_history, fallback_message, kb_scope, allowed_channels, is_active, active_prompt_version_id'
     )
+    // A template is what the source org is RUNNING. A deactivated agent is
+    // history (the pre-mesh single agent, an abandoned experiment) and would
+    // otherwise be carried into every target as dead weight holding grants.
+    .eq('is_active', true)
     .order('name')
 
   if (!agentRows || agentRows.length === 0) {
