@@ -37,8 +37,16 @@ export const AVAILABILITY_CACHE_TTL_MS = 60_000
 // "today" only right at midnight in that zone.
 const TIMEZONE_CACHE_TTL_MS = 10 * 60 * 1000
 
-// How many days ahead (inclusive of today) get prefetched after a quote.
-export const PREFETCH_WINDOW_DAYS = 3
+// How many days ahead (inclusive of today) get prefetched after a quote. A
+// week: the demo's own question was "Monday", three days out, and a 3-day
+// window missed it (measured 2026-09-05: the day turn paid the full cold cost
+// and blew the widget's turn budget). Nearest days first, so the likeliest
+// answers are warm soonest.
+export const PREFETCH_WINDOW_DAYS = 7
+// Provider requests in flight at once for one prefetch. The demo provider
+// answers a cold availability query in 8-14s; three at a time keeps a quote
+// from turning into seven simultaneous heavy queries against it.
+export const PREFETCH_CONCURRENCY = 3
 
 export interface AvailabilityCacheKeyParams {
   /** Undefined when the caller has no org context — see fetchXkeduleAvailabilityCached. */
@@ -130,7 +138,7 @@ export function datesFromToday(tz: string, count: number): string[] {
 
 /**
  * Fire-and-forget: warms the availability cache for `serviceIds` on
- * today/+1/+2 (PREFETCH_WINDOW_DAYS) in the org's timezone, through the same
+ * the next PREFETCH_WINDOW_DAYS days in the org's timezone, through the same
  * cache a real check_availability call goes through. Call this right after a
  * successful get_quote — never await it.
  *
@@ -154,17 +162,22 @@ export function prefetchXkeduleAvailability(
       const tz = await resolveOrgTimezone(credentials)
       const dates = datesFromToday(tz, PREFETCH_WINDOW_DAYS)
 
-      // Capped at PREFETCH_WINDOW_DAYS (3) concurrent requests by construction —
-      // one per date, none sequential, none awaited by the caller.
-      for (const date of dates) {
-        const query = new URLSearchParams({ date, serviceIds: ids.join(',') })
-        fetchXkeduleAvailabilityCached(
-          { organizationId, tenantBaseUrl: credentials.tenantBaseUrl, serviceIds: ids, date },
-          () => xkeduleFetchJson(`/api/v1/availability?${query.toString()}`, 'GET', null, credentials),
-        ).catch(() => {
-          // Swallowed by design — see doc comment above.
-        })
+      // A small worker pool: PREFETCH_CONCURRENCY dates in flight, nearest
+      // first, none awaited by the caller. Each failure is swallowed on its own
+      // so one bad date never stops the rest.
+      const queue = [...dates]
+      const worker = async () => {
+        for (let date = queue.shift(); date !== undefined; date = queue.shift()) {
+          const query = new URLSearchParams({ date, serviceIds: ids.join(',') })
+          await fetchXkeduleAvailabilityCached(
+            { organizationId, tenantBaseUrl: credentials.tenantBaseUrl, serviceIds: ids, date },
+            () => xkeduleFetchJson(`/api/v1/availability?${query.toString()}`, 'GET', null, credentials),
+          ).catch(() => {
+            // Swallowed by design — see doc comment above.
+          })
+        }
       }
+      await Promise.all(Array.from({ length: Math.min(PREFETCH_CONCURRENCY, queue.length) }, worker))
     } catch {
       // Swallowed by design — see doc comment above.
     }
