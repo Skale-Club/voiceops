@@ -7,7 +7,6 @@ import { createServiceRoleClient } from '@/lib/supabase/admin'
 import { createLogger } from '@/lib/obs/logger'
 import type { AgentChannel, AgentRunResult } from './types'
 import { getChannelLatencyPolicy } from './channel-policy'
-import { memoTtl } from '@/lib/cache/ttl-memo'
 
 // ---------------------------------------------------------------------------
 // Cap constants (read from env with documented defaults)
@@ -141,18 +140,27 @@ export function checkTokenCap(
 // Call this AFTER inserting the invocation row (so the current invocation doesn't
 // double-count | it hasn't been updated with cost yet).
 
-async function checkDailyCostCapUncached(
+export async function checkDailyCostCap(
   orgId: string,
   agentId: string
 ): Promise<string | null> {
   const supabase = createServiceRoleClient()
 
-  // Fetch the on/off switch + per-org override (override may be null → use env default)
-  const { data: org } = await supabase
+  // These reads are independent. Run them together to keep the hard cap fresh
+  // on every invocation without paying two sequential network round trips.
+  const orgQuery = supabase
     .from('organizations')
     .select('daily_cost_cap_enabled, daily_cost_cap_usd_override')
     .eq('id', orgId)
     .single()
+  const costQuery = supabase
+    .from('agent_invocations')
+    .select('cost_usd')
+    .eq('organization_id', orgId)
+    .eq('mode', 'production')
+    .gte('created_at', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString())
+    .not('cost_usd', 'is', null)
+  const [{ data: org }, { data: costRow }] = await Promise.all([orgQuery, costQuery])
 
   // Switch off → no cap, unlimited spend. Default (column missing/null) is enforced.
   if (org?.daily_cost_cap_enabled === false) return null
@@ -161,15 +169,6 @@ async function checkDailyCostCapUncached(
     (org?.daily_cost_cap_usd_override !== null && org?.daily_cost_cap_usd_override !== undefined)
       ? Number(org.daily_cost_cap_usd_override)
       : getDefaultDailyCostCapUsd()
-
-  // Sum today's cost (last 24h) for this org | exclude playground runs (PLAY-04)
-  const { data: costRow } = await supabase
-    .from('agent_invocations')
-    .select('cost_usd')
-    .eq('organization_id', orgId)
-    .eq('mode', 'production')
-    .gte('created_at', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString())
-    .not('cost_usd', 'is', null)
 
   const dailyTotal = (costRow ?? []).reduce(
     (sum, row) => sum + (Number(row.cost_usd) || 0),
@@ -181,42 +180,6 @@ async function checkDailyCostCapUncached(
   createLogger({ orgId, agentId }).warn('guardrail_tripped', { cap: 'daily_cost_cap_usd', value: dailyTotal, limit: capUsd })
 
   return 'Daily cost limit reached | service temporarily restricted'
-}
-
-/** Carries a denial string through memoTtl's fn without letting it be cached. */
-class DailyCostCapDenial extends Error {
-  constructor(public readonly denialMessage: string) {
-    super(denialMessage)
-  }
-}
-
-// Perf (2026-09-05 re-analysis, FINDINGS-OUTSIDE-SCOPE.md item 9): measured
-// 414-820ms in production — two sequential reads (the org's cap settings,
-// then a 24h sum over agent_invocations) on every single invocation, twice
-// per widget turn. Spend and the on/off switch move slowly enough that a
-// short memo window is safe, but a DENIAL must not outlive the query that
-// produced it: once an org is over cap, every subsequent invocation across
-// every agent needs its own fresh read so the cap lifts the moment spend
-// (or the switch) actually changes, not up to 30s later. The uncached
-// function's `null` (not denied) is the only result ever memoised — a
-// non-null denial is thrown past memoTtl (which never caches a rejection)
-// and unwrapped back into its original string below.
-const COST_CAP_TTL_MS = 30_000
-
-export async function checkDailyCostCap(
-  orgId: string,
-  agentId: string
-): Promise<string | null> {
-  try {
-    return await memoTtl(`daily-cost-cap:${orgId}:${agentId}`, COST_CAP_TTL_MS, async () => {
-      const result = await checkDailyCostCapUncached(orgId, agentId)
-      if (result !== null) throw new DailyCostCapDenial(result)
-      return null
-    })
-  } catch (err) {
-    if (err instanceof DailyCostCapDenial) return err.denialMessage
-    throw err
-  }
 }
 
 // ---------------------------------------------------------------------------

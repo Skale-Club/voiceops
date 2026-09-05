@@ -45,6 +45,26 @@ export function buildExternalRunRegistration(
     const v = meta[key]
     return typeof v === 'number' && Number.isFinite(v) ? v : undefined
   }
+  const nonNegativeInt = (value: unknown): number | undefined => (
+    typeof value === 'number' && Number.isInteger(value) && value >= 0 ? value : undefined
+  )
+  const countRecord = (value: unknown): Record<string, number> | undefined => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
+    const entries = Object.entries(value as Record<string, unknown>)
+      .filter((entry): entry is [string, number] => Boolean(entry[0].trim()) && nonNegativeInt(entry[1]) !== undefined)
+    return entries.length > 0 ? Object.fromEntries(entries) : undefined
+  }
+  const coverage = (): XmailRegisterExternalRunParams['coverage'] | undefined => {
+    const value = meta.web_presence
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
+    const record = value as Record<string, unknown>
+    const result = {
+      byWebPresence: countRecord(record.by_type),
+      byBookingPlatform: countRecord(record.booking_platforms),
+      unclassified: nonNegativeInt(record.unclassified),
+    }
+    return Object.values(result).some((field) => field !== undefined) ? result : undefined
+  }
   const metaHypothesis = (): XmailRegisterExternalRunParams['hypothesis'] | undefined => {
     const value = meta.hypothesis
     if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
@@ -68,10 +88,12 @@ export function buildExternalRunRegistration(
     location: metaString('location'),
     resultCount: metaNumber('result_count') ?? prospectCount,
     importedCount,
+    enrichedCount: nonNegativeInt(meta.enriched_count),
     costUsd: metaNumber('cost_usd'),
     actorId: metaString('actor_id'),
     template: metaString('template'),
     hypothesis: metaHypothesis(),
+    coverage: coverage(),
   }
 }
 

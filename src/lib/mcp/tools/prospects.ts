@@ -42,8 +42,8 @@ const filterShape = {
   kind: z.enum(['person', 'company', 'all']).optional().describe("'company' (scraped businesses), 'person', or 'all'. Default 'all'."),
   qualification: z.enum(['unqualified', 'needs_review', 'qualified']).optional(),
   engagement: z.string().max(40).optional().describe("e.g. 'not_contacted' to skip anyone already enrolled/contacted."),
-  web_presence: z.enum(['owned_website', 'booking_platform', 'social_profile', 'directory_listing', 'link_hub', 'none']).optional()
-    .describe("Company web presence. Use 'booking_platform' for Booksy/TheCut-style profiles or 'none' for no detected presence."),
+  web_presence: z.enum(['owned_website', 'no_owned_website', 'booking_platform', 'social_profile', 'directory_listing', 'link_hub', 'none']).optional()
+    .describe("Company web presence. Use 'no_owned_website' for every business without an independent domain, or an exact type such as 'booking_platform' or 'none'."),
   booking_platform: z.string().trim().min(1).max(80).optional()
     .describe("Only companies using this booking provider, e.g. 'Booksy', 'TheCut', or 'GlossGenius'."),
 }
@@ -55,7 +55,7 @@ type Filters = {
   kind?: 'person' | 'company' | 'all'
   qualification?: 'unqualified' | 'needs_review' | 'qualified'
   engagement?: string
-  web_presence?: 'owned_website' | 'booking_platform' | 'social_profile' | 'directory_listing' | 'link_hub' | 'none'
+  web_presence?: 'owned_website' | 'no_owned_website' | 'booking_platform' | 'social_profile' | 'directory_listing' | 'link_hub' | 'none'
   booking_platform?: string
 }
 
@@ -68,6 +68,10 @@ type ResolvedProspect = {
   source_type: string | null
   engagement_status: string
   website: string | null
+  phone: string | null
+  address: string | null
+  location: string | null
+  city: string | null
   has_owned_website?: boolean | null
   web_presence_type?: string | null
   web_presence_url?: string | null
@@ -154,10 +158,25 @@ export function toXmailLead(
     ...(sourceRunId ? { source_run_id: sourceRunId } : {}),
   }
   if (p.kind === 'company') {
-    return { email: p.email as string, companyName: p.name ?? undefined, website: p.website ?? undefined, customFields }
+    return {
+      email: p.email as string,
+      companyName: p.name ?? undefined,
+      phone: p.phone ?? undefined,
+      location: p.location ?? undefined,
+      website: p.website ?? undefined,
+      customFields,
+    }
   }
   const { firstName, lastName } = splitName(p.name)
-  return { email: p.email as string, firstName: firstName ?? undefined, lastName: lastName ?? undefined, website: p.website ?? undefined, customFields }
+  return {
+    email: p.email as string,
+    firstName: firstName ?? undefined,
+    lastName: lastName ?? undefined,
+    phone: p.phone ?? undefined,
+    location: p.location ?? undefined,
+    website: p.website ?? undefined,
+    customFields,
+  }
 }
 
 /** Shape the enroll/dry-run response's verification breakdown from a batch aggregate. */
@@ -186,7 +205,7 @@ async function resolveProspects(
   if (wantPeople) {
     let q = db()
       .from('contacts')
-      .select('id, first_name, last_name, name, email, score, source_type, engagement_status, dnd_enabled, dnd_channels')
+      .select('id, first_name, last_name, name, email, phone, custom_fields, score, source_type, engagement_status, dnd_enabled, dnd_channels')
       .eq('org_id', orgId)
       .eq('lifecycle_stage', 'prospect')
       .limit(cap)
@@ -198,6 +217,10 @@ async function resolveProspects(
     if (opts.requireEmail) q = q.not('email', 'is', null)
     const { data } = await q
     for (const r of (data ?? []) as Array<Record<string, unknown>>) {
+      const customFields = r.custom_fields && typeof r.custom_fields === 'object' && !Array.isArray(r.custom_fields)
+        ? r.custom_fields as Record<string, unknown>
+        : {}
+      const address = stringField(customFields.address) ?? stringField(customFields.location)
       out.push({
         kind: 'person',
         id: r.id as string,
@@ -207,6 +230,10 @@ async function resolveProspects(
         source_type: (r.source_type as string | null) ?? null,
         engagement_status: r.engagement_status as string,
         website: null,
+        phone: stringField(r.phone),
+        address,
+        location: address,
+        city: stringField(customFields.city),
         has_owned_website: null,
         web_presence_type: null,
         web_presence_url: null,
@@ -225,7 +252,7 @@ async function resolveProspects(
   if (wantCompanies) {
     let q = db()
       .from('accounts')
-      .select('id, name, domain, website, score, source_type, engagement_status, custom_fields')
+      .select('id, name, domain, website, phone, address, score, source_type, engagement_status, custom_fields')
       .eq('org_id', orgId)
       .eq('lifecycle_stage', 'prospect')
       .limit(cap)
@@ -234,7 +261,11 @@ async function resolveProspects(
     if (f.source_type) q = q.eq('source_type', f.source_type)
     if (f.qualification) q = q.eq('qualification_status', f.qualification)
     if (f.engagement) q = q.eq('engagement_status', f.engagement)
-    if (f.web_presence) q = q.eq('custom_fields->>web_presence_type', f.web_presence)
+    if (f.web_presence === 'no_owned_website') {
+      q = q.contains('custom_fields', { has_owned_website: false })
+    } else if (f.web_presence) {
+      q = q.eq('custom_fields->>web_presence_type', f.web_presence)
+    }
     if (f.booking_platform) q = q.ilike('custom_fields->>booking_platform', f.booking_platform)
     const { data } = await q
     for (const r of (data ?? []) as Array<Record<string, unknown>>) {
@@ -243,6 +274,7 @@ async function resolveProspects(
         ? r.custom_fields as Record<string, unknown>
         : {}
       const storedWebsite = (r.domain as string | null) ?? (r.website as string | null) ?? null
+      const address = stringField(r.address) ?? stringField(customFields.address) ?? stringField(customFields.location)
       const hasOwnedWebsite = typeof customFields.has_owned_website === 'boolean'
         ? customFields.has_owned_website
         : storedWebsite
@@ -258,6 +290,10 @@ async function resolveProspects(
         source_type: (r.source_type as string | null) ?? null,
         engagement_status: r.engagement_status as string,
         website: storedWebsite,
+        phone: stringField(r.phone),
+        address,
+        location: address,
+        city: stringField(customFields.city),
         has_owned_website: hasOwnedWebsite,
         web_presence_type: stringField(customFields.web_presence_type) ?? (hasOwnedWebsite ? 'owned_website' : null),
         web_presence_url: stringField(customFields.web_presence_url) ?? storedWebsite,

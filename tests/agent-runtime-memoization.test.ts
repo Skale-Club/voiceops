@@ -135,8 +135,8 @@ describe('resolveAgent() memoisation (30s per orgId+agentId+channel)', () => {
 })
 
 // ---------------------------------------------------------------------------
-// Part 2: checkDailyCostCap() — 30s memo per (orgId, agentId), non-denied
-// results only. See src/lib/agent-runtime/guardrails.ts.
+// Part 2: checkDailyCostCap() deliberately does not memoise. A cached
+// below-cap result creates a spend window beyond the configured hard limit.
 // ---------------------------------------------------------------------------
 
 import { checkDailyCostCap } from '@/lib/agent-runtime/guardrails'
@@ -180,7 +180,7 @@ function buildCostCapSupabaseMock(opts: {
   return { orgSingleMock, invocationsQueryMock }
 }
 
-describe('checkDailyCostCap() memoisation (30s per orgId+agentId, non-denied only)', () => {
+describe('checkDailyCostCap() freshness', () => {
   const originalDefaultCap = process.env.AGENT_DAILY_COST_CAP_USD
 
   beforeEach(() => {
@@ -194,7 +194,7 @@ describe('checkDailyCostCap() memoisation (30s per orgId+agentId, non-denied onl
     else process.env.AGENT_DAILY_COST_CAP_USD = originalDefaultCap
   })
 
-  it('hits the cache on a second call within the TTL when NOT denied', async () => {
+  it('re-checks a second call even when the previous call was not denied', async () => {
     const { orgSingleMock } = buildCostCapSupabaseMock({
       dailyCostCapOverride: null,
       invocationCostRows: [{ cost_usd: 5 }],
@@ -205,7 +205,7 @@ describe('checkDailyCostCap() memoisation (30s per orgId+agentId, non-denied onl
 
     expect(first).toBeNull()
     expect(second).toBeNull()
-    expect(orgSingleMock).toHaveBeenCalledTimes(1)
+    expect(orgSingleMock).toHaveBeenCalledTimes(2)
   })
 
   it('never caches a denial — every call re-checks, so the cap lifts the moment spend actually drops', async () => {
@@ -222,8 +222,7 @@ describe('checkDailyCostCap() memoisation (30s per orgId+agentId, non-denied onl
     expect(orgSingleMock).toHaveBeenCalledTimes(2)
   })
 
-  it('a denial is never cached even immediately after a cached non-denied result for a DIFFERENT agent', async () => {
-    // Regression guard: the cache key must include agentId, not just orgId.
+  it('observes a denial immediately after a non-denied result', async () => {
     buildCostCapSupabaseMock({ dailyCostCapOverride: null, invocationCostRows: [{ cost_usd: 1 }] })
     const notDenied = await checkDailyCostCap('org-cost-memo', 'agent-a')
     expect(notDenied).toBeNull()
@@ -232,21 +231,9 @@ describe('checkDailyCostCap() memoisation (30s per orgId+agentId, non-denied onl
       dailyCostCapOverride: null,
       invocationCostRows: [{ cost_usd: 999 }],
     })
-    const denied = await checkDailyCostCap('org-cost-memo', 'agent-b')
+    const denied = await checkDailyCostCap('org-cost-memo', 'agent-a')
     expect(typeof denied).toBe('string')
     expect(secondOrgMock).toHaveBeenCalledTimes(1)
   })
 
-  it('clearMemo() forces a fresh check on the next call', async () => {
-    const { orgSingleMock } = buildCostCapSupabaseMock({
-      dailyCostCapOverride: null,
-      invocationCostRows: [{ cost_usd: 1 }],
-    })
-
-    await checkDailyCostCap('org-cost-memo', 'agent-cost-memo')
-    clearMemo()
-    await checkDailyCostCap('org-cost-memo', 'agent-cost-memo')
-
-    expect(orgSingleMock).toHaveBeenCalledTimes(2)
-  })
 })

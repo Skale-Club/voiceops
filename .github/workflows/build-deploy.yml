@@ -41,7 +41,34 @@ env:
   COOLIFY_BASE: https://coolify.skale.club
 
 jobs:
+  release-gate:
+    name: Release gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Deterministic release tests and workflow validation
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: npm run release-gate
+
+      - name: TEST-03 latency profile
+        run: npx vitest run tests/vapi-latency-profile.test.ts
+
   build-and-deploy:
+    needs: release-gate
     runs-on: ubuntu-latest
     steps:
       - name: Checkout

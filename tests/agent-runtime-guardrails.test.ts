@@ -14,7 +14,6 @@ vi.mock('@/lib/supabase/admin', () => ({
 }))
 
 import { createServiceRoleClient } from '@/lib/supabase/admin'
-import { clearMemo } from '@/lib/cache/ttl-memo'
 import {
   checkKillSwitch,
   checkDelegationDepth,
@@ -248,11 +247,6 @@ describe('checkDailyCostCap (RUNTIME-07)', () => {
   beforeEach(() => {
     // Set default cap to $50 via env (matching D-34-05)
     process.env.AGENT_DAILY_COST_CAP_USD = '50.00'
-    // Every case below reuses ORG_ID/AGENT_ID with a different mocked cap/
-    // spend — checkDailyCostCap now memoises non-denied results for 30s
-    // (see src/lib/agent-runtime/guardrails.ts), which would otherwise leak
-    // one test's "not denied" answer into the next test's assertions.
-    clearMemo()
   })
 
   afterEach(() => {

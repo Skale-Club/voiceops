@@ -10,11 +10,9 @@ name: Release Gate
 # failing fails the job, which fails the check on the PR/commit. A gate that
 # only reports is not a gate.
 #
-# Deliberately NOT wired into build-deploy.yml. That workflow is the live
-# production deploy path (GHCR build -> Coolify rollout); coupling a new,
-# unproven gate to it risks blocking real deploys on a check that has not
-# yet earned that trust. This workflow is independent and additive: it can
-# go red without touching what ships.
+# The same blocking commands also run as the first job in build-deploy.yml.
+# This standalone workflow keeps PR/dev feedback focused, while the deploy
+# workflow's `needs: release-gate` guarantees that red tests cannot ship.
 #
 # `npm run build` is intentionally NOT a step here -- see
 # docs/agents/release-gate.md for why (it needs an 8 GB heap and 10-30

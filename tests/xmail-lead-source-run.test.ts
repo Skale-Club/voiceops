@@ -46,6 +46,10 @@ const person = {
   source_type: 'xcraper',
   engagement_status: 'not_contacted',
   website: null,
+  phone: '+16175550123',
+  address: '123 Main St, Cambridge, MA 02139',
+  location: '123 Main St, Cambridge, MA 02139',
+  city: 'Cambridge',
 }
 
 describe('toXmailLead', () => {
@@ -60,5 +64,14 @@ describe('toXmailLead', () => {
     const lead = toXmailLead(person, verification)
     expect(lead.customFields).toBeDefined()
     expect('source_run_id' in (lead.customFields as object)).toBe(false)
+  })
+
+  it('carries phone and location into Xmail instead of losing non-email reachability', async () => {
+    const { toXmailLead } = await import('@/lib/mcp/tools/prospects')
+    const lead = toXmailLead(person, verification)
+    expect(lead).toMatchObject({
+      phone: '+16175550123',
+      location: '123 Main St, Cambridge, MA 02139',
+    })
   })
 })

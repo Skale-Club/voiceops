@@ -33,6 +33,11 @@ export const API_KEY_SCOPES = [
     label: 'Commerce — events',
     description: 'Ingest e-commerce events via POST /api/v1/commerce/events',
   },
+  {
+    key: 'xmail:events',
+    label: 'Xmail — events',
+    description: 'Ingest Xmail delivery and engagement events via POST /api/integrations/xmail/events',
+  },
 ] as const
 
 export type ApiKeyScope = (typeof API_KEY_SCOPES)[number]['key']

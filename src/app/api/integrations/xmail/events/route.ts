@@ -7,7 +7,7 @@
 // they never auto-promote lifecycle_stage (deliberate, per the Prospects spec).
 
 import { createServiceRoleClient } from '@/lib/supabase/admin'
-import { resolveApiKey } from '@/lib/api-keys/verify'
+import { verifyApiKey } from '@/lib/api-keys/verify'
 import { resolveProspectEntity } from '@/lib/prospects/events'
 import type { CrmEngagementStatus, ProspectEventType } from '@/types/database'
 
@@ -35,8 +35,11 @@ function mapXmailEvent(name: string): Mapped | null {
 export async function POST(request: Request): Promise<Response> {
   const supabase = createServiceRoleClient()
 
-  const key = await resolveApiKey(request, supabase)
-  if (!key) return Response.json({ error: 'Invalid or missing API key' }, { status: 401 })
+  const verification = await verifyApiKey(request, supabase, 'xmail:events')
+  if (!verification.ok) {
+    return Response.json({ error: verification.error }, { status: verification.status })
+  }
+  const key = verification.key
 
   let body: Record<string, unknown>
   try {

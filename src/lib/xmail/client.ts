@@ -68,6 +68,7 @@ export interface XmailLead {
   lastName?: string | null
   companyName?: string | null
   phone?: string | null
+  location?: string | null
   website?: string | null
   customFields?: Record<string, unknown>
 }
@@ -162,6 +163,8 @@ export interface XmailRegisterExternalRunParams {
   location?: string
   resultCount?: number
   importedCount?: number
+  /** Number of source results that went through contact enrichment. */
+  enrichedCount?: number
   /** The ACTUAL total cost the provider (Apify) reported for this run, in USD. */
   costUsd?: number
   actorId?: string
@@ -170,6 +173,13 @@ export interface XmailRegisterExternalRunParams {
     premise?: string
     expected?: Record<string, string | number>
     basis?: string
+  }
+  coverage?: {
+    emailFound?: number
+    emailVerified?: number
+    byWebPresence?: Record<string, number>
+    byBookingPlatform?: Record<string, number>
+    unclassified?: number
   }
 }
 
