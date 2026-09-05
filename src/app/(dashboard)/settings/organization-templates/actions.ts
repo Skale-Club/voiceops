@@ -145,7 +145,7 @@ export async function createTemplateFromCurrentOrg(input: {
   if (!orgId) return { error: 'No active organization.' }
 
   const groups = parsed.data.asset_groups as OrgTemplateAssetGroup[]
-  const snapshot = await captureOrgSnapshot(supabase, groups)
+  const snapshot = await captureOrgSnapshot(supabase, groups, { organizationId: orgId })
 
   const { data, error } = await supabase
     .from('org_templates')
@@ -211,8 +211,11 @@ export async function refreshTemplateSnapshot(
     .maybeSingle()
   if (!tmpl) return { error: 'Template not found.' }
 
+  const { data: orgId } = await supabase.rpc('get_current_org_id')
+  if (!orgId) return { error: 'No active organization.' }
+
   const groups = (tmpl.asset_groups ?? []) as OrgTemplateAssetGroup[]
-  const snapshot = await captureOrgSnapshot(supabase, groups)
+  const snapshot = await captureOrgSnapshot(supabase, groups, { organizationId: orgId })
 
   const { error } = await supabase
     .from('org_templates')

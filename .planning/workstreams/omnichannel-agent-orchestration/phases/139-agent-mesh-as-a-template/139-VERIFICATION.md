@@ -56,6 +56,12 @@ assistant. That judgement was right.
 
 ## What is not proven
 
+**Update 2026-09-05 — the install has now run on the real database.** See
+`FINDINGS-OUTSIDE-SCOPE.md` item 11: capture → install into a new scratch organization through the
+product's own functions, with the expected shape and prompts naming the new tenant. The UI
+walkthrough itself (an operator clicking through `Settings → Organization Templates`) remains
+undone; the pipeline it drives is proven.
+
 **The live walkthrough.** `139-08`'s `checkpoint:human-verify` — an operator opening
 `Settings → Organization Templates`, capturing Cuts & Culture and installing the mesh into a
 real second organization — has not been done. Every guarantee above is proven against

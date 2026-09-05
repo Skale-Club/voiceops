@@ -293,3 +293,19 @@ describe('TMPL-01: captureOrgSnapshot(["agents"])', () => {
     }
   })
 })
+
+describe('capture scope: a service-role caller never captures another tenant', () => {
+  it('with { organizationId }, only that organization\'s agents are captured; without it, RLS is trusted', async () => {
+    const fixture = buildMeshFixture()
+    const mine = (fixture.agents as Record<string, unknown>[]).map((a) => ({ ...a, organization_id: 'org-A' }))
+    const theirs = { ...(fixture.agents as Record<string, unknown>[])[0], id: 'agent-other', slug: 'other-tenant-agent', organization_id: 'org-B' }
+    const fake = buildFakeSupabase({ agents: [...mine, theirs] })
+
+    const scoped = await captureOrgSnapshot(fake as never, ['agents'], { organizationId: 'org-A' })
+    expect(scoped.agents!.map((a) => a.slug)).not.toContain('other-tenant-agent')
+    expect(scoped.agents).toHaveLength(mine.length)
+
+    const unscoped = await captureOrgSnapshot(fake as never, ['agents'])
+    expect(unscoped.agents!.map((a) => a.slug)).toContain('other-tenant-agent')
+  })
+})

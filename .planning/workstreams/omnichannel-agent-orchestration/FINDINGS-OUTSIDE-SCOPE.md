@@ -252,3 +252,33 @@ Voice is unaffected by this budget: it runs on legacy routing with Vapi calling
 `/api/vapi/tools` directly, one tool per request, and `check_availability` at 8–14s cold sits
 inside Vapi's 30s per-tool timeout (item 5). The widget is where the mesh's inference hops
 stack up.
+
+## 10. `captureOrgSnapshot()` through a service-role client captured every tenant — FIXED (2026-09-05)
+
+Every query in `src/lib/org-templates/snapshot.ts` relied on RLS alone for its tenant scope.
+Through the authenticated client the server action uses, that is exactly one organization.
+Through a service-role client it is the whole platform: the first ops probe of the replication
+path captured **325 agents, 364 pipelines and 245 workflows across all tenants** in one call,
+and would have installed them into the target had it not been a dry run.
+
+**Fixed:** `captureOrgSnapshot(supabase, groups, { organizationId })` applies the tenant filter on
+every top-level query; the server action passes it as defence in depth; a service-role caller
+must pass it. Pinned by a two-tenant fake in `tests/org-templates-agents-capture.test.ts`.
+
+## 11. The replication proof ran on the real database — DONE (2026-09-05)
+
+Through the product's own `captureOrgSnapshot()` → `installSnapshotIntoOrg()` (not a fixture),
+Cuts & Culture was captured with every asset group and installed into a new organization
+`ZZ Template Test (scratch)` (`fbead582-b6e1-467e-8b2b-dc3729733555`, slug
+`zz-template-test-scratch`), created the way `createOrganization()` does it, with the same
+owner. Result: 7 agents each with an active prompt version, 8 partner edges, 17 delegated
+grants, 16 direct grants, 8 workflows (as drafts), 1 pipeline with 5 stages, both channel
+defaults, and **no** `agent_channel_routing_modes` row — install never activates. Both the
+orchestrator and the voice receptionist resolve through the real `resolveAgent()` to prompts
+that open with “You are the front desk at ZZ Template Test (scratch)”.
+
+What a second real tenant still needs after this, and what the runbook covers
+(`docs/agents/tenant-replication-runbook.md`): connect Xkedule, activate the eight workflows,
+set business type and modality in Company Info, create and map a Vapi assistant and push its
+config, then flip routing per channel when ready. The scratch org can be deleted or reused as
+the target for the UI walkthrough.
