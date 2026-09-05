@@ -103,7 +103,7 @@ import type { Json } from '@/types/database'
 
 // Turn timeout has three tiers, picked by turnTimeoutFor():
 //   1. AGENT_TURN_TIMEOUT_MS (8s)         — plain text-only turns.
-//   2. AGENT_TURN_TIMEOUT_MS_TOOLS (30s)  — turns with tools assembled; a single
+//   2. AGENT_TURN_TIMEOUT_MS_TOOLS (45s)  — turns with tools assembled; a single
 //      tool call (workflow flows especially) can take up to ~30s.
 //   3. AGENT_TURN_TIMEOUT_MS_THINKING (30s) — extended-thinking turns (added
 //      latency); never shorter than the tools tier.
@@ -112,7 +112,7 @@ const AGENT_TURN_TIMEOUT_MS = parseInt(
   10
 )
 const AGENT_TURN_TIMEOUT_MS_TOOLS = parseInt(
-  process.env.AGENT_TURN_TIMEOUT_MS_TOOLS ?? '30000',
+  process.env.AGENT_TURN_TIMEOUT_MS_TOOLS ?? '45000',
   10
 )
 const MAX_LLM_CALLS_PER_TURN = parseInt(

@@ -91,15 +91,40 @@ function formatServiceArea(area: BusinessInfoResponse['serviceArea']): string {
   return `\nService area: ${[...new Set(names)].join(', ')}`
 }
 
-export async function getXkeduleBusinessInfo(
-  _params: Record<string, unknown>,
-  credentials: XkeduleCredentials,
-): Promise<string> {
-  const data = await memoTtl(
+/** The raw business-info document, cached per tenant. Shared with availability so a
+ *  day with no slots can be told apart as "closed" rather than "fully booked". */
+export async function fetchBusinessInfoCached(credentials: XkeduleCredentials): Promise<BusinessInfoResponse> {
+  return memoTtl(
     `xk:business_info:${credentials.tenantBaseUrl}`,
     BUSINESS_INFO_CACHE_TTL_MS,
     () => xkeduleFetchJson<BusinessInfoResponse>('/api/v1/business-info', 'GET', null, credentials),
   )
+}
+
+/**
+ * Whether the business is open on a given YYYY-MM-DD, per its weekly hours.
+ * Returns null when hours are unknown (never claims "closed" on missing data).
+ */
+export async function isBusinessOpenOn(credentials: XkeduleCredentials, date: string): Promise<{ open: boolean; weekday: string; hours: string } | null> {
+  try {
+    const info = await fetchBusinessInfoCached(credentials)
+    const hours = info.businessHours
+    if (!hours) return null
+    const weekday = DAY_ORDER[(new Date(`${date}T12:00:00Z`).getUTCDay() + 6) % 7]
+    const day = hours[weekday]
+    if (!day) return null
+    const open = day.isOpen !== false && !!day.start && !!day.end
+    return { open, weekday: titleCase(weekday), hours: open ? `${day.start}-${day.end}` : 'closed' }
+  } catch {
+    return null
+  }
+}
+
+export async function getXkeduleBusinessInfo(
+  _params: Record<string, unknown>,
+  credentials: XkeduleCredentials,
+): Promise<string> {
+  const data = await fetchBusinessInfoCached(credentials)
 
   const header = [
     data.businessName ? `Business: ${data.businessName}` : null,

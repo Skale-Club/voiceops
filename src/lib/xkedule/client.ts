@@ -18,7 +18,8 @@ export const DEFAULT_TIMEOUT_MS = 15000
 // and Xkedule had already created it (booking #471). Telling someone they
 // have no appointment when they do is worse than making them wait, so the
 // mutations get a longer budget than the reads.
-export const WRITE_TIMEOUT_MS = 30000
+// A real booking write took 24.4s on the demo provider (2026-09-05 call).
+export const WRITE_TIMEOUT_MS = 60000
 
 export interface XkeduleCredentials {
   tenantBaseUrl: string

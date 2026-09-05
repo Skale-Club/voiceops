@@ -14,6 +14,7 @@
 // one call instead of one call per staff member.
 import { xkeduleFetchJson, type XkeduleCredentials } from '../client'
 import { fetchXkeduleAvailabilityCached } from '../availability-cache'
+import { isBusinessOpenOn } from './business-info'
 
 interface AvailabilityParams {
   date?: string
@@ -155,7 +156,14 @@ export async function checkXkeduleAvailability(
 
   const available = (data.slots ?? []).filter((s) => s.available)
   if (available.length === 0) {
-    return `No available time slots on ${date}.`
+    // "Closed on Sunday" and "fully booked on Sunday" are different answers a
+    // customer hears very differently; the provider returns an empty list for
+    // both. Ask the business hours (cached per tenant) before saying either.
+    const day = await isBusinessOpenOn(credentials, date)
+    if (day && !day.open) {
+      return `The business is closed on ${day.weekday} (${date}). Suggest the next open day instead.`
+    }
+    return `No available time slots on ${date} (fully booked). Suggest another day.`
   }
 
   if (!wantsStaff || !data.staff?.length) {

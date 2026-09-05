@@ -215,7 +215,9 @@ export async function persistCallRecord(
     org_number: call?.phoneNumber?.number ?? null,
     assistant_id: call?.assistantId ?? null,
     call_type: call?.type ?? null,
-    status: call?.status ?? null,
+    // The report's call.status is whatever Vapi last had ('ringing' on every
+    // row so far); this report only ever arrives for a call that has ended.
+    status: 'ended',
     ended_reason: endedReason ?? null,
     started_at: startedAt ?? call?.startedAt ?? null,
     ended_at: endedAt ?? call?.endedAt ?? null,

@@ -42,7 +42,27 @@ import {
 export const CALLS_SERVER_URL = 'https://xphere.app/api/vapi/calls'
 
 export const FIRST_MESSAGE_TEMPLATE =
-  'Thank you for calling {{business_name}}. Which service would you like to book today?'
+  'Hi there! Thanks for calling {{business_name}}. Which service would you like to book today?'
+
+/**
+ * Voice and turn-taking, provisioned rather than left to Vapi's defaults.
+ * The first real call (2026-09-05) on the default `vapi/Elliot` voice sounded
+ * flat and slow, and the default endpointing cut the caller off mid-sentence
+ * ("I wanna book a-") after a 0.4s pause. These are the same for every
+ * tenant until an operator overrides them on the assistant; the push carries
+ * an existing override through untouched (see `voice` handling below).
+ */
+export const DEFAULT_VOICE = {
+  provider: '11labs',
+  voiceId: 'sarah',
+  model: 'eleven_turbo_v2_5',
+  stability: 0.5,
+  similarityBoost: 0.75,
+}
+export const DEFAULT_START_SPEAKING_PLAN = {
+  waitSeconds: 0.8,
+  smartEndpointingEnabled: true,
+}
 
 export interface PushAssistantConfigResult {
   ok: boolean
@@ -362,10 +382,18 @@ export async function pushAssistantConfig(
         }
       : {}
 
+    // Voice: keep an operator's non-default choice; replace only the stock
+    // `vapi` voice nobody chose. Turn-taking plan: set when absent.
+    const currentVoice = current.voice as { provider?: string } | undefined
+    const voice = currentVoice && currentVoice.provider && currentVoice.provider !== 'vapi' ? currentVoice : DEFAULT_VOICE
+    const startSpeakingPlan = current.startSpeakingPlan ?? DEFAULT_START_SPEAKING_PLAN
+
     const patch = {
       model,
       firstMessageMode: 'assistant-speaks-first',
       firstMessage,
+      voice,
+      startSpeakingPlan,
       ...assistantServer,
     }
 
