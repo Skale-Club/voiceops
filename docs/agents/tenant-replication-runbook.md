@@ -110,7 +110,12 @@ where each turn's time went. See `FINDINGS-OUTSIDE-SCOPE.md` item 9.
    - per-tool routing (`https://xphere.app/api/vapi/tools` + secret, 30s timeout) — carried
      over from the assistant, and the push **refuses** if any tool would be left unrouted;
    - the fixed opening line, spoken instantly on pickup:
-     `Thank you for calling <name>. Which service would you like to book today?`
+     `Hi there! Thanks for calling <name>. Which service would you like to book today?`
+   - the voice (ElevenLabs "sarah", turbo v2.5) and the turn-taking plan (wait 0.8s, smart
+     endpointing) unless the assistant already carries a non-stock voice of its own;
+   - per-tool spoken lines: none for the customer lookup (it is warmed at pickup), a
+     "still working on that" line at 8s and a 60s timeout on the three writes (a real booking
+     write took 24s on the demo provider);
    - the assistant-level server (`https://xphere.app/api/vapi/calls`, same secret, 20s), so
      status updates and the end-of-call report reach Xphere. The `in-progress` status update
      carries the caller's number before anyone has spoken, and Xphere starts the customer
@@ -118,9 +123,13 @@ where each turn's time went. See `FINDINGS-OUTSIDE-SCOPE.md` item 9.
 4. Repeat the push whenever the prompt, the modality or the tool set changes. Nothing on the
    Vapi side is edited by hand anymore.
 
-Check: call the number. Instant greeting; first reply greets a returning caller by name;
-service → price confirmed → day → three times offered → name/phone confirmed → read-back →
-booked. Then `Calls` in Xphere shows the transcript.
+Check: call the number. Instant greeting; first reply greets a returning caller by name and
+continues what they started saying; service named the way a person would ("a signature
+haircut, a skin fade, or a buzz cut - which would you like?") → price once, accepted →
+"anyone, or someone in particular?" → "what's the best day for you?" → a closed day is
+"we're closed on Sundays", not "fully booked" → three times → name and phone confirmed →
+read-back → "anything else you'd like to add?" → booked. Then `Calls` in Xphere shows the
+transcript with status `ended`.
 
 ## Step 7 — Routing modes (optional, per channel)
 
