@@ -14,7 +14,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import type { Database, Json } from '@/types/database'
 import type { CalendarEvent, CalendarEventPayload } from '@/lib/calendar/events'
 import { runFlowSync } from '@/lib/workflows/run-flow-sync'
-import { buildMeetingScope } from '@/lib/calendar/scope'
+import { buildMeetingScope, buildMeetingScopeFromData } from '@/lib/calendar/scope'
 import { runFlow, definitionHasWait } from '@/lib/flows/engine'
 import type { FlowDefinition } from '@/lib/flows/schema'
 import { resumeMatchingWaits } from '@/lib/flows/resume-waits'
@@ -34,7 +34,7 @@ async function recordDispatch(
   ctx: TransitionContext,
   orgId: string,
   event: CalendarEvent,
-  bookingId: string,
+  sourceId: string,
   payload: Json,
   workflowIds: string[],
 ): Promise<string | null> {
@@ -44,7 +44,7 @@ async function recordDispatch(
       org_id: orgId,
       event_type: event,
       source_table: 'bookings',
-      source_id: bookingId,
+      source_id: sourceId,
       workflow_ids: workflowIds,
       payload,
       parent_id: ctx.parentDispatchId ?? null,
@@ -102,11 +102,15 @@ export async function emitCalendarEvent(
   }
 
   const matched = await findMatchingWorkflows(ctx.supabase, payload.org_id, payload.event)
+  // meeting.requested has no `bookings` row (see CalendarEventPayload's
+  // comment) -- event_dispatches.source_id is NOT NULL but carries no FK to
+  // bookings, so a synthetic id it never wrote a row for is safe to record.
+  const sourceId = payload.booking_id ?? crypto.randomUUID()
   const dispatch_id = await recordDispatch(
     ctx,
     payload.org_id,
     payload.event,
-    payload.booking_id,
+    sourceId,
     payload as unknown as Json,
     matched.map((m) => m.id),
   )
@@ -114,10 +118,22 @@ export async function emitCalendarEvent(
   // Build the meeting scope for workflow variable interpolation + wait
   // correlation. Built unconditionally (even with no trigger matches) because a
   // run may be *waiting* for this event without any workflow being triggered by it.
-  const scope = await buildMeetingScope(ctx.supabase, payload.booking_id, {
-    rescheduled_from: payload.rescheduled_from,
-    rescheduled_to: payload.rescheduled_to,
-  })
+  const scope = payload.booking_id
+    ? await buildMeetingScope(ctx.supabase, payload.booking_id, {
+        rescheduled_from: payload.rescheduled_from,
+        rescheduled_to: payload.rescheduled_to,
+      })
+    : payload.requested
+      ? await buildMeetingScopeFromData(ctx.supabase, payload.org_id, sourceId, {
+          booker_name: payload.requested.booker_name,
+          booker_email: payload.requested.booker_email,
+          booker_phone: payload.requested.booker_phone,
+          start_at: payload.requested.start_at,
+          end_at: payload.requested.end_at,
+          event_type_id: payload.requested.event_type_id,
+          linked_contact_id: payload.requested.linked_contact_id,
+        })
+      : null
   if (!scope) {
     return { dispatched: 0, dispatch_id }
   }

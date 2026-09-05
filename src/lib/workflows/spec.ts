@@ -96,6 +96,12 @@ export const TRIGGERS: TriggerSpec[] = [
     variables: ['workflow.*', 'trigger.fired_at'],
   },
   {
+    type: 'event:meeting.requested',
+    description:
+      'A booking request was received but is still pending/awaiting the provider\'s approval -- may still be rejected. No bookings row exists yet for it.',
+    variables: ['meeting.*', 'trigger.fired_at'],
+  },
+  {
     type: 'event:meeting.scheduled',
     description: 'A new booking row was inserted (any status).',
     variables: ['meeting.*', 'trigger.fired_at'],

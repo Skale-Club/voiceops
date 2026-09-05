@@ -129,7 +129,7 @@ Endpoint **dedicado** (não o trigger genérico `webhook_url`), porque o espelho
 2. Resolve a **org** pelo mapa tenant→org (ver §5.4).
 3. **Upsert** na tabela `bookings` nativa por (`org_id`, `external_source='xkedule'`, `external_id`).
 4. Casa/cria o **contato** (telefone E.164 → e-mail → criar) e seta `linked_contact_id`.
-5. Emite `meeting.scheduled/confirmed/cancelled/rescheduled/...` (reusar `emitCalendarEvent`).
+5. Emite `meeting.scheduled/confirmed/cancelled/rescheduled/...` (reusar `emitCalendarEvent`). Para `status` pending/awaiting_approval não há upsert em `bookings` (o provider ainda pode rejeitar — ver linha da tabela abaixo); emite-se apenas `meeting.requested`, sem `booking_id` (payload carrega os dados crus do agendamento).
 
 ### 5.4 Mapeamento de dados (booking Xkedule → `bookings` Xphere)
 
@@ -138,7 +138,7 @@ Endpoint **dedicado** (não o trigger genérico `webhook_url`), porque o espelho
 | `booking.id` | `external_id` (+ `external_source='xkedule'`) | idempotência |
 | `bookingDate`+`startTime` (tz do tenant) | `start_at` (timestamptz/UTC) | **converter** via `timeZone` — ver risco §8 |
 | `endTime` | `end_at` | |
-| `status` (pending/confirmed/cancelled/completed/no_show) | `status` (confirmed/cancelled/no_show) | mapear; `completed` → status + evento `meeting.completed` |
+| `status` (pending/confirmed/cancelled/completed/no_show) | `status` (confirmed/cancelled/no_show) | mapear; `completed` → status `showed` + evento `meeting.completed`; `pending`/`awaiting_approval` → **sem** upsert em `bookings`, apenas evento `meeting.requested` (payload carrega os campos crus, sem `booking_id`) |
 | `customer.*` | `booker_name/email/phone` + `linked_contact_id` | |
 | `services[]` | `title`/`notes` + `event_type_id` sintético | criar um `event_type` "Xkedule" por org na conexão (ver risco §8) |
 | `staff` | `location_data`/`notes` | sem campo de organizer direto |

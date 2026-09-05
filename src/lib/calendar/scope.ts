@@ -62,6 +62,29 @@ export interface MeetingScope {
   rescheduled_to?: string
 }
 
+// The subset of a `bookings` row assembleMeetingScope needs. Populated
+// either by a real SELECT (buildMeetingScope) or synthesized directly from
+// an event's own payload when there is no mirror row to query
+// (buildMeetingScopeFromData -- see its comment below).
+interface BookingLike {
+  id: string
+  org_id: string
+  booker_name: string
+  booker_email: string
+  booker_phone: string | null
+  booker_timezone: string | null
+  start_at: string
+  end_at: string
+  status: string
+  notes: string | null
+  linked_contact_id: string | null
+  location_kind: string | null
+  location_data: Record<string, unknown> | null
+  meeting_url: string | null
+  meeting_phone: string | null
+  event_type_id: string | null
+}
+
 export async function buildMeetingScope(
   supabase: SupabaseClient<Database>,
   bookingId: string,
@@ -81,6 +104,63 @@ export async function buildMeetingScope(
 
   if (error || !booking) return null
 
+  return assembleMeetingScope(supabase, booking as unknown as BookingLike, extras)
+}
+
+// Data shape emitted for `meeting.requested` (see CalendarEventPayload's
+// `requested` field, lib/calendar/events.ts) -- a pending/awaiting_approval
+// Xkedule booking that MIR-07 deliberately never mirrors into `bookings`
+// (the provider can still reject it, and bookings.status's CHECK constraint
+// has no honest value for "pending" -- supabase/migrations/
+// 1224_booking_status_showed.sql). There is therefore no row id to query;
+// this builds the same {{meeting.*}} scope shape directly from the raw
+// fields the caller already gathered (src/lib/action-engine/executors/
+// xkedule-booking-events.ts), sharing every join/formatting rule in
+// assembleMeetingScope with the real, row-backed path above.
+export interface RequestedBookingData {
+  booker_name: string
+  booker_email: string
+  booker_phone: string | null
+  booker_timezone?: string | null
+  start_at: string
+  end_at: string
+  event_type_id: string | null
+  linked_contact_id: string | null
+  notes?: string | null
+}
+
+export async function buildMeetingScopeFromData(
+  supabase: SupabaseClient<Database>,
+  orgId: string,
+  syntheticId: string,
+  data: RequestedBookingData,
+): Promise<MeetingScope> {
+  const booking: BookingLike = {
+    id: syntheticId,
+    org_id: orgId,
+    booker_name: data.booker_name,
+    booker_email: data.booker_email,
+    booker_phone: data.booker_phone,
+    booker_timezone: data.booker_timezone ?? null,
+    start_at: data.start_at,
+    end_at: data.end_at,
+    status: 'pending',
+    notes: data.notes ?? null,
+    linked_contact_id: data.linked_contact_id,
+    location_kind: null,
+    location_data: null,
+    meeting_url: null,
+    meeting_phone: null,
+    event_type_id: data.event_type_id,
+  }
+  return assembleMeetingScope(supabase, booking)
+}
+
+async function assembleMeetingScope(
+  supabase: SupabaseClient<Database>,
+  booking: BookingLike,
+  extras?: { rescheduled_from?: string; rescheduled_to?: string },
+): Promise<MeetingScope> {
   // Optional joins (event_type, store, contact). Each is best-effort |
   // missing rows just leave the corresponding fields null.
   const [eventTypeRes, contactRes] = await Promise.all([

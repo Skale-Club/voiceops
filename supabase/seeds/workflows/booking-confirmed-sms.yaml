@@ -1,0 +1,31 @@
+# Platform-default workflow — ships to every org.
+# On booking confirmed: a short SMS to the attendee when a phone number is on
+# file. The sibling booking-confirmation.yaml covers email; a customer who
+# booked by phone or chat usually gave a number and no email, so without this
+# they heard "you're all set" and received nothing. Tenant-neutral (SCH-04).
+
+name: Booking confirmed (SMS)
+description: |
+  Platform-default. When a booking is confirmed, texts the attendee the
+  appointment details — only when the contact has a phone number.
+trigger:
+  type: event
+  event: meeting.confirmed
+
+nodes:
+  - id: check_phone
+    kind: condition
+    expression: "meeting.attendee_contact.phone != ''"
+
+  - id: send_confirmation_sms
+    kind: send_sms
+    integration: twilio
+    to: "{{meeting.attendee_contact.phone}}"
+    body: "Hi {{meeting.attendee_contact.first_name}}, you're confirmed for {{meeting.title}} on {{meeting.starts_date}} at {{meeting.starts_time}}. See you then!"
+
+edges:
+  - from: trigger
+    to: check_phone
+  - from: check_phone
+    to: send_confirmation_sms
+    when: "true"

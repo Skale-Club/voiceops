@@ -32,10 +32,21 @@
 // has no representation in bookings.status (CHECK constraint only allows
 // confirmed/cancelled/no_show/showed -- supabase/migrations/
 // 1224_booking_status_showed.sql) and Xkedule itself can still reject the
-// booking while it's in this state. So this module mirrors nothing and
-// emits nothing for a pending/awaiting_approval booking -- same as the
-// webhook. It mirrors/emits later, once Xkedule's webhook (if configured)
-// delivers a decided status.
+// booking while it's in this state. So this module still mirrors NOTHING
+// for a pending/awaiting_approval booking (no insert into `bookings`) --
+// same as the webhook. What changed (product decision, 2026-09-05): the
+// customer who just booked by phone/chat must be told immediately that
+// their request was received, even though the shop still has to confirm
+// it. So a pending/awaiting_approval booking now emits `meeting.requested`
+// instead of emitting nothing -- without lying that it's confirmed (no
+// meeting.scheduled/confirmed) and without a mirror row (payload carries
+// the raw booking-like fields directly; see RequestedMeetingData,
+// lib/calendar/events.ts). The contact is still matched/created below so
+// the request-received workflow (booking-request-received.yaml) has
+// someone to address. A later webhook delivery reporting a decided status
+// for the SAME external_id still hits the untouched insert-and-emit path
+// below and fires meeting.scheduled/meeting.confirmed normally -- there is
+// no mirror row for it to collide with, since this path never wrote one.
 //
 // Fire-and-forget: called from execute-action.ts as
 // `void emitXkeduleBookingCreatedEvents(...).catch(...)` AFTER
@@ -81,6 +92,9 @@ async function warn(orgId: string, message: string, extra?: Record<string, unkno
  * Mirrors a freshly Xkedule-created booking into `bookings` and emits the
  * platform's own meeting.scheduled (always, for a decided status) and
  * meeting.confirmed (only when that status is 'confirmed') calendar events.
+ * For a pending/awaiting_approval status, mirrors nothing (MIR-07) and
+ * instead emits meeting.requested carrying the raw booking-like fields
+ * directly in its payload (no booking_id).
  *
  * Never throws -- every failure path returns quietly after logging. The
  * caller (execute-action.ts) additionally wraps this in its own
@@ -104,26 +118,25 @@ export async function emitXkeduleBookingCreatedEvents(
       return
     }
 
-    if (UNCONFIRMED_XKEDULE_STATUSES.has(rawStatus)) {
-      // MIR-07: nothing to mirror or emit until Xkedule reports a decided
-      // status -- see this file's header.
-      return
-    }
-
-    const nativeStatus = mapStatus(rawStatus)
+    const isUnconfirmed = UNCONFIRMED_XKEDULE_STATUSES.has(rawStatus)
     const externalId = String(booking.id)
 
     // Idempotency guard: someone (a racing webhook delivery, or a duplicate
     // invocation of this hook) may have already mirrored this exact
-    // external booking. Never double-insert, never double-emit.
-    const { data: existing } = await supabase
-      .from('bookings')
-      .select('id')
-      .eq('org_id', orgId)
-      .eq('external_source', 'xkedule')
-      .eq('external_id', externalId)
-      .maybeSingle()
-    if (existing) return
+    // external booking. Never double-insert, never double-emit. Only
+    // applies to the decided-status mirror path below -- a
+    // pending/awaiting_approval booking never gets a mirror row (MIR-07),
+    // so there is nothing it could already have inserted.
+    if (!isUnconfirmed) {
+      const { data: existing } = await supabase
+        .from('bookings')
+        .select('id')
+        .eq('org_id', orgId)
+        .eq('external_source', 'xkedule')
+        .eq('external_id', externalId)
+        .maybeSingle()
+      if (existing) return
+    }
 
     const bookingDate = booking.bookingDate ?? (typeof input.bookingDate === 'string' ? input.bookingDate : null)
     const startTime = booking.startTime ?? (typeof input.startTime === 'string' ? input.startTime : null)
@@ -179,6 +192,39 @@ export async function emitXkeduleBookingCreatedEvents(
     const price =
       booking.totalPrice != null && !Number.isNaN(Number(booking.totalPrice)) ? Number(booking.totalPrice) : null
     const notes = typeof input.notes === 'string' && input.notes.trim() ? input.notes.trim() : null
+
+    if (isUnconfirmed) {
+      // MIR-07 still applies: no insert into `bookings`. But the customer
+      // just requested this by phone/chat and needs to be told their
+      // request was received -- reuses every field the decided-status path
+      // below builds (same "builder"), just routed into the payload
+      // directly instead of a mirror row, since RequestedMeetingData has no
+      // booking_id to key off (see lib/calendar/events.ts).
+      await emitCalendarEvent(
+        { supabase },
+        {
+          event: 'meeting.requested',
+          booking_id: null,
+          org_id: orgId,
+          requested: {
+            booker_name: customerName,
+            booker_email: bookerEmail,
+            booker_phone: phoneNorm,
+            start_at: startAt,
+            end_at: endAt,
+            event_type_id: eventTypeId,
+            linked_contact_id: contactId,
+            price,
+            external_source: 'xkedule',
+            external_id: externalId,
+            status: 'pending',
+          },
+        },
+      )
+      return
+    }
+
+    const nativeStatus = mapStatus(rawStatus)
 
     const { data: inserted, error } = await supabase
       .from('bookings')

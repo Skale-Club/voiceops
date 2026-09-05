@@ -1,0 +1,54 @@
+# Platform-default workflow — ships to every org.
+# Acknowledges a booking REQUEST (not yet confirmed) the moment the
+# provider accepts it as pending/awaiting_approval. There is no `bookings`
+# mirror row for this state yet (MIR-07 — the provider can still reject it),
+# so this reacts to `meeting.requested` rather than `meeting.scheduled`/
+# `meeting.confirmed`. Deliberately tenant-neutral (SCH-04) — no tagging or
+# opportunity-creation nodes; tenants that want those can add them via the
+# builder. Prefers SMS (matches the immediacy of a phone/chat booking);
+# falls back to email only when there is no phone on file.
+
+name: Booking request received
+description: |
+  Platform-default. When a booking request is received but still pending
+  the shop's approval, lets the attendee know their request came through —
+  by SMS if a phone number is on file, otherwise by email.
+trigger:
+  type: event
+  event: meeting.requested
+
+nodes:
+  - id: check_phone
+    kind: condition
+    expression: "meeting.attendee_contact.phone != ''"
+
+  - id: send_request_sms
+    kind: send_sms
+    integration: twilio
+    to: "{{meeting.attendee_contact.phone}}"
+    body: "Hi {{meeting.attendee_contact.first_name}}, we received your request for {{meeting.title}} on {{meeting.starts_date}} at {{meeting.starts_time}}. We'll confirm shortly."
+
+  - id: check_email
+    kind: condition
+    expression: "meeting.attendee_contact.email != ''"
+
+  - id: send_request_email
+    kind: send_tenant_email
+    to: "{{meeting.attendee_contact.email}}"
+    subject: "We received your {{meeting.title}} request"
+    body: |
+      <p>Hi {{meeting.attendee_contact.first_name}},</p>
+      <p>We received your request for {{meeting.title}} on {{meeting.starts_date}} at {{meeting.starts_time}}. We'll confirm shortly.</p>
+
+edges:
+  - from: trigger
+    to: check_phone
+  - from: check_phone
+    to: send_request_sms
+    when: "true"
+  - from: check_phone
+    to: check_email
+    when: "false"
+  - from: check_email
+    to: send_request_email
+    when: "true"

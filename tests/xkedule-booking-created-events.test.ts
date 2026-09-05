@@ -66,6 +66,8 @@ import { emitXkeduleBookingCreatedEvents } from '@/lib/action-engine/executors/x
 import { executeAction } from '@/lib/action-engine/execute-action'
 import { getXkeduleCredentialsForOrg } from '@/lib/xkedule/credentials'
 import type { GhlCredentials } from '@/lib/ghl/client'
+import { CALENDAR_EVENTS } from '@/lib/calendar/events'
+import { TRIGGERS } from '@/lib/workflows/spec'
 
 vi.mock('@/lib/xkedule/credentials', () => ({
   getXkeduleCredentialsForOrg: vi.fn(),
@@ -257,17 +259,40 @@ describe('emitXkeduleBookingCreatedEvents', () => {
   })
 
   it.each(['pending', 'awaiting_approval'])(
-    "a '%s' booking mirrors nothing and emits nothing (MIR-07: no DB representation for a not-yet-decided status)",
+    "a '%s' booking mirrors nothing (MIR-07: no DB representation for a not-yet-decided status) but emits exactly one meeting.requested carrying the raw fields, no booking_id",
     async (status) => {
       const { client, bookingsInsertMock } = buildFakeClient()
 
       await emitXkeduleBookingCreatedEvents(client, ORG_ID, CREDS, {
-        booking: { id: 42, status, bookingDate: '2026-08-01', startTime: '10:00' },
+        booking: { id: 42, status, bookingDate: '2026-08-01', startTime: '10:00', endTime: '10:30', totalPrice: '50.00' },
         input: bookingInput(),
       })
 
+      // Still no mirror row -- MIR-07 unchanged.
       expect(bookingsInsertMock).not.toHaveBeenCalled()
-      expect(vi.mocked(emitCalendarEvent)).not.toHaveBeenCalled()
+
+      expect(vi.mocked(emitCalendarEvent)).toHaveBeenCalledTimes(1)
+      expect(vi.mocked(emitCalendarEvent)).toHaveBeenCalledWith(
+        expect.anything(),
+        {
+          event: 'meeting.requested',
+          booking_id: null,
+          org_id: ORG_ID,
+          requested: {
+            booker_name: 'Jane Doe',
+            booker_email: 'jane@example.com',
+            booker_phone: '+15555551234',
+            start_at: expect.any(String),
+            end_at: expect.any(String),
+            event_type_id: EVENT_TYPE_ID,
+            linked_contact_id: CONTACT_ID,
+            price: 50,
+            external_source: 'xkedule',
+            external_id: '42',
+            status: 'pending',
+          },
+        },
+      )
     },
   )
 
@@ -386,5 +411,19 @@ describe("executeAction('xkedule_create_booking', ...) wiring", () => {
       executeAction('xkedule_create_booking', bookingInput(), ghlCreds, { organizationId: ORG_ID, supabase: client }),
     ).rejects.toThrow('Xkedule integration not configured for this organization')
     expect(vi.mocked(xkeduleFetchJson)).not.toHaveBeenCalled()
+  })
+})
+
+// ─── Layer 4: meeting.requested registration ────────────────────────────────
+
+describe('meeting.requested is registered wherever the other calendar events are', () => {
+  it('is present in CALENDAR_EVENTS (src/lib/calendar/events.ts)', () => {
+    expect(CALENDAR_EVENTS).toContain('meeting.requested')
+  })
+
+  it('is present in the workflow spec trigger catalogue (src/lib/workflows/spec.ts) with a meeting.* scope', () => {
+    const trigger = TRIGGERS.find((t) => t.type === 'event:meeting.requested')
+    expect(trigger).toBeDefined()
+    expect(trigger?.variables).toContain('meeting.*')
   })
 })
