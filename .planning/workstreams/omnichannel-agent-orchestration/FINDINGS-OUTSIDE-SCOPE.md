@@ -340,3 +340,25 @@ phone up front.
 
 Redis itself remains unprovisioned in production. With the database as the source of truth
 it is now an optimisation, not a dependency; the rate limiters already run in-memory without it.
+
+## 13. What the widget's day turn was really paying for — FIXED (2026-09-05)
+
+After the prefetch shipped, the availability turn still took 35–40s in production and
+timed out. `workflow_tool_logs` showed why: the Availability specialist called
+`check_availability` **twice**, 12.8s and 13.0s, with `startDate`/`endDate` on the same day.
+That is the range path of `check-availability.ts`, which is uncached by design — so the
+date the quote had just pre-warmed sat unused while the provider was asked cold, twice.
+A one-day range is now folded into the single-date, cached path.
+
+Two more things the same measurement settled:
+
+- The orchestrator on Sonnet used the `think` tool before every handoff — a full model
+  round trip per turn. It now runs on Haiku, is told not to think, and answers a repeated
+  price question from memory in 2.8s.
+- Memo TTLs of 30s never hit: a widget turn through the mesh takes ~20s, so every
+  resolution expired between one turn and the next. `resolveAgent` is now held two minutes;
+  the services catalogue five, business info ten (per tenant).
+
+Voice, final numbers through production as Vapi calls it (warm run): `lookup_customer`
+0.17s (warmed at pickup), `business_info` 0.46s, `list_services` 0.86s, `get_quote` 2.3s,
+`check_availability` 0.56s. The provider's quote endpoint is the one thing left that is slow.
