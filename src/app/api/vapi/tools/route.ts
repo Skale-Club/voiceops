@@ -62,10 +62,20 @@ import { resolveChannelRoutingMode, type ChannelRoutingMode } from '@/lib/agent-
 import { resolveSpecialistForTool } from '@/lib/agent-runtime/resolve-specialist-route'
 import { invokeInternalSpecialist } from '@/lib/agent-runtime/invocation-gateway'
 import type { Database } from '@/types/database'
+import { memoTtl } from '@/lib/cache/ttl-memo'
 
 export const runtime = 'nodejs'
 
 const obs = createLogger({ route: 'api/vapi/tools' })
+
+// PERF: the four resolutions a tool call makes before touching the provider
+// (org by assistant, routing mode, tool config + credentials) are Supabase
+// round trips that do not change within one phone call. Cached in-process for
+// a short window so a live call pays them once, not once per tool call.
+// Measured through production before this: business_info 1.8-2.2s end to end
+// for a ~0.2s provider GET. Writes, idempotency and the provider call itself
+// are never cached. An operator change reaches a live call at most this late.
+const HOT_PATH_TTL_MS = 30_000
 
 const IDEMPOTENCY_CONFLICT_RESULT =
   'That request conflicts with an earlier one from this call. Please repeat the details again.'
@@ -150,9 +160,14 @@ export async function POST(request: Request): Promise<Response> {
     // first (globally unique), then the Vapi-native number, then the legacy
     // per-number assistant override — same resolution used by the end-of-call
     // webhooks so a call and its tool-calls never disagree on which org owns them.
-    const { organizationId: orgId } = await resolveOrgForCall(
-      { assistantId: call.assistantId, phoneNumberId: call.phoneNumberId },
-      supabase,
+    const { organizationId: orgId } = await memoTtl(
+      `vapi:org:${call.assistantId ?? ''}:${call.phoneNumberId ?? ''}`,
+      HOT_PATH_TTL_MS,
+      () =>
+        resolveOrgForCall(
+          { assistantId: call.assistantId, phoneNumberId: call.phoneNumberId },
+          supabase,
+        ),
     )
     if (!orgId) {
       return Response.json({
@@ -167,7 +182,9 @@ export async function POST(request: Request): Promise<Response> {
     // into a non-200 response or a changed legacy-path result.
     let routingMode: ChannelRoutingMode = 'legacy'
     try {
-      routingMode = await resolveChannelRoutingMode({ organizationId: orgId, channel: 'voice' })
+      routingMode = await memoTtl(`vapi:routing:${orgId}`, HOT_PATH_TTL_MS, () =>
+        resolveChannelRoutingMode({ organizationId: orgId, channel: 'voice' })
+      )
     } catch (routingModeErr) {
       obs.error('vapi_routing_mode_lookup_failed', { error: routingModeErr })
     }
@@ -227,7 +244,11 @@ async function executeOneToolCall(params: {
     }
 
     // Resolve tool config (with nested integration credentials)
-    const toolConfig = await resolveTool(orgId, toolCall.name, supabase)
+    const tResolve = Date.now()
+    const toolConfig = await memoTtl(`vapi:tool:${orgId}:${toolCall.name}`, HOT_PATH_TTL_MS, () =>
+      resolveTool(orgId, toolCall.name, supabase)
+    )
+    const resolveMs = Date.now() - tResolve
     if (!toolConfig) {
       return { toolCallId: toolCall.id, result: 'Tool not configured.' }
     }
@@ -237,6 +258,8 @@ async function executeOneToolCall(params: {
     const idempotencyNeeded = requiresIdempotency(toolConfig.action_type, toolConfig.config)
     let idempotencyKey = ''
     let requestHash = ''
+    let idempotencyMs = 0
+    let executeMs = 0
 
     if (idempotencyNeeded) {
       // Keyed on the trusted, already-verified call.id + toolCall.id — never
@@ -257,8 +280,10 @@ async function executeOneToolCall(params: {
       // mutated the provider, and executing anyway is the double-booking this
       // phase exists to prevent.
       let outcome: Awaited<ReturnType<typeof checkIdempotency>>
+      const tIdem = Date.now()
       try {
         outcome = await checkIdempotency(orgId, idempotencyKey, requestHash)
+        idempotencyMs = Date.now() - tIdem
       } catch (preflightErr) {
         obs.error('vapi_idempotency_preflight_failed', {
           toolCallId: toolCall.id,
@@ -354,6 +379,7 @@ async function executeOneToolCall(params: {
         const credentials = integration
           ? { apiKey: await decrypt(integration.encrypted_api_key), locationId: integration.location_id ?? '' }
           : { apiKey: '', locationId: '' }
+        const tExec = Date.now()
         result = await executeAction(toolConfig.action_type, args, credentials, {
           organizationId: orgId,
           supabase,
@@ -361,6 +387,7 @@ async function executeOneToolCall(params: {
           integrationProvider: integration?.provider,
           callerNumber: call.customer?.number,
         })
+        executeMs = Date.now() - tExec
 
         if (idempotencyNeeded && idempotencyKey) {
           // The mutation already succeeded. Failing to persist the receipt must
@@ -417,6 +444,18 @@ async function executeOneToolCall(params: {
     }
 
     const executionMs = Date.now() - startTime
+
+    // Where the time went, per stage, so production latency is measured
+    // rather than inferred. `executeMs` is the provider call; the difference
+    // to executionMs is ours.
+    obs.info('vapi_tool_timings', {
+      toolName: toolCall.name,
+      resolveMs,
+      idempotencyMs,
+      executeMs,
+      totalMs: executionMs,
+      routingMode,
+    })
 
     // Log execution async | does NOT block Vapi response
     // workflow_runs (kind='tool') via logToolRun — feeds the call-detail
