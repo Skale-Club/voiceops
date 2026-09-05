@@ -28,7 +28,7 @@ Checked against source, not against the executing agent's report.
 
 | # | Focus | Result | Evidence |
 |---|-------|--------|----------|
-| 1 | `customerAddress` is genuinely required at the tool boundary for `at_customer` | PASS | `applyServiceLocationMode` sets `required: safeMode === 'at_customer'` on the field before `deriveWorkflowInputSchema` runs, so the requirement lands in the ai-sdk tool schema. The model is structurally unable to call `book_appointment` without one — it is not a runtime check that could be bypassed. |
+| 1 | `customerAddress` is genuinely required at the tool boundary for `at_customer` | PASS (after a fix, see below) | `applyServiceLocationMode` sets `required: safeMode === 'at_customer'` on the field before `deriveWorkflowInputSchema` runs, so the requirement lands in the ai-sdk tool schema. The model is structurally unable to call `book_appointment` without one — it is not a runtime check that could be bypassed. |
 | 2 | An `on_premises` organization never sees the field | PASS | For `on_premises` the transform deletes the field outright, so it is absent from the schema the model is shown rather than present-and-optional. |
 | 3 | An unrecognised mode never fails open into asking | PASS | `const safeMode = isServiceLocationMode(mode) ? mode : 'on_premises'`. A typo, a null, or a value from a future migration all resolve to the mode that does not ask. |
 | 4 | Merging changes no existing organization's behaviour | PASS | Verified in production after applying 1296 and 1297: all **350** organizations sit on `business_type='on_premises_shop'` and `service_location_mode='on_premises'`. No backfill ran; the defaults did the work. |
@@ -70,11 +70,32 @@ flattened every tuned per-tool line to “One moment.” Three changes, then the
 The canary prompt file is now a template with the token; the hardcoded sentence no longer
 exists in the repository or in Vapi.
 
+## Two gaps found on re-analysis, 2026-09-05
+
+**The field the rule acts on did not exist.** The live `book_appointment` workflow's trigger
+`input_schema` had no `customerAddress`, and `applyServiceLocationMode()` returns a map
+unchanged when the key is absent. So for this tenant the rule was vacuous — nothing to require
+for `at_customer`, nothing to hide for `on_premises` — and every organization installed from its
+template would have inherited the gap: a prompt that asks for an address and a function with no
+field to carry it. Fixed as workflow version 2 (append-only, `current_version_id` repointed);
+`create-booking.ts` already forwards the field as `address`. Verified: a push dry run now renders
+`book_appointment` for this `on_premises` org **without** the field, which is the transform doing
+its job on a field that finally exists.
+
+**The Vapi push did not apply the rule to schemas.** `buildWorkflowTools()` transformed the
+widget's tool schema; `pushAssistantConfig()` pushed the raw `input_schema`. The prompt and the
+schema were rendered from different sources. Now both go through `applyServiceLocationMode()`
+with the org's mode.
+
+The same pattern as the four before it: a mechanism correct in itself, never reached by the
+data or the path that needed it. Found by asking what the live definition actually contained
+rather than what the plan said it would.
+
 ## Requirement verdicts
 
 - **MODAL-00** — Done. `business_type` on the organization, set in Company Info, seeding the modality.
 - **MODAL-01** — Done. `service_location_mode` with a safe default and a fail-closed resolver.
-- **MODAL-02** — Done for the widget path; the address requirement is structural.
+- **MODAL-02** — Done on both channels; the address requirement is structural, and the field it acts on now exists in the tenant's definition.
 - **MODAL-03** — Done. One source, two channels: the widget renders the block at build time, voice at push time, both from `service_location_mode`.
 
 ## Production boundary

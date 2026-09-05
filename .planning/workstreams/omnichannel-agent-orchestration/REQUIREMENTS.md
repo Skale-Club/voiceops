@@ -124,7 +124,7 @@ Every active v3.5 requirement maps to exactly one implementation phase.
 | MESH-04 | Phase 137 | Done — booking #471 created 2026-09-04 through the mesh on the widget: orchestrator to Booking specialist to Action Engine to Xkedule |
 | MODAL-00 | Phase 138 | Done — business_type in Company Info, migration 1296 applied |
 | MODAL-01 | Phase 138 | Done — service_location_mode, migration 1297 applied, 350 orgs on the safe default |
-| MODAL-02 | Phase 138 | Done — customerAddress required at the tool-schema boundary for at_customer |
+| MODAL-02 | Phase 138 | Done — customerAddress required at the tool-schema boundary for at_customer, on widget and voice; the field was added to the live book_appointment definition 2026-09-05 (it had been missing, making the rule vacuous) |
 | MODAL-03 | Phase 138 | Done — 2026-09-04: the Vapi assistant's prompt is now pushed from Xphere with the service location rule rendered by the engine from service_location_mode; the static “do not ask for an address” text is gone from Vapi |
 | TMPL-01 | Phase 139 | Done — agents asset group, bound by slug and tool_name |
 | TMPL-02 | Phase 139 | Done — tokenisation script RUN against the live tenant 2026-09-04: 7 prompts now carry {{business_name}}/{{business_location}}; push-time rendering resolves them |

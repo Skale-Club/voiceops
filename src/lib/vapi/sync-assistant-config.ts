@@ -22,6 +22,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import type { Database } from '@/types/database'
 import { decrypt } from '@/lib/crypto'
 import { getWorkflowInputSchema } from '@/lib/workflows/derive-input-schema'
+import { applyServiceLocationMode } from '@/lib/agent-runtime/service-location-schema'
 import { renderPromptTemplate, resolveTenantFacts } from '@/lib/org-templates/prompt-template'
 import { vapiFetch, vapiFetchWrite, VapiApiError } from './client'
 import {
@@ -182,13 +183,21 @@ export async function pushAssistantConfig(
       for (const v of versionRows ?? []) definitionById.set(v.id, v.definition)
     }
 
+    // The same schema-boundary rule the widget applies in buildWorkflowTools():
+    // for an on_premises org the model must not even see that customerAddress
+    // exists on book_appointment; for at_customer it is required. Without this
+    // the voice prompt would ask for an address the function has no field to
+    // carry - the prompt and the schema must be rendered from the same setting.
     assistantWorkflows = (workflowRows ?? [])
       .filter((w): w is typeof w & { tool_name: string } => !!w.tool_name)
       .map((w) => ({
         toolName: w.tool_name,
         description: w.description ?? `Execute the workflow: ${w.name}`,
-        inputSchema: getWorkflowInputSchema(
-          w.current_version_id ? definitionById.get(w.current_version_id) ?? null : null
+        inputSchema: applyServiceLocationMode(
+          getWorkflowInputSchema(
+            w.current_version_id ? definitionById.get(w.current_version_id) ?? null : null
+          ),
+          org?.service_location_mode
         ),
       }))
   }
