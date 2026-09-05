@@ -46,7 +46,10 @@ it('simulates a full call against the live assistant config', async () => {
   const callId = 'sim-' + Date.now()
 
   async function runTool(name: string, args: Record<string, unknown>): Promise<string> {
-    if (name === 'book_appointment') return `Booking confirmed. ID: 999 | ${args.bookingDate} at ${args.startTime}-${args.startTime} | Status: pending | Total: $38.00 (SIMULATED - nothing was booked)`
+    // The two-phase gate lives in production: an unconfirmed call returns the
+    // read-back without writing, so let it through. Only the confirmed call
+    // (the one that would write) is intercepted.
+    if (name === 'book_appointment' && (args.confirmed === true || args.confirmed === 'true')) return `Booking confirmed. ID: 999 | ${args.bookingDate} at ${args.startTime}-${args.startTime} | Status: pending | Total: $38.00 (SIMULATED - nothing was booked)`
     const tc = { id: 'toolu_sim', type: 'function', function: { name, arguments: JSON.stringify(args) } }
     const r = await fetch('https://xphere.app/api/vapi/tools', { method: 'POST', headers: { 'content-type': 'application/json', 'x-vapi-secret': secret }, body: JSON.stringify({ message: { type: 'tool-calls', call: { id: callId, assistantId: ASSISTANT_ID, customer: { number: CALLER } }, toolCallList: [tc] } }) })
     const j = (await r.json()) as any
@@ -110,7 +113,7 @@ it('simulates a full call against the live assistant config', async () => {
     for (const opener of ['perfect', 'great', 'sure thing', 'absolutely', 'got it']) if (low.startsWith(opener)) issues.push(`T${turn} filler opener "${opener}"`)
   }
   // Generic, script-independent gates.
-  const bookIdx = messages.findIndex((m) => m.role === 'assistant' && m.tool_calls?.some((c: any) => c.function.name === 'book_appointment'))
+  const bookIdx = messages.findIndex((m) => m.role === 'assistant' && m.tool_calls?.some((c: any) => c.function.name === 'book_appointment' && /"confirmed":\s*(true|"true")/.test(c.function.arguments)))
   const askIdx = messages.findIndex((m) => m.role === 'assistant' && typeof m.content === 'string' && /anything else/i.test(m.content))
   if (bookIdx >= 0 && (askIdx < 0 || bookIdx < askIdx)) issues.push('GATE: book_appointment before the "anything else" question')
   if (bookIdx >= 0 && askIdx >= 0 && bookIdx > askIdx && !messages.slice(askIdx + 1, bookIdx).some((m) => m.role === 'user')) issues.push('GATE: book_appointment in the same turn as the read-back')
