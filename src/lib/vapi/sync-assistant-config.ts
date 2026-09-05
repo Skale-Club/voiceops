@@ -56,6 +56,29 @@ interface VapiAssistantGetResponse {
 interface VapiExistingTool {
   function?: { name?: string }
   messages?: VapiToolMessage[]
+  /** Per-tool routing: where Vapi POSTs the tool call, and the secret it sends. */
+  server?: Record<string, unknown>
+}
+
+/**
+ * Reads the per-tool `server` blocks (URL + webhook secret) the assistant
+ * already carries, keyed by tool name.
+ *
+ * This exists because the first real push dropped them. A tool without a
+ * `server` block, on an assistant and phone number without one either, has
+ * nowhere to send its call: the phone robot answers, decides to look up the
+ * customer, and the lookup goes into the void. Routing is not part of what
+ * this module renders, so it must be carried through untouched — the same
+ * discipline as the tuned messages, with a harder failure when it is missing.
+ */
+function existingToolServersOf(current: VapiAssistantGetResponse): Record<string, Record<string, unknown>> {
+  const tools = (current.model?.tools ?? []) as VapiExistingTool[]
+  const byName: Record<string, Record<string, unknown>> = {}
+  for (const tool of tools) {
+    const name = tool.function?.name
+    if (name && tool.server && typeof tool.server === 'object') byName[name] = tool.server
+  }
+  return byName
 }
 
 /**
@@ -250,16 +273,41 @@ export async function pushAssistantConfig(
     })
 
     const messagesByTool = new Map(rendered.toolMessages.map((m) => [m.toolName, m.messages]))
+    const serverByTool = existingToolServersOf(current)
 
-    const tools = rendered.functions.map((fn) => ({
-      type: 'function',
-      function: {
-        name: fn.name,
-        description: fn.description,
-        parameters: fn.parameters,
-      },
-      messages: messagesByTool.get(fn.name) ?? [{ type: 'request-start', content: 'One moment.' }],
-    }))
+    // Routing for a tool that has none of its own: the block every other tool
+    // on this assistant shares, if they all share one. A brand-new function
+    // then inherits where its siblings already go. If the assistant carries no
+    // per-tool routing at all and has no assistant-level `server` either, its
+    // calls cannot reach us and pushing would ship a mute robot: refuse.
+    const distinctServers = new Set(Object.values(serverByTool).map((srv) => JSON.stringify(srv)))
+    const sharedServer =
+      distinctServers.size === 1 ? (JSON.parse([...distinctServers][0]) as Record<string, unknown>) : undefined
+    const assistantLevelServer = current.server && typeof current.server === 'object'
+
+    const tools = rendered.functions.map((fn) => {
+      const server = serverByTool[fn.name] ?? sharedServer
+      return {
+        type: 'function',
+        function: {
+          name: fn.name,
+          description: fn.description,
+          parameters: fn.parameters,
+        },
+        messages: messagesByTool.get(fn.name) ?? [{ type: 'request-start', content: 'One moment.' }],
+        ...(server ? { server } : {}),
+      }
+    })
+
+    const unroutedTools = tools.filter((t) => !('server' in t))
+    if (unroutedTools.length > 0 && !assistantLevelServer) {
+      return {
+        ok: false,
+        error:
+          `Refusing to push: ${unroutedTools.map((t) => t.function.name).join(', ')} would have no server ` +
+          'to send tool calls to (no per-tool server block to carry over and no assistant-level server).',
+      }
+    }
 
     const model = {
       ...(current.model ?? {}),

@@ -62,7 +62,11 @@ real second organization — has not been done. Every guarantee above is proven 
 in-memory fakes, which is the right place to prove them, and none of it substitutes for one
 real install.
 
-**The outbound Vapi sync has never run.** `pushAssistantConfig()` is unit-tested against a
+**The outbound Vapi sync has now run — and its first run broke routing.** See
+`FINDINGS-OUTSIDE-SCOPE.md` item 8: the first push dropped every tool's `server` block; fixed the
+same day with a fail-closed guard. What follows is the pre-push text, kept for the record.
+
+**The outbound Vapi sync had never run.** `pushAssistantConfig()` is unit-tested against a
 mocked fetch and has never PATCHed a real assistant. Its request shape was not guessed: it
 was read off this repository's own earlier probes, which did get 200 responses from the live
 assistant. That is good evidence and it is not the same as having run.
