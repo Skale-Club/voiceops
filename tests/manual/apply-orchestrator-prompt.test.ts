@@ -24,7 +24,7 @@ it.skipIf(!ORG_ID)('activates the orchestrator prompt', async () => {
   const { data: nv, error } = await s.from('agent_prompt_versions').insert({ organization_id: ORG_ID!, agent_id: a.id, version: next, system_prompt: prompt }).select('id').single()
   if (error || !nv) throw new Error(error?.message)
   const FALLBACK = 'Sorry, our calendar is taking longer than usual right now. Please ask me again in a moment and I will check it for you.'
-  const { error: e2 } = await s.from('agents').update({ active_prompt_version_id: nv.id, max_tokens: 500, fallback_message: FALLBACK }).eq('id', a.id)
+  const { error: e2 } = await s.from('agents').update({ active_prompt_version_id: nv.id, max_tokens: 500, fallback_message: FALLBACK, ...(process.env.ORCH_MODEL ? { model: process.env.ORCH_MODEL } : {}) }).eq('id', a.id)
   if (e2) throw new Error(e2.message)
   const graph = JSON.parse(readFileSync(GRAPH_FILE, 'utf8'))
   const entry = graph.agents.find((x: { slug: string }) => x.slug === SLUG)

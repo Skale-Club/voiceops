@@ -8,6 +8,13 @@
 // no-show or a refund argument. Unpublished policy comes back as nothing at
 // all, which the agent must relay as "I don't know" — never as "there is none".
 import { xkeduleFetchJson, type XkeduleCredentials } from '../client'
+import { memoTtl } from '@/lib/cache/ttl-memo'
+
+// A read the conversation repeats on almost every turn (each specialist
+// resolves a service name to an id through it). The catalogue does not change
+// between two turns; the provider takes 1.5-3s to answer it from production.
+// Keyed by tenant base URL so two organizations never share an answer.
+const BUSINESS_INFO_CACHE_TTL_MS = 600000
 
 interface DayHours {
   isOpen?: boolean
@@ -88,7 +95,11 @@ export async function getXkeduleBusinessInfo(
   _params: Record<string, unknown>,
   credentials: XkeduleCredentials,
 ): Promise<string> {
-  const data = await xkeduleFetchJson<BusinessInfoResponse>('/api/v1/business-info', 'GET', null, credentials)
+  const data = await memoTtl(
+    `xk:business_info:${credentials.tenantBaseUrl}`,
+    BUSINESS_INFO_CACHE_TTL_MS,
+    () => xkeduleFetchJson<BusinessInfoResponse>('/api/v1/business-info', 'GET', null, credentials),
+  )
 
   const header = [
     data.businessName ? `Business: ${data.businessName}` : null,

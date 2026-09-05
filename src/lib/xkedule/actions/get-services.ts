@@ -9,6 +9,13 @@
 // front of the customer. v2's `staff[].serviceIds` (empty = unrestricted) is
 // what makes "who can do this?" answerable.
 import { xkeduleFetchJson, type XkeduleCredentials } from '../client'
+import { memoTtl } from '@/lib/cache/ttl-memo'
+
+// A read the conversation repeats on almost every turn (each specialist
+// resolves a service name to an id through it). The catalogue does not change
+// between two turns; the provider takes 1.5-3s to answer it from production.
+// Keyed by tenant base URL so two organizations never share an answer.
+const SERVICES_CACHE_TTL_MS = 300000
 
 interface CatalogV2Service {
   id: number
@@ -37,7 +44,11 @@ export async function getXkeduleServices(
   _params: Record<string, unknown>,
   credentials: XkeduleCredentials,
 ): Promise<string> {
-  const data = await xkeduleFetchJson<CatalogV2Response>('/api/v1/catalog/v2', 'GET', null, credentials)
+  const data = await memoTtl(
+    `xk:services:${credentials.tenantBaseUrl}`,
+    SERVICES_CACHE_TTL_MS,
+    () => xkeduleFetchJson<CatalogV2Response>('/api/v1/catalog/v2', 'GET', null, credentials),
+  )
 
   if (!data.services || data.services.length === 0) {
     return 'No services available.'

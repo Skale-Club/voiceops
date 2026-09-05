@@ -24,7 +24,9 @@ import type { AgentChannel, ResolvedAgent } from './types'
 // resolveAgentUncached() throws in that case so memoTtl's own
 // never-cache-a-rejection contract keeps every caller retrying on the very
 // next turn instead of being stuck behind a transient failure for 30s.
-const RESOLVE_AGENT_TTL_MS = 30_000
+// Two minutes: a widget turn through the mesh takes ~20s, so 30s expired
+// between one turn and the next and the memo never actually hit.
+const RESOLVE_AGENT_TTL_MS = 120_000
 
 async function resolveAgentUncached(
   agentId: string,
