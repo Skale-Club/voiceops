@@ -130,11 +130,17 @@ export async function resolveTwilioOrgByToNumber(
 > {
   const supabase = createServiceRoleClient()
 
+  // Oldest registration first: when several organizations share one number
+  // (the platform's notifications number is registered by three), the first
+  // AccountSid match below wins, and without an explicit order that was heap
+  // order — stable in practice, guaranteed by nothing. The original owner
+  // keeps its inbound traffic no matter who registers the number later.
   const { data: candidates } = await supabase
     .from('twilio_phone_numbers')
     .select('id, organization_id, e164')
     .eq('e164', toNumber)
     .eq('is_active', true)
+    .order('created_at', { ascending: true })
 
   if (!candidates || candidates.length === 0) return null
 

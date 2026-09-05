@@ -28,6 +28,8 @@ const fromMock = vi.fn((table: string) => {
       select: vi.fn().mockReturnThis(),
       eq: vi.fn().mockReturnThis(),
       limit: vi.fn().mockReturnThis(),
+    order: vi.fn().mockReturnThis(),
+      order: vi.fn().mockReturnThis(),
       maybeSingle: vi.fn().mockResolvedValue({ data: { e164: '+19990000000' }, error: null }),
       then: (resolve: (v: { data: unknown[]; error: null }) => unknown) =>
         resolve({ data: candidateRows, error: null }),
@@ -42,6 +44,8 @@ const fromMock = vi.fn((table: string) => {
         return builder
       }),
       limit: vi.fn().mockReturnThis(),
+    order: vi.fn().mockReturnThis(),
+      order: vi.fn().mockReturnThis(),
       maybeSingle: vi.fn(() => {
         const blob = capturedOrg ? ORG_INTEGRATIONS[capturedOrg] : null
         return Promise.resolve({
@@ -56,6 +60,7 @@ const fromMock = vi.fn((table: string) => {
     select: vi.fn().mockReturnThis(),
     eq: vi.fn().mockReturnThis(),
     limit: vi.fn().mockReturnThis(),
+    order: vi.fn().mockReturnThis(),
     maybeSingle: vi.fn().mockResolvedValue({ data: null, error: null }),
   }
 })
