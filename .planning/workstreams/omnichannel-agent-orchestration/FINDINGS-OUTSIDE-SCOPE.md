@@ -375,3 +375,22 @@ Friday, 2026-09-05 (America/New_York). Resolve every relative day to a full YYYY
 in this year before using it." — from `organizations.timezone` (memoised 10 minutes, UTC when
 absent). This replaces relying on the model to remember a tool call. Pinned by
 `tests/agent-today-line.test.ts`.
+
+## 15. End of day, measured in production (2026-09-05, after `52049a47`)
+
+Widget, the demo's own three turns, same session, all answered correctly:
+
+| Turn | Before (first measurement) | After |
+|---|---|---|
+| "Hi, I'd like to book a haircut." | 10–21s, open questions, asked for name and phone | 18.8s, one narrowing question |
+| "Just the signature haircut, how much is it?" | 19–22s | 14.9s (2.8s when answered from memory) |
+| "Ok. What do you have open on September 8th?" | **aborted at 30s**, or lost the service, or 2024 | 14.4s, three real times, right year |
+
+What remains in a ~15s widget turn is structural: two model hops (orchestrator decide +
+compose, specialist) on OpenRouter plus one provider call, with pre-model overhead now
+~1s per hop. The next lever is architectural — let the orchestrator answer a plain price or
+catalogue question itself from cached data rather than delegating — and is a design decision,
+not a defect.
+
+Voice, warm, through production as Vapi calls it: lookup 0.17s (warmed at pickup), business
+info 0.46s, services 0.86s, quote 2.3s, availability 0.56s. The greeting is instant.
