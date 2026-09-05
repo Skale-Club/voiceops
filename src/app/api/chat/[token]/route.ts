@@ -10,7 +10,7 @@ import { after } from 'next/server'
 import { z } from 'zod'
 import { createServiceRoleClient } from '@/lib/supabase/admin'
 import { getSession, setSession, type ChatSessionContext } from '@/lib/chat/session'
-import { ensureDbSession, persistMessage } from '@/lib/chat/persist'
+import { ensureDbSession, persistMessage, loadSessionFromDb } from '@/lib/chat/persist'
 import { runAgent } from '@/lib/agent-runtime'
 import { createLogger } from '@/lib/obs/logger'
 import { isRequestAllowed, normalizeWidgetUrlMode, normalizeWidgetUrlRules } from '@/lib/widget/url-rules'
@@ -89,12 +89,41 @@ export async function POST(
     }
     const { message, sessionId: incomingSessionId, pageUrl, commerce_context } = parsed.data
 
-    // R3/R4 (contract §7). getSession needs only the sessionId (org-independent
-    // Redis read) so session limits run before the org DB lookup.
-    // R4 gates ANY path that will create a session — including a bogus/expired
-    // incoming sessionId (Redis miss), which would otherwise bypass R4 entirely
-    // by minting a new session + chat_sessions row per request.
-    const existingSession = incomingSessionId ? await getSession(incomingSessionId) : null
+    // 3. Resolve org by widget token. Runs before the session limits now: a
+    // session that Redis does not hold has to be reloaded from the database,
+    // and that reload is scoped to the organization.
+    const supabase = createServiceRoleClient()
+    const { data: org, error: orgError } = await supabase
+      .from('organizations')
+      .select('id, name, is_active, widget_url_mode, widget_url_rules')
+      .eq('widget_token', token)
+      .single()
+
+    if (orgError || !org || !org.is_active) {
+      return Response.json({ error: 'Invalid or inactive token' }, { status: 401, headers: CORS_HEADERS })
+    }
+
+    // Session: Redis first, the database second. Redis is a cache the
+    // production container may not even have (2026-09-05: no REDIS_URL, so
+    // getSession() always returned null, every message minted a new session,
+    // and the widget answered "this is the start of our conversation" to its
+    // own third turn). conversations + conversation_messages are the source
+    // of truth and loadSessionFromDb() rebuilds the same context from them.
+    // A database error here degrades to "start a fresh session", never a 500.
+    let existingSession = incomingSessionId ? await getSession(incomingSessionId) : null
+    if (!existingSession && incomingSessionId) {
+      try {
+        existingSession = await loadSessionFromDb({ orgId: org.id, sessionId: incomingSessionId })
+      } catch (err) {
+        log.warn('chat_session_db_fallback_failed', { error: err, orgId: org.id })
+        existingSession = null
+      }
+    }
+
+    // R3/R4 (contract §7). R4 gates ANY path that will create a session —
+    // including a bogus/expired incoming sessionId, which would otherwise
+    // bypass R4 entirely by minting a new session + conversations row per
+    // request.
     if (incomingSessionId && existingSession) {
       const r3 = await rateLimit(`chat:sess:${incomingSessionId}`, 10, 60, { failMode: 'memory' })
       if (!r3.allowed) {
@@ -107,18 +136,6 @@ export async function POST(
         log.warn('chat_rate_limited', { rule: 'R4', ip })
         return rateLimited()
       }
-    }
-
-    // 3. Resolve org by widget token
-    const supabase = createServiceRoleClient()
-    const { data: org, error: orgError } = await supabase
-      .from('organizations')
-      .select('id, name, is_active, widget_url_mode, widget_url_rules')
-      .eq('widget_token', token)
-      .single()
-
-    if (orgError || !org || !org.is_active) {
-      return Response.json({ error: 'Invalid or inactive token' }, { status: 401, headers: CORS_HEADERS })
     }
 
     // R5 — org LLM budget (fail-open: Redis down must not take every org's chat down).
