@@ -171,6 +171,8 @@ export async function checkXkeduleAvailability(
     if (day && !day.open) {
       return `The business is closed on ${day.weekday} (${date}). Suggest the next open day instead.`
     }
+    // Late in the day "fully booked" is misleading: the day is simply over.
+    if (day?.today) return `No openings left today (${date}). Suggest another day.`
     return `No available time slots on ${date} (fully booked). Suggest another day.`
   }
 

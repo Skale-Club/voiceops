@@ -105,7 +105,7 @@ export async function fetchBusinessInfoCached(credentials: XkeduleCredentials): 
  * Whether the business is open on a given YYYY-MM-DD, per its weekly hours.
  * Returns null when hours are unknown (never claims "closed" on missing data).
  */
-export async function isBusinessOpenOn(credentials: XkeduleCredentials, date: string): Promise<{ open: boolean; weekday: string; hours: string } | null> {
+export async function isBusinessOpenOn(credentials: XkeduleCredentials, date: string): Promise<{ open: boolean; weekday: string; hours: string; today: boolean } | null> {
   try {
     const info = await fetchBusinessInfoCached(credentials)
     const hours = info.businessHours
@@ -114,7 +114,11 @@ export async function isBusinessOpenOn(credentials: XkeduleCredentials, date: st
     const day = hours[weekday]
     if (!day) return null
     const open = day.isOpen !== false && !!day.start && !!day.end
-    return { open, weekday: titleCase(weekday), hours: open ? `${day.start}-${day.end}` : 'closed' }
+    let today = false
+    try {
+      today = new Intl.DateTimeFormat('en-CA', { timeZone: info.timezone || 'UTC', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date()) === date
+    } catch { /* unknown timezone: not judged */ }
+    return { open, weekday: titleCase(weekday), hours: open ? `${day.start}-${day.end}` : 'closed', today }
   } catch {
     return null
   }

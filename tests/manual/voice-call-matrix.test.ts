@@ -36,7 +36,7 @@ const SCENARIOS: Scenario[] = [
   { name: 'known caller reschedules #471', caller: KNOWN, script: ['I need to move my appointment on the 8th', 'monday same time if you can', 'the first one', "no that's it", 'thanks bye'], expect: { mustSay: [/vanildo/i, /monday/i], mustCall: ['lookup_customer', 'check_availability', 'reschedule_appointment'], mustNotCall: ['book_appointment'] } },
   { name: 'known caller cancels #471', caller: KNOWN, script: ['I have to cancel my appointment', 'yes cancel it', 'no', 'thanks bye'], expect: { mustCall: ['lookup_customer', 'cancel_appointment'], mustNotCall: ['book_appointment', 'check_availability'], mustSay: [/cancel/i] } },
   { name: 'tomorrow is Sunday (closed)', caller: NEW, script: ['Ana', 'a buzz cut', 'yes', 'anyone', 'tomorrow', 'monday then', 'ten twenty', 'Silva', 'no'], expect: { mustSay: [/closed/i, /monday/i], mustNotSay: [/fully booked/i] } },
-  { name: 'changes mind: adds beard after price', caller: NEW, script: ['Jon', 'a haircut', 'signature', 'actually can I add a beard trim too', 'yes', 'anyone', 'monday', 'nine', 'Doe', 'no'], expect: { mustCall: ['get_quote'], mustSay: [/anything else/i] } },
+  { name: 'changes mind: adds beard after price', caller: NEW, script: ['Jon', 'a haircut', 'signature', 'actually can I add a beard trim too', 'yes', 'anyone', 'tuesday', 'nine', 'Doe', 'no'], expect: { mustCall: ['get_quote'], mustSay: [/anything else/i] } },
   { name: 'garbage transcription mid-flow', caller: NEW, script: ['Kim', 'a buzz cut', 'yes', 'anyone', 'monday', 'uh the yeah um', 'nine twenty', 'Park', 'no'], expect: { mustSay: [/didn.t catch|say (that )?again|repeat/i, /anything else/i] } },
   { name: 'declines the price', caller: NEW, script: ['Rob', 'a skin fade', "that's too much, anything cheaper?", 'ok the buzz cut then', 'yes', 'anyone', 'monday', 'nine', 'Cruz', 'no'], expect: { mustSay: [/twenty[- ]five|25|buzz/i, /anything else/i], mustCall: ['get_quote'] } },
   { name: 'availability tool fails', caller: NEW, script: ['Eve', 'a buzz cut', 'yes', 'anyone', 'monday', 'ok', 'bye'], failTool: 'check_availability', expect: { mustSay: [/can.t|cannot|unable|right now|message/i], mustNotCall: ['book_appointment'], mustNotSay: [/\b9|nine|ten|eleven\b/i] } },
@@ -143,7 +143,7 @@ it('runs the voice rehearsal matrix', async () => {
             let args: Record<string, unknown> = {}
             try { args = JSON.parse(c.function.arguments || '{}') } catch { problems.push(`${label} malformed tool args`) }
             const result = await runTool(c.function.name, args)
-            console.log(`###   ${label} TOOL ${c.function.name}(${JSON.stringify(args).slice(0, 110)}) :: ${result.slice(0, 70).replace(/\n/g, ' ')}`)
+            console.log(`###   ${label} TOOL ${c.function.name}(${JSON.stringify(args).slice(0, 400)}) :: ${result.slice(0, 70).replace(/\n/g, ' ')}`)
             messages.push({ role: 'tool', tool_call_id: c.id, content: result })
           }
           continue

@@ -45,7 +45,7 @@
       "node_kind": "action",
       "access": "read",
       "name": "Check availability",
-      "description": "Open times for a set of services on a given date. Pinning a staff id materially speeds up the lookup.",
+      "description": "Open times for a set of service ids on a given date (YYYY-MM-DD). Pinning a staffId materially speeds up the lookup. Call it ONLY for a date the customer named out loud, one date per call - never for today, tomorrow or a guessed day on your own, and never before the customer answered \"what day works for you?\".",
       "input_schema": {
         "service_ids": {
           "type": "array",

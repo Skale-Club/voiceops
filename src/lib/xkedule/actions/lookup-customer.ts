@@ -19,6 +19,11 @@ interface UpcomingBooking {
   totalPrice?: string | number | null
 }
 
+interface BookingDetail {
+  items?: Array<{ serviceId: number; serviceName: string }>
+  staff?: { id: number; name: string } | null
+}
+
 interface CustomerResponse {
   customer: { id: number; name: string; email: string | null; phone: string | null }
   upcomingBookings: UpcomingBooking[]
@@ -41,9 +46,21 @@ export async function lookupXkeduleCustomer(
       null,
       credentials,
     )
-    const upcoming = data.upcomingBookings.length
-      ? data.upcomingBookings.map((b) => `#${b.id} on ${b.bookingDate} at ${b.startTime} (${b.status})${b.staffMemberId ? `, staff member id ${b.staffMemberId}` : ''}${b.totalPrice != null ? `, $${b.totalPrice}` : ''}`).join('\n')
-      : 'No upcoming bookings.'
+    // The customer endpoint lists bookings without their services or staff.
+    // A move needs both (the availability check is per service and staff),
+    // so each upcoming booking is described from its detail endpoint; the
+    // lookup is warmed at pickup, so the extra round trips are off the line.
+    const details = await Promise.all(data.upcomingBookings.slice(0, 3).map(async (b) => {
+      try {
+        const d = await xkeduleFetchJson<BookingDetail>(`/api/v1/bookings/${b.id}`, 'GET', null, credentials)
+        const services = (d.items ?? []).map((i) => `${i.serviceName} (service id ${i.serviceId})`).join(' + ')
+        const staff = d.staff?.name ? ` with ${d.staff.name} (staff id ${d.staff.id})` : b.staffMemberId ? ` with staff id ${b.staffMemberId}` : ''
+        return `#${b.id} on ${b.bookingDate} at ${b.startTime} (${b.status})${services ? `: ${services}` : ''}${staff}${b.totalPrice != null ? `, $${b.totalPrice}` : ''}`
+      } catch {
+        return `#${b.id} on ${b.bookingDate} at ${b.startTime} (${b.status})${b.staffMemberId ? `, staff id ${b.staffMemberId}` : ''}${b.totalPrice != null ? `, $${b.totalPrice}` : ''}`
+      }
+    }))
+    const upcoming = details.length ? details.join('\n') : 'No upcoming bookings.'
     return `Found customer: ${data.customer.name}${data.customer.email ? ` (${data.customer.email})` : ''}\n${upcoming}`
   } catch (err) {
     const msg = (err as Error).message
