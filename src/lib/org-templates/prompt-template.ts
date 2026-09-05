@@ -26,6 +26,26 @@ export interface TenantFacts {
   businessAddress: string | null
 }
 
+/** True when a prompt still carries a tenant-fact token this module renders. */
+export function hasTenantFactTokens(template: string): boolean {
+  return template.includes('{{business_name}}') || template.includes('{{business_location}}')
+}
+
+// resolveTenantFacts() is on the per-turn path now (resolve-agent.ts renders a
+// templated prompt on every turn, on every channel), and its preferred source
+// is a Xkedule network call. A business does not change its name or address
+// between two turns of one conversation, so the answer is held in-process for
+// a few minutes per organization. This is a freshness cache, not a store of
+// record; a cold container simply asks again. Never shared across orgs: the
+// key is the organization id.
+const TENANT_FACTS_TTL_MS = 5 * 60 * 1000
+const tenantFactsCache = new Map<string, { facts: TenantFacts; expiresAt: number }>()
+
+/** Test seam. */
+export function clearTenantFactsCache(): void {
+  tenantFactsCache.clear()
+}
+
 interface XkeduleBusinessInfoResponse {
   businessName?: string | null
   address?: string | null
@@ -75,6 +95,18 @@ function assembleAddressFromOrgRow(org: {
  * row values are used instead. Read-only: never writes to any table.
  */
 export async function resolveTenantFacts(
+  admin: SupabaseClient<Database>,
+  orgId: string
+): Promise<TenantFacts> {
+  const cached = tenantFactsCache.get(orgId)
+  if (cached && cached.expiresAt > Date.now()) return cached.facts
+
+  const facts = await resolveTenantFactsUncached(admin, orgId)
+  tenantFactsCache.set(orgId, { facts, expiresAt: Date.now() + TENANT_FACTS_TTL_MS })
+  return facts
+}
+
+async function resolveTenantFactsUncached(
   admin: SupabaseClient<Database>,
   orgId: string
 ): Promise<TenantFacts> {

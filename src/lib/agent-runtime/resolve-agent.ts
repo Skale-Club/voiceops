@@ -4,6 +4,7 @@
 // D-34-11: channel_overrides deep-merge (system_prompt suffix-append; model/temp/tokens/history replace).
 
 import { createServiceRoleClient } from '@/lib/supabase/admin'
+import { hasTenantFactTokens, renderPromptTemplate, resolveTenantFacts } from '@/lib/org-templates/prompt-template'
 import { createLogger } from '@/lib/obs/logger'
 import type { AgentChannel, ResolvedAgent } from './types'
 
@@ -53,7 +54,20 @@ export async function resolveAgent(
       .error('agent_prompt_version_missing', { active_prompt_version_id: agent.active_prompt_version_id, resolution: 'returning_null_to_caller' })
     return null
   }
-  const baseSystemPrompt = promptVersionRow.system_prompt
+  // A stored prompt may be a template: scripts/templatize-agent-prompts.ts
+  // (139-06) turns a live tenant's prompts into ones carrying
+  // `{{business_name}}` / `{{business_location}}`, so that the same rows can be
+  // captured into an org template. Those tokens are rendered here, on every
+  // channel, from the tenant's own facts — this is the one seam every runtime
+  // path (blocking, streaming, partner calls) resolves an agent through, so
+  // rendering here is what makes "a template carries behaviour; a tenant
+  // supplies its facts" true for the source tenant and not only for a target
+  // one installed from it. Prompts without tokens cost nothing extra: the
+  // facts lookup runs only when a token is present.
+  const storedSystemPrompt = promptVersionRow.system_prompt
+  const baseSystemPrompt = hasTenantFactTokens(storedSystemPrompt)
+    ? renderPromptTemplate(storedSystemPrompt, await resolveTenantFacts(supabase, orgId))
+    : storedSystemPrompt
 
   // D-34-11: apply channel_overrides | JSONB keyed by channel name
   const overrides = (agent.channel_overrides as Record<string, Record<string, unknown>> | null) ?? {}

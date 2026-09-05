@@ -31,9 +31,16 @@ import {
   parseExpectSlug,
   assertExpectSlugPresentForApply,
 } from '../scripts/templatize-agent-prompts'
-import { renderPromptTemplate, type TenantFacts } from '../src/lib/org-templates/prompt-template'
+import {
+  clearTenantFactsCache,
+  renderPromptTemplate,
+  type TenantFacts,
+} from '../src/lib/org-templates/prompt-template'
 
 beforeEach(() => {
+  // resolveTenantFacts() caches per org id; these cases reuse one fake org
+  // with different facts, so the cache must not carry across them.
+  clearTenantFactsCache()
   getXkeduleCredentialsForOrg.mockReset()
   xkeduleFetchJson.mockReset()
   // No Xkedule connection for any org in this suite -- resolveTenantFacts()
