@@ -124,7 +124,9 @@ it('runs the voice rehearsal matrix', async () => {
       }
       const tc = { id: `toolu_${++toolSeq}`, type: 'function', function: { name, arguments: JSON.stringify(args) } }
       const r = await fetch('https://xphere.app/api/vapi/tools', { method: 'POST', headers: { 'content-type': 'application/json', 'x-vapi-secret': secret }, body: JSON.stringify({ message: { type: 'tool-calls', call: { id: callId, assistantId: ASSISTANT_ID, customer: { number: sc.caller } }, artifact: { messages: toArtifactMessages(messages) }, toolCallList: [tc] } }) })
-      const j = (await r.json()) as any
+      const body = await r.text()
+      let j: any = {}
+      try { j = JSON.parse(body) } catch { problems.push(`${name}: production answered HTTP ${r.status} non-JSON`); return 'Service unavailable.' }
       const result = String(j.results?.[0]?.result ?? '')
       if (name === 'check_availability' && /Available slots/.test(result)) offered += ' ' + result
       return result

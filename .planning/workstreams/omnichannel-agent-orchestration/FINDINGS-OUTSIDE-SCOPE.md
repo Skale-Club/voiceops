@@ -523,3 +523,60 @@ and harmless to correctness.
 
 **Not exercised by the rehearsal, by construction:** audio, transcription, TTS and
 endpointing. Those only a real call proves.
+
+## 21. Consent is verified by the server, not trusted from the model — 2026-09-05, both channels
+
+Item 20's two-phase gate trusted `confirmed: true`. The rehearsal matrix
+(`tests/manual/voice-call-matrix.test.ts`, 13 scripted callers) showed the model
+setting it before the read-back, moving a booking on the first mention, and choosing a
+time nobody had said. Codex proposed the mechanism; this item integrates it.
+
+**How a calendar write happens on a phone call now**
+
+1. The model calls `book_appointment` (or `reschedule_appointment` / `cancel_appointment`)
+   without `confirmed`. Nothing is written. The engine answers with the read-back to
+   speak, the exact question to ask ("Anything else you'd like to add to that?") and a
+   `confirmationToken` (`turn.time.mac`, ~40 chars; org, call id and a hash of the
+   arguments live inside the MAC).
+2. The model reads back and asks. It stops.
+3. Only a later call with the same arguments, `confirmed: true`, the token, and a Vapi
+   conversation artifact in which the customer answered that question with no / that's
+   all (or "shall I book it?" with yes) writes. Same turn, changed arguments, another
+   call, a token older than ten minutes, "yes" to "anything else?" (an addition), or a
+   missing artifact: refused, with a fresh read-back. `src/lib/vapi/booking-confirmation.ts`,
+   unit-tested in `tests/voice-booking-confirmation.test.ts`.
+4. A time nobody said out loud — not offered by the assistant, not spoken by the caller,
+   in digits or words ("nine forty-five", "quarter to ten", "one" for 13:00) — cannot even
+   be prepared. The model is told to offer the listed times and let the caller pick.
+
+Enabled per workflow by `require_voice_confirmation: true` on the action node
+(`src/lib/action-engine/execute-action.ts`); set on the three Cuts & Culture write
+workflows, whose input schemas gained `confirmed` and `confirmationToken`. The widget is
+unaffected: no artifact, no gate beyond `confirmed`.
+
+**What the matrix found on the way (all fixed, all now in the harness as gates or lints)**
+
+| Seen | Fix |
+|---|---|
+| Consent token (~230 chars of base64 JSON) pushed the booking call past Vapi's 250-token output cap; the JSON was cut mid-argument, the model retried with `{}` and told the caller "you're booked" | Token shrunk to `turn.time.mac`; push sets a 600-token floor on `model.maxTokens`; prompt: the booking tool confirms only with "Appointment request received" / "Booking confirmed" |
+| Prepared 09:00 straight after availability, before offering a time | "Time was spoken" guard (above) |
+| Moved #471 by guessing service id 1: the customer lookup listed bookings without their services | `lookup_customer` reads each upcoming booking's detail: services with ids, staff with id |
+| Availability failure ("Service unavailable") narrated as "booked up" | Prompt: a failure is never "booked", "full" or "closed"; say the calendar can't be checked right now, offer a message |
+| Checked today, tomorrow and Monday on its own before asking the day; said "fully booked today" at 23:00 | Tool description: only for a date the caller named; `check_availability` says "no openings left today" for the current day |
+| Rehearsal reused one tool-call id, so production's per-call dedupe rejected the second prepare as a conflict | Harness: unique ids; it also sends the artifact and runs the same consent check locally, so no rehearsal can write |
+
+Scoreboard (13 scenarios, gpt-5.1, live prompt and schemas, read tools against production):
+v25 8 pass · v27 (against the previous production) 3 · v31 10 · v32 12 · **v33 13 of 13**
+(`b88e6aff` in production, prompt v33 on the assistant). In the last run the server refused
+two writes the model attempted without the read-back (prepare + confirm in one turn; a
+confirm after "give me a moment" instead of the question) and the model recovered on the
+next turn each time - which is the point: the conversation can wobble, the calendar cannot.
+Residue: an occasional "Sure"/"Got it" opener and a 47-51 word turn, lint-only.
+
+**For the next real call** the things only a phone proves: the pause before the first
+words, whether "nine forty-five" transcribes as a time the guard recognises, and whether
+Vapi's artifact carries every turn (the gate fails closed without it: the model is told
+to explain nothing was booked and offer a message).
+
+Not exercised by construction: audio, transcription, TTS, endpointing. A real call proves
+those; everything above holds regardless of what the model does.

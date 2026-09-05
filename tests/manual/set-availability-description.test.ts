@@ -5,13 +5,13 @@ import { readFileSync, writeFileSync } from 'node:fs'
 import { createServiceRoleClient } from '@/lib/supabase/admin'
 const ORG_ID = process.env.VAPI_PUSH_TEST_ORG_ID
 const GRAPH = '.planning/workstreams/omnichannel-agent-orchestration/canary/cuts-and-culture.json'
-const SUFFIX = ' Call it ONLY for a date the customer named out loud, one date per call - never for today, tomorrow or a guessed day on your own, and never before the customer answered "what day works for you?".'
+const SUFFIX = ' Call it ONLY for a date the customer named out loud, one date per call - never for today, tomorrow or a guessed day on your own, and never before the customer answered "what day works for you?". The date of an existing booking returned by lookup_customer is not a date the customer named.'
 it.skipIf(!ORG_ID)('sets the availability description', async () => {
   const s = createServiceRoleClient()
   const { data: wf } = await s.from('workflows').select('id, description').eq('org_id', ORG_ID!).eq('tool_name', 'check_availability').is('deleted_at', null).maybeSingle()
   console.log('### now: ' + wf!.description)
-  if (wf!.description?.includes('named out loud')) { console.log('### unchanged'); return }
-  const next = (wf!.description ?? 'Check available time slots for a service on a date.').trim() + SUFFIX
+  if (wf!.description?.includes('existing booking returned by lookup_customer')) { console.log('### unchanged'); return }
+  const next = (wf!.description ?? 'Check available time slots for a service on a date.').replace(/ Call it ONLY for a date[\s\S]*$/, '').trim() + SUFFIX
   console.log('### next: ' + next)
   if (process.env.APPLY !== '1') { console.log('### DRY RUN'); return }
   const { error } = await s.from('workflows').update({ description: next }).eq('id', wf!.id)
