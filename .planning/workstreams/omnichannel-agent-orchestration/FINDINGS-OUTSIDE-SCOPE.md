@@ -458,3 +458,38 @@ events, no cancellation texts).
 What a real customer now gets: "we received your request" the moment they book, on either
 channel; "you're confirmed" when the shop confirms (or immediately, once the Xkedule demo
 tenant is set to auto-confirm). Still an operator setting: that auto-confirm flag.
+
+## 19. The second real call (21:00) and the model/transcriber decisions — FIXED (2026-09-05)
+
+Two minutes, hung up. What the transcript showed:
+
+- After the greeting, 11.5s of silence, then the bot: *"I need to look up your account first.
+  What's your phone number?"* The number **was** in the prompt (`caller's number, +15088018190`
+  verified in the call's own system message); the model (Haiku via Vapi) ignored it on a turn
+  with no caller speech, misheard the dictated digits, found nobody, and re-asked the opening
+  question. Prompt v7 now says the number is known, never to ask for it, and to ask only
+  "which service?" when the caller has not spoken.
+- The caller's speech arrived as fragments ("I either 4", "Who can", "Okay. JD?") and the bot
+  was cut off by any sound. The model-based "smart endpointing" enabled that morning was the
+  cause. Replaced by transcription-based endpointing (0.3s after punctuation, 1.5s without,
+  0.6s wait) and a stop plan that needs two words before the bot yields. Transcriber set
+  explicitly to OpenAI `gpt-4o-transcribe` (the operator asked for Whisper; this is its
+  streaming successor — Whisper itself is batch-only).
+
+**Model, measured for a voice decision (real prompt, the 8 functions, "a haircut please"):**
+
+| Model | Minimal reasoning | Default reasoning (what Vapi sends) |
+|---|---|---|
+| openai/gpt-5-mini | 1.1s, correct call | 2.5–2.6s, **no tool call** |
+| openai/gpt-5 | 1.0–1.8s, correct | 2.8–3.8s, **no tool call** |
+| openai/gpt-5-nano | 0.9–1.1s, correct | 1.8–2.2s, **no tool call** |
+| openai/gpt-5.1 | 1.6–2.0s, correct | **1.0–1.4s, correct** |
+| openai/gpt-5.2 | 2.9s | — |
+
+The operator asked for OpenAI, generation 5 or newer. Only `gpt-5.1` is fast and correct with
+the reasoning setting Vapi can send, so both channels run `openai/gpt-5.1` now (Vapi assistant,
+entry orchestrator, voice receptionist, five specialists), mirrored into the template.
+Widget on it: 7.2s / 15.3s / 22.6s for the demo's three turns, all correct.
+
+One thing it exposed: the prompts' example line named this shop's own services, and gpt-5.1
+recited it without calling the catalogue. Example made generic; names come from the tool.

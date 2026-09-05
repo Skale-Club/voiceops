@@ -59,9 +59,32 @@ export const DEFAULT_VOICE = {
   stability: 0.5,
   similarityBoost: 0.75,
 }
+// Second real call (2026-09-05 21:00): the model-based "smart" endpointing
+// chopped the caller into fragments ("I either 4", "Who can") and the bot was
+// interrupted by any sound. Transcription-based endpointing with patient
+// thresholds, and two words before the bot yields. These are platform tuning,
+// applied on every push; an operator who wants different values changes them
+// here, not in the Vapi dashboard where the next push would not know.
 export const DEFAULT_START_SPEAKING_PLAN = {
-  waitSeconds: 0.8,
-  smartEndpointingEnabled: true,
+  waitSeconds: 0.6,
+  smartEndpointingEnabled: false,
+  transcriptionEndpointingPlan: {
+    onPunctuationSeconds: 0.3,
+    onNoPunctuationSeconds: 1.5,
+    onNumberSeconds: 0.8,
+  },
+}
+export const DEFAULT_STOP_SPEAKING_PLAN = {
+  numWords: 2,
+  voiceSeconds: 0.3,
+  backoffSeconds: 1,
+}
+// OpenAI's realtime transcription (the streaming successor of Whisper), on the
+// operator's choice after Deepgram's default chopped a caller into fragments.
+export const DEFAULT_TRANSCRIBER = {
+  provider: 'openai',
+  model: 'gpt-4o-transcribe',
+  language: 'en',
 }
 
 export interface PushAssistantConfigResult {
@@ -386,14 +409,14 @@ export async function pushAssistantConfig(
     // `vapi` voice nobody chose. Turn-taking plan: set when absent.
     const currentVoice = current.voice as { provider?: string } | undefined
     const voice = currentVoice && currentVoice.provider && currentVoice.provider !== 'vapi' ? currentVoice : DEFAULT_VOICE
-    const startSpeakingPlan = current.startSpeakingPlan ?? DEFAULT_START_SPEAKING_PLAN
-
     const patch = {
       model,
       firstMessageMode: 'assistant-speaks-first',
       firstMessage,
       voice,
-      startSpeakingPlan,
+      startSpeakingPlan: DEFAULT_START_SPEAKING_PLAN,
+      stopSpeakingPlan: DEFAULT_STOP_SPEAKING_PLAN,
+      transcriber: DEFAULT_TRANSCRIBER,
       ...assistantServer,
     }
 
