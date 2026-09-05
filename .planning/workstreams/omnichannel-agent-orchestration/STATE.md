@@ -4,7 +4,7 @@ milestone: v3.5
 milestone_name: milestone
 status: complete_pending_live_walkthrough
 stopped_at: Phases 131-139 executed and verified; a real booking proved the mesh; the Vapi assistant is pushed from Xphere; one live template walkthrough outstanding
-last_updated: "2026-09-05T00:10:00.000Z"
+last_updated: "2026-09-05T04:40:00.000Z"
 last_activity: 2026-09-04
 progress:
   total_phases: 9
@@ -32,8 +32,8 @@ Next: the live walkthrough. Everything below that line is built, tested and depl
 **Phase:** 139 of 139 (9 of 9)
 **Plan:** 8 of 8 in the final phase
 **Status:** Complete; two human-gated items remain
-**Last Activity:** 2026-09-04
-**Last Activity Description:** Phases 136-139 closed; ROADMAP, REQUIREMENTS and STATE reconciled against the 33 plan summaries
+**Last Activity:** 2026-09-05
+**Last Activity Description:** Voice prompt pushed from Xphere with the engine-rendered location rule; deep re-analysis found and fixed three more never-reached mechanisms (runtime token rendering, missing customerAddress field, dropped tool routing)
 
 ## Progress
 
@@ -96,6 +96,11 @@ Both are human-gated and outward-facing; neither is autonomous work.
 - Production schema has drifted from the repo before (migration 1295 reconciled one function).
   A wider audit was not done.
 - Test booking #471 (2026-09-08 10:30) is real and sits in the demo calendar.
+- The widget mesh cannot answer a cold availability question inside its 30s turn budget
+  (measured 31s; `check_availability` 13.9s cold, ~6s of unmeasured runtime overhead before the
+  first delegation). Levers ranked in `FINDINGS-OUTSIDE-SCOPE.md` item 9; nothing changed yet.
+- Vapi still carries a hardcoded, currently inert `firstMessage`; transcriber and speaking plans
+  are Vapi defaults (items 6-7).
 
 ## Session Continuity
 

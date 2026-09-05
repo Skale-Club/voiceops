@@ -103,7 +103,7 @@ ROLL-02’s two named gaps.
 still has the step. The Phase 131 gateway (`invokeAgent`) continues to have zero production
 callers; the widget reaches `runAgent` directly.
 
-## Four defects found that no phase was looking for
+## Seven defects found that no phase was looking for
 
 **The Xkedule booking mutations never reached the idempotency guard.** Phase 133 built the
 entire mechanism around the mutation SAFE-02 names, and `xkedule_create_booking` was absent
@@ -135,9 +135,24 @@ agent reported failure to a customer whose appointment had in fact been created.
 explicit 30s write timeout, an abandoned-outcome record, and a completion finalizer that
 distinguishes an aborted turn from an empty one.
 
-Both share the pattern of the first two: a mechanism built correctly and never reached by the path
-that needed it. Four occurrences in one workstream is not four accidents; it is the argument for
-testing which callers reach a guard, not only that the guard works.
+**Three more on the 2026-09-05 re-analysis**, all on the same day the Vapi push first ran:
+
+- Tokenising the live tenant's prompts (139-06, as designed) left the widget mesh introducing
+  itself as “the front desk at {{business_name}}” for about an hour — install-time rendering
+  covered a *target* org, nothing covered the *source* org whose rows had just become templates.
+  `resolveAgent()` now renders tokens on every channel.
+- The live `book_appointment` definition had no `customerAddress` field, so Phase 138’s rule was
+  vacuous for this tenant and every template made from it. Field added (workflow version 2); the
+  Vapi push now applies the same modality transform to schemas that the widget applies.
+- The first push replaced every tool without its `server` block: for ninety minutes the phone
+  robot’s tool calls had nowhere to go (no real call in the window). Routing restored with a 30s
+  per-tool timeout; the pusher now carries routing through and refuses to push unrouted tools.
+
+Seven occurrences of one pattern — a mechanism correct about what it renders and silent about
+what it discards or never reaches — is not seven accidents. It is the argument for verifying a
+change against what it replaced, not against its own output, and for testing which callers reach
+a guard rather than only that the guard works. `FINDINGS-OUTSIDE-SCOPE.md` items 8 and 9 carry
+the detail, including the measured widget latency trace and the ranked levers.
 
 ## Still open
 
