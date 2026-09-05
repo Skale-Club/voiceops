@@ -25,6 +25,7 @@ vi.mock('@/lib/chat/session', () => ({
 vi.mock('@/lib/chat/persist', () => ({
   ensureDbSession: vi.fn(),
   persistMessage: vi.fn(),
+  loadSessionFromDb: vi.fn(),
 }))
 vi.mock('next/server', async (importOriginal) => {
   const actual = await importOriginal<typeof import('next/server')>()
@@ -57,7 +58,7 @@ vi.mock('@/lib/medusa/context', () => ({
 
 import { createServiceRoleClient } from '@/lib/supabase/admin'
 import { getSession, setSession } from '@/lib/chat/session'
-import { ensureDbSession, persistMessage } from '@/lib/chat/persist'
+import { ensureDbSession, persistMessage, loadSessionFromDb } from '@/lib/chat/persist'
 import { readSseLines } from './helpers/stream'
 import { executeAction } from '@/lib/action-engine/execute-action'
 
@@ -161,6 +162,43 @@ describe('POST /api/chat/[token]', () => {
     expect(sessionEvent.event).toBe('session')
     expect(sessionEvent.sessionId).toBe('existing-sess')
     expect(ensureDbSession).not.toHaveBeenCalled()
+  })
+
+  it('resumes from the database when Redis has no session (no REDIS_URL in production)', async () => {
+    mockSupabase.single.mockResolvedValue({ data: { id: 'org-1', name: 'Org', is_active: true }, error: null })
+    ;(getSession as ReturnType<typeof vi.fn>).mockResolvedValue(null)
+    const fromDb = {
+      orgId: 'org-1', sessionId: 'db-only-sess', dbSessionId: 'db-row-1',
+      messages: [{ role: 'user', content: 'a signature haircut' }, { role: 'assistant', content: 'That is $38.' }],
+      createdAt: new Date().toISOString(), lastActiveAt: new Date().toISOString(),
+    }
+    ;(loadSessionFromDb as ReturnType<typeof vi.fn>).mockResolvedValue(fromDb)
+    mockRunAgent.mockReturnValue(makeDefaultStream('db-only-sess'))
+    const { POST } = await import('@/app/api/chat/[token]/route')
+    const res = await POST(makeRequest({ message: 'What is open on the 8th?', sessionId: 'db-only-sess' }), {
+      params: Promise.resolve({ token: 'valid-token' }),
+    })
+    const lines = await readSseLines(res)
+    const sessionEvent = lines[0] as { event: string; sessionId?: string }
+    expect(sessionEvent.sessionId).toBe('db-only-sess')
+    expect(loadSessionFromDb).toHaveBeenCalledWith({ orgId: 'org-1', sessionId: 'db-only-sess' })
+    expect(ensureDbSession).not.toHaveBeenCalled()
+    // the reloaded history reaches the agent
+    const opts = mockRunAgent.mock.calls[0][0] as { historyWindow?: unknown[] }
+    expect(opts.historyWindow?.length).toBeGreaterThanOrEqual(3)
+  })
+
+  it('starts a fresh session when the database reload itself fails', async () => {
+    mockSupabase.single.mockResolvedValue({ data: { id: 'org-1', name: 'Org', is_active: true }, error: null })
+    ;(getSession as ReturnType<typeof vi.fn>).mockResolvedValue(null)
+    ;(loadSessionFromDb as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('pg down'))
+    mockRunAgent.mockReturnValue(makeDefaultStream('fresh'))
+    const { POST } = await import('@/app/api/chat/[token]/route')
+    const res = await POST(makeRequest({ message: 'hi', sessionId: 'gone-sess' }), {
+      params: Promise.resolve({ token: 'valid-token' }),
+    })
+    expect(res.status).toBe(200)
+    expect(ensureDbSession).toHaveBeenCalled()
   })
 
   it('returns 400 for missing message field', async () => {
