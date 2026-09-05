@@ -83,11 +83,19 @@ export function calendarEventForNewRow(event: string, status: BookingStatus): Ca
 // Lazily get-or-create a synthetic "Xkedule" event type for the org. bookings
 // requires event_type_id (NOT NULL); event_types requires a user_id (any member).
 export async function getOrCreateEventType(supabase: ServiceClient, orgId: string): Promise<string | null> {
+  // event_types is unique on (user_id, slug), not (org_id, slug): one person
+  // who owns several organizations can hold the slug 'xkedule' in only one of
+  // them. The demo org's owner already had it in Skale Club, so every insert
+  // here failed with a duplicate key and no booking event was ever emitted
+  // (2026-09-05, bookings #480/#481). New rows get an org-scoped slug; orgs
+  // that already hold the plain 'xkedule' keep matching on it.
+  const orgScopedSlug = `xkedule-${orgId.slice(0, 8)}`
   const { data: existing } = await supabase
     .from('event_types')
     .select('id')
     .eq('org_id', orgId)
-    .eq('slug', 'xkedule')
+    .in('slug', ['xkedule', orgScopedSlug])
+    .limit(1)
     .maybeSingle()
   if (existing) return existing.id
 
@@ -105,7 +113,7 @@ export async function getOrCreateEventType(supabase: ServiceClient, orgId: strin
       org_id: orgId,
       user_id: member.user_id,
       title: 'Xkedule',
-      slug: 'xkedule',
+      slug: orgScopedSlug,
       description: 'Bookings mirrored from Xkedule',
       location_type: 'in_person',
     })
