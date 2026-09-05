@@ -185,6 +185,19 @@ export interface TemplatizeOptions {
   apply: boolean
 }
 
+/**
+ * Address components (street line, city) that survive templatizing as literal
+ * text. Components shorter than four characters (state codes, house numbers)
+ * are ignored - they are not identifying on their own.
+ */
+export function residualAddressFragments(templatized: string, facts: TenantFacts): string[] {
+  if (!facts.businessAddress) return []
+  return facts.businessAddress
+    .split(',')
+    .map((part) => part.trim())
+    .filter((part) => part.length >= 4 && templatized.includes(part))
+}
+
 export async function templatizeOrgAgentPrompts(options: TemplatizeOptions): Promise<TemplatizeResult> {
   const { supabase, organizationId, expectSlug, apply } = options
 
@@ -247,6 +260,13 @@ export async function templatizeOrgAgentPrompts(options: TemplatizeOptions): Pro
     console.log(`  ${agent.slug}: would change`)
     console.log(`    - ${activeVersion.system_prompt}`)
     console.log(`    + ${result}`)
+    for (const fragment of residualAddressFragments(result, facts)) {
+      // Not an error: the exact-match roundtrip guard is what makes this
+      // script safe, and a partial address ("212 Newbury Street, Boston" when
+      // the live address ends in ", MA 02116") correctly does not match. But
+      // it is exactly what a template must not carry, so say so loudly.
+      console.log(`    ! WARNING: address fragment "${fragment}" still literal in ${agent.slug} - fix by hand before capturing a template`)
+    }
 
     if (!apply) {
       changes.push({ agentSlug: agent.slug, changed: true })
