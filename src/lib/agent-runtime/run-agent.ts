@@ -245,6 +245,48 @@ async function resolveLlmProvider(
 // cheaper wrong answer.
 const KB_HAS_DOCS_TTL_MS = 60_000
 
+// Every agent is told what day it is, in the tenant's own timezone. Without
+// this the model has to remember to call the datetime tool before resolving
+// "September 8th", and when it does not, it guesses the year: measured
+// 2026-09-05 on the production widget, the Availability specialist asked the
+// provider for 2024-09-08, 09 and 10 (three cold calls, ~21s) and the turn
+// timed out. A date the customer can hear is never a prompt author's job.
+const ORG_TIMEZONE_TTL_MS = 10 * 60_000
+
+export async function todayLine(
+  orgId: string,
+  serviceClient: ReturnType<typeof createServiceRoleClient>,
+  now: Date = new Date(),
+): Promise<string> {
+  let timeZone = 'UTC'
+  try {
+    timeZone = await memoTtl(`org-timezone:${orgId}`, ORG_TIMEZONE_TTL_MS, async () => {
+      const { data, error } = await serviceClient.from('organizations').select('timezone').eq('id', orgId).maybeSingle()
+      if (error) throw error
+      const tz = (data?.timezone ?? '').trim()
+      if (!tz) throw new Error('no timezone on organization')
+      return tz
+    })
+  } catch {
+    timeZone = 'UTC'
+  }
+  return formatTodayLine(now, timeZone)
+}
+
+/** Pure: "Today is Friday, 2026-09-05 (America/New_York)." */
+export function formatTodayLine(now: Date, timeZone: string): string {
+  let zone = timeZone
+  let parts: Intl.DateTimeFormatPart[]
+  try {
+    parts = new Intl.DateTimeFormat('en-CA', { timeZone: zone, year: 'numeric', month: '2-digit', day: '2-digit', weekday: 'long' }).formatToParts(now)
+  } catch {
+    zone = 'UTC'
+    parts = new Intl.DateTimeFormat('en-CA', { timeZone: zone, year: 'numeric', month: '2-digit', day: '2-digit', weekday: 'long' }).formatToParts(now)
+  }
+  const get = (t: string) => parts.find((p) => p.type === t)?.value ?? ''
+  return `Today is ${get('weekday')}, ${get('year')}-${get('month')}-${get('day')} (${zone}). Resolve every relative day ("tomorrow", "Monday", "the 8th") to a full YYYY-MM-DD date in this year before using it.`
+}
+
 async function orgHasKnowledgeDocuments(
   orgId: string,
   serviceClient: ReturnType<typeof createServiceRoleClient>,
@@ -933,7 +975,9 @@ async function runAgentBlocking(opts: InternalAgentRunOptions): Promise<AgentRun
   // rich context rather than a pre-synthesised summary.
   // Phase 132 (KNOW-01/KNOW-02): kbScope comes ONLY from resolveAgent()'s
   // output — never from a handoff payload or channel/ingress metadata.
-  let systemPrompt = resolvedAgent.systemPrompt
+  let systemPrompt = `${resolvedAgent.systemPrompt}
+
+${await todayLine(orgId, createServiceRoleClient())}`
   const FALLBACK_KB_RESPONSE = "I don't have information about that in my knowledge base."
   const knowledgeStart = Date.now()
   try {
@@ -1685,7 +1729,9 @@ function runAgentStreaming(
         // Q5: rawMode=true — inject full chunks with citations for richer LLM context.
         // Phase 132 (KNOW-01/KNOW-02): kbScope comes ONLY from resolveAgent()'s
         // output — never from a handoff payload or channel/ingress metadata.
-        let systemPrompt = resolvedAgent.systemPrompt
+        let systemPrompt = `${resolvedAgent.systemPrompt}
+
+${await todayLine(orgId, createServiceRoleClient())}`
         const FALLBACK_KB_RESPONSE = "I don't have information about that in my knowledge base."
         const knowledgeStart = Date.now()
         try {
