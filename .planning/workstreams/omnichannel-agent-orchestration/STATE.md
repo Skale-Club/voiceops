@@ -99,9 +99,13 @@ Recent decisions affecting current work:
 - Test booking #471 (2026-09-08 10:30) is real and sits in the demo calendar.
 - The widget mesh cannot answer a cold availability question inside its 30s turn budget
   (measured 31s; `check_availability` 13.9s cold, ~6s of unmeasured runtime overhead before the
-  first delegation). Levers ranked in `FINDINGS-OUTSIDE-SCOPE.md` item 9; in progress
-  2026-09-05 (runAgent stage timings + parallel pre-model reads; availability cache with
-  prefetch at quote time).
+  first delegation). Levers ranked in `FINDINGS-OUTSIDE-SCOPE.md` item 9. Shipped 2026-09-05:
+  runAgent stage timings, parallel pre-model reads, memoised resolve/cost-cap/provider/KB
+  short-circuit, invocation insert folded into the parallel group; availability cache with a
+  seven-day prefetch at quote time; orchestrator prompt v10 (directive flow, price acceptance,
+  handoff carries the service). Production measurement after deploy is the open item.
+- The production widget had no conversation memory (no Redis; the DB fallback existed but was
+  never called). Fixed in `9c7c1680`; verified live: same session across turns (item 12).
 - Voice, in production: our route is ~0.5s cold / ~0 warm; the Xkedule demo provider is the
   whole remaining cost (lookup 3–4.5s, quote 3.4s, availability 9.4s cold / 0.7s warm).
 - Transcriber and speaking plans are Vapi defaults (item 7). `firstMessage` is now owned by the
