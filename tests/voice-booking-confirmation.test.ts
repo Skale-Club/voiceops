@@ -19,10 +19,17 @@ beforeEach(() => { vi.stubEnv('ENCRYPTION_SECRET', 'ab'.repeat(32)); vi.mocked(x
 describe('voice booking consent', () => {
   it('a call with confirmed:true but no token cannot write; it gets the read-back and a token', async () => {
     const result = await createXkeduleBooking({ ...args, confirmed: true }, creds, undefined,
-      { callId: 'call-1', messages: [{ role: 'user', content: 'Monday' }] })
+      { callId: 'call-1', messages: [{ role: 'assistant', content: 'Nine or ten?' }, { role: 'user', content: 'nine' }] })
     expect(result).toContain('NOT BOOKED YET')
     expect(result).toContain('Anything else')
     expect(result).toContain('confirmationToken:')
+    expect(xkeduleFetchJson).not.toHaveBeenCalled()
+  })
+  it('a time nobody said cannot even be prepared', async () => {
+    const result = await createXkeduleBooking({ ...args, confirmed: true }, creds, undefined,
+      { callId: 'call-1', messages: [{ role: 'user', content: 'Monday' }] })
+    expect(result).toContain('has not chosen')
+    expect(result).not.toContain('confirmationToken:')
     expect(xkeduleFetchJson).not.toHaveBeenCalled()
   })
   it('a first call with confirmed true cannot write', async () => {
@@ -63,5 +70,35 @@ describe('voice booking consent', () => {
   it('accepts native and OpenAI Vapi conversation artifacts without treating tool outputs as consent', () => {
     expect(voiceMessages({ messages: [{ role: 'bot', message: 'Shall I request that appointment?' }, { role: 'user', message: 'yes' }, { role: 'tool', result: 'yes' }] })).toEqual(consent.messages.slice(-2).map((m) => ({ ...m, content: m.role === 'user' ? 'yes' : 'Shall I request that appointment?' })))
     expect(voiceMessages({ messagesOpenAIFormatted: consent.messages })).toEqual(consent.messages)
+  })
+})
+
+import { timeWasSpoken } from '@/lib/vapi/booking-confirmation'
+describe('the caller chooses the time', () => {
+  const offer = (t: string) => [{ role: 'assistant', content: t }, { role: 'user', content: 'the second one' }]
+  it.each([
+    ['09:45', 'I have nine, nine forty-five, or ten thirty.', true],
+    ['09:00', 'I have nine, nine forty-five, or ten thirty.', true],
+    ['09:00', 'I have nine forty-five or ten thirty.', false],
+    ['09:00', 'I have 9:45 or 10:30.', false],
+    ['13:00', 'I have twelve, one, or four.', true],
+    ['13:20', 'I have twelve, one, or four.', false],
+    ['10:30', 'How about half past ten?', true],
+    ['09:45', 'Quarter to ten works.', true],
+    ['09:05', 'I have nine oh five.', true],
+    ['11:00', 'Eleven a.m. is open.', true],
+    ['10:30', 'We open at nine.', false],
+  ])('%s after "%s" -> %s', (time, said, expected) => {
+    expect(timeWasSpoken(time, offer(said))).toBe(expected)
+  })
+  it('refuses to prepare a time nobody said, without issuing a token', () => {
+    const r = checkVoiceBookingConfirmation(args, 'org-1', { callId: 'call-1', messages: [{ role: 'assistant', content: 'What day?' }, { role: 'user', content: 'Monday' }] })
+    expect(r.allowed).toBe(false)
+    if (!r.allowed) { expect(r.instruction).toContain('has not chosen'); expect(r.instruction).not.toContain('confirmationToken:') }
+  })
+  it('does not judge a cancellation', () => {
+    const r = checkVoiceBookingConfirmation({ bookingId: 471 }, 'org-1', { callId: 'call-1', messages: [{ role: 'user', content: 'cancel it' }] })
+    expect(r.allowed).toBe(false)
+    if (!r.allowed) expect(r.instruction).toContain('NOT CANCELLED YET')
   })
 })

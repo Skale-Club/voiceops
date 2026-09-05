@@ -44,10 +44,13 @@ export function checkVoiceBookingConfirmation(
   if (!ctx.callId || !userCount) {
     return { allowed: false, instruction: 'NOT BOOKED YET. I cannot verify the conversation right now. Explain that the appointment has not been booked and offer to take a message. Do not retry the booking.' }
   }
+  // The caller chooses the time, never the model. A time nobody said out loud
+  // (offered by the assistant or spoken by the caller) cannot be prepared,
+  // let alone booked. "The second one" still works: the assistant offered it.
+  if (typeof params.startTime === 'string' && params.bookingDate != null && !timeWasSpoken(params.startTime, ctx.messages)) {
+    return { allowed: false, instruction: `NOT BOOKED YET. Nobody has said ${params.startTime} out loud in this call, so the customer has not chosen it. Offer up to three of the times the availability tool listed, spoken naturally, and let the customer pick. Then call this tool again with the time they chose.` }
+  }
   const hash = detailsHash(params)
-  // The exact time is bound by the token's details hash and spoken in the
-  // read-back the customer consents to; "the second one" is a legitimate
-  // choice a caller makes, so no clock-time utterance is required here.
   const token = typeof params.confirmationToken === 'string' ? params.confirmationToken : ''
   const [payload, mac, extra] = token.split('.')
   if (payload && mac && !extra) {
@@ -89,4 +92,50 @@ function readBack(params: Record<string, unknown>): string {
     return `NOT MOVED YET. Read back that you are moving booking ${id} to ${params.bookingDate} at ${params.startTime} in one sentence, then ask exactly "Anything else you'd like to change?" and STOP for the customer's answer.`
   }
   return `NOT BOOKED YET. Read back the service name, quoted price, ${params.bookingDate} at ${params.startTime}, and ${params.customerName} in one sentence, then ask exactly "Anything else you'd like to add to that?" and STOP for the customer's answer.`
+}
+
+const NUM = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven', 'twelve', 'thirteen', 'fourteen', 'fifteen', 'sixteen', 'seventeen', 'eighteen', 'nineteen']
+const TENS = ['', '', 'twenty', 'thirty', 'forty', 'fifty']
+const MINUTE_WORD = '(?:o ?five|oh ?five|fifteen|twenty|thirty|forty|fifty|ten|five)'
+
+function minuteWords(m: number): string {
+  if (m < 20) return NUM[m]
+  const tens = TENS[Math.floor(m / 10)]
+  return m % 10 ? `${tens} ${NUM[m % 10]}` : tens
+}
+
+/**
+ * Whether an HH:MM time was uttered in the conversation, in any of the ways
+ * people say it on the phone: "9:45", "nine forty-five", "quarter to ten",
+ * "one" for 13:00, "half past ten". A bare hour ("nine") counts only when it
+ * is not the start of a longer time ("nine forty-five"). Unparseable input
+ * is not judged here (the action's own validation reports it).
+ */
+export function timeWasSpoken(startTime: string, messages: VoiceBookingContext['messages']): boolean {
+  const m = /^(\d{1,2}):(\d{2})$/.exec(startTime.trim())
+  if (!m) return true
+  const h24 = Number(m[1])
+  const min = Number(m[2])
+  if (h24 > 23 || min > 59) return true
+  const h12 = h24 % 12 || 12
+  const next12 = (h12 % 12) + 1
+  const text = messages.map((x) => x.content).join(' | ').toLowerCase().replace(/[‐-―-]/g, ' ').replace(/\s+/g, ' ')
+  const hours = [...new Set([String(h24), String(h12), NUM[h12], NUM[h24] ?? ''])].filter(Boolean)
+  const patterns: RegExp[] = []
+  for (const h of hours) {
+    patterns.push(new RegExp(`\\b${h}:${m[2]}\\b`))
+    if (min === 0) {
+      // "nine", "9", "nine o'clock", "9 am" - but not "nine forty five" / "9:45"
+      patterns.push(new RegExp(`\\b${h}\\b(?![:.]\\d)(?! ?${MINUTE_WORD}\\b)(?! \\d{2}\\b)`))
+    } else {
+      patterns.push(new RegExp(`\\b${h} ${minuteWords(min)}\\b`))
+      patterns.push(new RegExp(`\\b${h} ${m[2]}\\b`))
+      if (min < 10) patterns.push(new RegExp(`\\b${h} (?:o|oh) ${NUM[min]}\\b`))
+      if (min === 30) patterns.push(new RegExp(`\\bhalf past ${h}\\b`))
+      if (min === 15) patterns.push(new RegExp(`\\b(?:a )?quarter past ${h}\\b`))
+    }
+  }
+  if (min === 45) for (const n of [String(next12), NUM[next12]]) patterns.push(new RegExp(`\\b(?:a )?quarter (?:to|of|til|till) ${n}\\b`))
+  patterns.push(new RegExp(`\\b${h24}${m[2]}\\b`))
+  return patterns.some((p) => p.test(text))
 }

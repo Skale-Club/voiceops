@@ -96,6 +96,7 @@ it('runs the voice rehearsal matrix', async () => {
     let offered = ''
     let maxTurn = 0
 
+    let toolSeq = 0
     async function runTool(name: string, args: Record<string, unknown>): Promise<string> {
       called.push(name)
       if (sc.failTool === name) return 'Service unavailable.'
@@ -121,7 +122,7 @@ it('runs the voice rehearsal matrix', async () => {
         if (offered && typeof args.startTime === 'string' && !offered.includes(args.startTime)) problems.push(`rescheduled to ${args.startTime}, not an offered slot`)
         return `Booking 471 rescheduled to ${args.bookingDate} at ${args.startTime}. (SIMULATED)`
       }
-      const tc = { id: 'toolu_m', type: 'function', function: { name, arguments: JSON.stringify(args) } }
+      const tc = { id: `toolu_${++toolSeq}`, type: 'function', function: { name, arguments: JSON.stringify(args) } }
       const r = await fetch('https://xphere.app/api/vapi/tools', { method: 'POST', headers: { 'content-type': 'application/json', 'x-vapi-secret': secret }, body: JSON.stringify({ message: { type: 'tool-calls', call: { id: callId, assistantId: ASSISTANT_ID, customer: { number: sc.caller } }, artifact: { messages: toArtifactMessages(messages) }, toolCallList: [tc] } }) })
       const j = (await r.json()) as any
       const result = String(j.results?.[0]?.result ?? '')

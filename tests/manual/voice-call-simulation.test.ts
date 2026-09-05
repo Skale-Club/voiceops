@@ -70,7 +70,7 @@ it('simulates a full call against the live assistant config', async () => {
   console.log(`### CONFIG model=${model} temp=${temperature} voice=${a.voice?.provider}/${a.voice?.voiceId} transcriber=${a.transcriber?.provider}/${a.transcriber?.model} firstMode=${a.firstMessageMode} tools=${tools.length} prompt=${system.length}ch`)
   const callId = 'sim-' + Date.now()
 
-  async function runTool(name: string, args: Record<string, unknown>): Promise<string> {
+    async function runTool(name: string, args: Record<string, unknown>): Promise<string> {
     // Confirmed calls never reach production. Exercise the local guard and
     // provider payload while preserving the production-issued signed proposal.
     if (name === 'book_appointment' && (process.env.SIM_PREDEPLOY === '1' || (args.confirmed !== undefined && args.confirmed !== false))) {
