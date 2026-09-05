@@ -22,12 +22,29 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import type { Database } from '@/types/database'
 import { decrypt } from '@/lib/crypto'
 import { getWorkflowInputSchema } from '@/lib/workflows/derive-input-schema'
+import { renderPromptTemplate, resolveTenantFacts } from '@/lib/org-templates/prompt-template'
 import { vapiFetch, vapiFetchWrite, VapiApiError } from './client'
-import { renderAssistantConfig, type AssistantConfigWorkflow } from './render-assistant-config'
+import {
+  renderAssistantConfig,
+  type AssistantConfigWorkflow,
+  type RenderedAssistantConfig,
+  type VapiToolMessage,
+} from './render-assistant-config'
 
 export interface PushAssistantConfigResult {
   ok: boolean
   error?: string
+  /**
+   * What was (or, under dryRun, would have been) PATCHed. Present whenever
+   * resolution and rendering succeeded, so an operator can inspect the exact
+   * payload before it reaches a live phone-answering assistant.
+   */
+  rendered?: RenderedAssistantConfig
+}
+
+export interface PushAssistantConfigOptions {
+  /** Resolve, fetch and render, but do not PATCH. */
+  dryRun?: boolean
 }
 
 interface VapiAssistantGetResponse {
@@ -35,14 +52,43 @@ interface VapiAssistantGetResponse {
   [key: string]: unknown
 }
 
+interface VapiExistingTool {
+  function?: { name?: string }
+  messages?: VapiToolMessage[]
+}
+
+/**
+ * Reads the tuned per-tool spoken lines the assistant already carries, keyed
+ * by tool name, so a push preserves them instead of flattening every tool to
+ * the generic fallback.
+ */
+function existingToolMessagesOf(current: VapiAssistantGetResponse): Record<string, VapiToolMessage[]> {
+  const tools = (current.model?.tools ?? []) as VapiExistingTool[]
+  const byName: Record<string, VapiToolMessage[]> = {}
+  for (const tool of tools) {
+    const name = tool.function?.name
+    if (name && Array.isArray(tool.messages) && tool.messages.length > 0) {
+      byName[name] = tool.messages
+    }
+  }
+  return byName
+}
+
 export async function pushAssistantConfig(
   supabase: SupabaseClient<Database>,
   organizationId: string,
-  vapiAssistantId: string
+  vapiAssistantId: string,
+  options: PushAssistantConfigOptions = {}
 ): Promise<PushAssistantConfigResult> {
   // 1. Resolve the org's entry orchestrator: voice's channel default, falling
   // back to web_widget's -- an org may run the mesh on the widget before
   // voice is wired.
+  const { data: org } = await supabase
+    .from('organizations')
+    .select('service_location_mode')
+    .eq('id', organizationId)
+    .maybeSingle()
+
   const { data: defaults } = await supabase
     .from('agent_channel_defaults')
     .select('channel, agent_id')
@@ -147,13 +193,7 @@ export async function pushAssistantConfig(
       }))
   }
 
-  // 4. Render as pure data.
-  const rendered = renderAssistantConfig({
-    systemPrompt: promptVersion.system_prompt,
-    workflows: assistantWorkflows,
-  })
-
-  // 5. Resolve + decrypt the org's Vapi API key (same lookup as
+  // 4. Resolve + decrypt the org's Vapi API key (same lookup as
   // syncVapiAssistants()).
   const { data: integration } = await supabase
     .from('integrations')
@@ -174,13 +214,33 @@ export async function pushAssistantConfig(
     return { ok: false, error: 'Could not read the saved Vapi API key.' }
   }
 
-  // 6. PATCH. Fetch the current assistant first so unrelated `model` fields
-  // (provider, model name, voice, etc.) are preserved -- only `messages` and
-  // `tools` are replaced.
+  // 5. Fetch the current assistant BEFORE rendering, for two reasons: its
+  // unrelated `model` fields (provider, model name, voice, etc.) must be
+  // preserved through the PATCH, and its tuned per-tool spoken lines are an
+  // input to rendering rather than something to overwrite.
   try {
     const current = await vapiFetch<VapiAssistantGetResponse>(apiKey, `/assistant/${vapiAssistantId}`)
 
-    const requestStartByTool = new Map(rendered.toolMessages.map((m) => [m.toolName, m.requestStart]))
+    // 6. Render as pure data.
+    //
+    // Tenant facts are resolved here rather than inside the pure renderer
+    // because resolveTenantFacts() is I/O. They must be rendered at push time:
+    // scripts/templatize-agent-prompts.ts (139-06) deliberately turns a live
+    // tenant's prompts back INTO templates carrying `{{business_name}}` /
+    // `{{business_location}}`, so pushing a stored prompt verbatim would put
+    // raw tokens in front of a caller. Vapi's own call-time variables
+    // (`{{customer.number}}`, `{{now}}`) are untouched — renderPromptTemplate()
+    // replaces only the two tenant-fact tokens it owns.
+    const facts = await resolveTenantFacts(supabase, organizationId)
+
+    const rendered = renderAssistantConfig({
+      systemPrompt: renderPromptTemplate(promptVersion.system_prompt, facts),
+      workflows: assistantWorkflows,
+      serviceLocationMode: org?.service_location_mode,
+      existingToolMessages: existingToolMessagesOf(current),
+    })
+
+    const messagesByTool = new Map(rendered.toolMessages.map((m) => [m.toolName, m.messages]))
 
     const tools = rendered.functions.map((fn) => ({
       type: 'function',
@@ -189,7 +249,7 @@ export async function pushAssistantConfig(
         description: fn.description,
         parameters: fn.parameters,
       },
-      messages: [{ type: 'request-start', content: requestStartByTool.get(fn.name) ?? 'One moment.' }],
+      messages: messagesByTool.get(fn.name) ?? [{ type: 'request-start', content: 'One moment.' }],
     }))
 
     const model = {
@@ -198,8 +258,12 @@ export async function pushAssistantConfig(
       tools,
     }
 
+    // 7. PATCH -- unless this is a dry run, in which case the caller gets the
+    // fully rendered payload and the assistant is left untouched.
+    if (options.dryRun) return { ok: true, rendered }
+
     await vapiFetchWrite(apiKey, `/assistant/${vapiAssistantId}`, 'PATCH', { model })
-    return { ok: true }
+    return { ok: true, rendered }
   } catch (err) {
     const message = err instanceof VapiApiError ? err.message : 'Failed to push assistant config to Vapi.'
     return { ok: false, error: message }

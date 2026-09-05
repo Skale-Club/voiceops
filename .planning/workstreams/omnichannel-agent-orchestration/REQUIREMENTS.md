@@ -125,10 +125,10 @@ Every active v3.5 requirement maps to exactly one implementation phase.
 | MODAL-00 | Phase 138 | Done — business_type in Company Info, migration 1296 applied |
 | MODAL-01 | Phase 138 | Done — service_location_mode, migration 1297 applied, 350 orgs on the safe default |
 | MODAL-02 | Phase 138 | Done — customerAddress required at the tool-schema boundary for at_customer |
-| MODAL-03 | Phase 138 | PARTIAL — engine renders the block for the widget; the Vapi prompt is still static text |
+| MODAL-03 | Phase 138 | Done — 2026-09-04: the Vapi assistant's prompt is now pushed from Xphere with the service location rule rendered by the engine from service_location_mode; the static “do not ask for an address” text is gone from Vapi |
 | TMPL-01 | Phase 139 | Done — agents asset group, bound by slug and tool_name |
-| TMPL-02 | Phase 139 | Done — prompts render tenant facts; tokenisation script exists |
-| TMPL-03 | Phase 139 | Done in code — outbound Vapi sync has never run against a real assistant |
+| TMPL-02 | Phase 139 | Done — tokenisation script RUN against the live tenant 2026-09-04: 7 prompts now carry {{business_name}}/{{business_location}}; push-time rendering resolves them |
+| TMPL-03 | Phase 139 | Done — pushAssistantConfig() PATCHed the live Cuts & Culture assistant 2026-09-04 after a dry run; 8 functions, 13 tuned tool messages preserved, verified by re-reading the assistant |
 | TMPL-04 | Phase 139 | Done — routing-mode card on the agents page |
 | TMPL-05 | Phase 139 | Done — install is idempotent and never activates routing |
 

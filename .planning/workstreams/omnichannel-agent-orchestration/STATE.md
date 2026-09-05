@@ -3,7 +3,7 @@ gsd_state_version: 1.0
 milestone: v3.5
 milestone_name: milestone
 status: complete_pending_live_walkthrough
-stopped_at: Phases 131-139 executed and verified; a real booking proved the mesh; one live template walkthrough outstanding
+stopped_at: Phases 131-139 executed and verified; a real booking proved the mesh; the Vapi assistant is pushed from Xphere; one live template walkthrough outstanding
 last_updated: "2026-09-05T00:10:00.000Z"
 last_activity: 2026-09-04
 progress:
@@ -22,7 +22,7 @@ progress:
 See: `.planning/PROJECT.md` (last updated 2026-07-03)
 
 **Core value:** Voice and text must reach the correct tenant-scoped specialist and execute business actions through the Action Engine quickly, safely, and observably.
-**Current focus:** nothing autonomous remains. Two human items: install the mesh into a real second tenant, and push a rendered config to the Vapi assistant so voice stops carrying static prompt text.
+**Current focus:** nothing autonomous remains. One human item: install the mesh into a real second tenant through `Settings → Organization Templates`.
 
 ## Current Position
 
@@ -58,7 +58,7 @@ Next: the live walkthrough. Everything below that line is built, tested and depl
 | 135 | 3 | Complete |
 | 136 | 3 | Complete — ROLL-03 closed by booking #471 |
 | 137 | 3 | Complete — MESH-04 closed by booking #471 |
-| 138 | 3 | Complete — migrations 1296/1297 applied; MODAL-03 partial |
+| 138 | 3 | Complete — migrations applied; voice prompt pushed with the engine-rendered rule |
 | 139 | 8 | Complete in code; live walkthrough outstanding |
 
 ## Accumulated Context
@@ -83,9 +83,9 @@ Both are human-gated and outward-facing; neither is autonomous work.
 
 - Install the mesh into a real second organization through `Settings → Organization Templates`.
   Every guarantee is proven against in-memory fakes; none of it substitutes for one real install.
-- Push a rendered config to the Vapi assistant (`pushAssistantConfig`, two deliberate clicks).
-  Until then the voice prompt still carries "do not ask for the caller's address, ever" as
-  static text — exactly the hardcoding Phase 138 exists to remove. Tracked as MODAL-03 partial.
+- ~~Push a rendered config to the Vapi assistant~~ Done 2026-09-04 from a dry-run-first script;
+  the assistant now carries the engine-rendered service location rule. The operator button
+  (139-07) remains the way to re-push after a settings change.
 
 ### Blockers/Concerns
 

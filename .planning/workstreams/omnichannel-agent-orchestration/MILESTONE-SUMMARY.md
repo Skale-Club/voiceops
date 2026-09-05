@@ -1,14 +1,14 @@
 ---
 milestone: v3.5 Omnichannel Agent Orchestration
-status: complete — two items remain on the human gate
+status: complete — one item remains on the human gate
 completed: 2026-09-04
 workstream: omnichannel-agent-orchestration
 ---
 
 # v3.5 Omnichannel Agent Orchestration — Milestone Summary
 
-Nine phases, 33 plans, built and verified to their gates. 43 of 45 requirements are done;
-SAFE-01 and MODAL-03 are partial and named below.
+Nine phases, 33 plans, built and verified to their gates. 44 of 45 requirements are done;
+SAFE-01 is partial and named below.
 
 The milestone was planned as six phases. Phases 137-139 were opened afterwards — 137 because
 voice and text were still two brains, 138 because a prompt that hardcodes “never ask for an
@@ -150,25 +150,21 @@ testing which callers reach a guard, not only that the guard works.
   not fixed autonomously: the change spans most of the product's integration surface and the
   guard fails closed, so a wrong classification suppresses real work. Pinned in a named
   bucket that fails the build if it grows. See `FINDINGS-OUTSIDE-SCOPE.md`.
-- **The voice prompt still hardcodes the address rule.** `canary/vapi-receptionist-prompt.md`
-  contains “Do not ask for the caller’s address, ever” as static text inside the Vapi assistant —
-  exactly what Phase 138 exists to remove. The widget path is engine-driven; voice cannot be until
-  someone pushes a rendered config. Tracked as MODAL-03 partial, with the mechanism (139-04,
-  surfaced in 139-07) already built and waiting.
 - **No tenant has actually been templated.** The capture → install pipeline is proven against
-  in-memory fakes, which is the right place to prove it, and `pushAssistantConfig()` has never
-  PATCHed a real assistant. TMPL-03 is recorded as “done in code, never run” rather than done.
+  in-memory fakes, which is the right place to prove it, and none of it substitutes for one real
+  install through `Settings → Organization Templates`.
 
 ## Where to start
 
-Two human items, both outward-facing, neither of them code:
+One human item, outward-facing, not code:
 
 1. **Install the mesh into a real second organization** — `Settings → Organization Templates`,
    capture Cuts & Culture, install into the target. This is the difference between “the pipeline
    is correct” and “a second tenant is running”.
-2. **Push a rendered config to the Vapi assistant** — the kebab menu on the assistant row, then
-   confirm in the dialog that names the assistant and warns it may be answering a real phone
-   number. That is what retires the static prompt text.
+
+The Vapi push has been done once, from a dry-run-first script, on 2026-09-04. After any change
+to the voice prompt or to `service_location_mode`, re-push from the kebab menu on the assistant
+row — the dialog names the assistant and warns it may be answering a real phone number.
 
 `docs/agents/canary-activation-runbook.md` remains the reference for flipping voice from legacy
 to specialist routing: six ordered steps, each with a precondition, an exact action, an observable
