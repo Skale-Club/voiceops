@@ -415,3 +415,27 @@ one channel's prompt):
 | Availability cold twice (10.8s + 13.4s) despite the prefetch | Model sent `includeStaff: true` unasked, a different cache key | Field described as "only when the customer asks who" (workflow schema, so both channels) |
 | Calls page shows the call as `ringing` | Raw `call.status` persisted from the report | `ended` |
 | No booking confirmation to the caller | Xkedule's webhook is not configured for this tenant (0 mirrored bookings), the org has no SMS channel, and the platform only emitted meeting events from that webhook | Engine now emits the booking-created event from the Action Engine itself (see item 17); an SMS-capable number is still an operator step |
+
+## 17. Booking confirmation: the event now comes from the engine — DONE (2026-09-05); two operator steps remain
+
+`1145ef50`: when `book_appointment` succeeds, the Action Engine itself mirrors the booking
+and emits `meeting.scheduled` (and `meeting.confirmed` when the provider returns it as
+confirmed), with the same payload and the same dedupe key the Xkedule webhook uses — so the
+platform's seeded workflows (confirmation email, reminders) fire on both channels the moment a
+booking is made, without a round trip through the provider's webhook. If the webhook is
+configured later, its delivery finds the mirror row and takes the update branch; nothing fires
+twice.
+
+What it does **not** do, deliberately: a booking the provider returns as **pending /
+awaiting approval** emits nothing (MIR-07 — the provider can still reject it, and the mirror
+table's status constraint has no honest value for it).
+
+**Why the demo caller still gets no message, and what to do about it — both are settings,
+not code:**
+
+1. **The demo shop's bookings come back `pending`** (#471, #479). Until the Xkedule demo
+   tenant is set to auto-confirm, no `meeting.confirmed` fires. Flip that in Xkedule.
+2. **The org has no channel to send with.** No SMS-capable number (Twilio) and no WhatsApp
+   connection; the seeded confirmation is an email, and a phone caller gives no email. Connect
+   an SMS number to the organization and add a "booking confirmed → SMS to
+   `{{meeting.booker_phone}}`" workflow (the builder has `send_sms`), or connect WhatsApp.
