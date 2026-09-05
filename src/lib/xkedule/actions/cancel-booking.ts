@@ -3,6 +3,7 @@
 // Idempotent on Xkedule's side: cancelling an already-terminal booking
 // returns its current state instead of erroring.
 import { xkeduleFetchJson, WRITE_TIMEOUT_MS, type XkeduleCredentials } from '../client'
+import { checkVoiceBookingConfirmation, type VoiceBookingContext } from '@/lib/vapi/booking-confirmation'
 
 interface CancelBookingParams {
   bookingId?: number | string
@@ -18,7 +19,15 @@ interface BookingResponse {
 export async function cancelXkeduleBooking(
   params: Record<string, unknown>,
   credentials: XkeduleCredentials,
+  voiceBooking?: VoiceBookingContext,
 ): Promise<string> {
+  // Voice consent gate (see booking-confirmation.ts): a cancellation or a
+  // move is a write the customer must have heard read back and agreed to in
+  // a later turn. Without a conversation artifact this returns the read-back.
+  if (voiceBooking) {
+    const consent = checkVoiceBookingConfirmation(params, credentials.organizationId ?? '', voiceBooking)
+    if (!consent.allowed) return consent.instruction
+  }
   const p = params as CancelBookingParams
   const id = p.bookingId ?? p.booking_id
   if (id == null) {

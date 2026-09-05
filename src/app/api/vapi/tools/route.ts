@@ -64,6 +64,7 @@ import { invokeInternalSpecialist } from '@/lib/agent-runtime/invocation-gateway
 import type { Database } from '@/types/database'
 import { memoTtl } from '@/lib/cache/ttl-memo'
 import { CUSTOMER_LOOKUP_ACTION, CUSTOMER_LOOKUP_TTL_MS, customerLookupKey } from '@/lib/vapi/customer-lookup-cache'
+import { voiceMessages, type VoiceBookingContext } from '@/lib/vapi/booking-confirmation'
 
 export const runtime = 'nodejs'
 
@@ -194,7 +195,8 @@ export async function POST(request: Request): Promise<Response> {
     // call must never suppress or delay the others' results.
     const results = await Promise.all(
       toolCallList.map((toolCall) =>
-        executeOneToolCall({ call, toolCall, orgId, supabase, startTime, routingMode })
+        executeOneToolCall({ call, toolCall, orgId, supabase, startTime, routingMode,
+          voiceBooking: { callId: call.id, messages: voiceMessages(parsed.data.message.artifact) } })
       )
     )
 
@@ -225,6 +227,7 @@ async function executeOneToolCall(params: {
   supabase: SupabaseClient<Database>
   startTime: number
   routingMode: ChannelRoutingMode
+  voiceBooking: VoiceBookingContext
 }): Promise<ToolCallResult> {
   const { call, toolCall, orgId, supabase, startTime, routingMode } = params
 
@@ -388,6 +391,7 @@ async function executeOneToolCall(params: {
             toolConfig: toolConfig.config,
             integrationProvider: integration?.provider,
             callerNumber: call.customer?.number,
+            voiceBooking: params.voiceBooking,
           })
         // The customer lookup is a read the calls route may already have
         // started when the call was answered (status-update). Same key, so

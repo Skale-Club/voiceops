@@ -149,7 +149,7 @@ export function renderSystemPrompt(template: string, serviceLocationMode: unknow
  */
 export function todayLineForVapi(timeZone?: string): string {
   const zone = isValidTimeZone(timeZone) ? (timeZone as string) : 'UTC'
-  return `Today is {{"now" | date: "%A, %Y-%m-%d", "${zone}"}} (${zone}). Resolve every relative day ("tomorrow", "Monday", "the 8th") to a full YYYY-MM-DD date in this year, counting from today, before using it.`
+  return `Today is {{"now" | date: "%A, %Y-%m-%d", "${zone}"}} (${zone}). Resolve every relative day ("tomorrow", "Monday", "the 8th") to a full YYYY-MM-DD date, counting forward from today across month and year boundaries when necessary, before using it.`
 }
 
 function isValidTimeZone(tz: unknown): boolean {

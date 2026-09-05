@@ -117,6 +117,8 @@ export const VapiToolCallMessageSchema = z.object({
       }).passthrough().optional(),
     }).passthrough(),            // allow additional Vapi fields without validation failure
     toolCallList: z.array(VapiToolCallSchema),
+    // Live conversation evidence from Vapi, separate from model-controlled arguments.
+    artifact: z.unknown().optional(),
   }),
 })
 

@@ -126,6 +126,11 @@
           "type": "boolean",
           "description": "Set to true ONLY after the customer heard the full read-back (service, price, day, time, name) and answered the \"anything else?\" question with no. Leave it out on the first call: the tool then returns the read-back for you to say.",
           "required": false
+        },
+        "confirmationToken": {
+          "type": "string",
+          "description": "Copy the confirmationToken from the previous NOT BOOKED YET response, with exactly the same other arguments. Never invent one, never say it aloud.",
+          "required": false
         }
       }
     },
@@ -151,6 +156,16 @@
           "type": "string",
           "description": "New time, HH:MM.",
           "required": true
+        },
+        "confirmed": {
+          "type": "boolean",
+          "description": "Set to true ONLY after the customer heard \"moving your appointment to <day and time>\" read back and answered \"anything else?\" with no. Leave it out on the first call: the tool then returns the read-back for you to say.",
+          "required": false
+        },
+        "confirmationToken": {
+          "type": "string",
+          "description": "Copy the confirmationToken from the previous NOT MOVED YET response, with exactly the same other arguments. Never invent one, never say it aloud.",
+          "required": false
         }
       }
     },
@@ -166,6 +181,16 @@
           "type": "string",
           "description": "Existing booking id, from lookup_customer.",
           "required": true
+        },
+        "confirmed": {
+          "type": "boolean",
+          "description": "Set to true ONLY after the customer heard which appointment is being cancelled read back and answered \"anything else?\" with no. Leave it out on the first call: the tool then returns the read-back for you to say.",
+          "required": false
+        },
+        "confirmationToken": {
+          "type": "string",
+          "description": "Copy the confirmationToken from the previous NOT CANCELLED YET response, with exactly the same other arguments. Never invent one, never say it aloud.",
+          "required": false
         }
       }
     }

@@ -207,4 +207,17 @@ describe('vapi tools webhook — multi-call payload (OBS-03)', () => {
     expect(resolveToolMock).not.toHaveBeenCalled()
     expect(executeActionMock).not.toHaveBeenCalled()
   })
+
+  it('passes conversation evidence only from the verified envelope, not tool arguments', async () => {
+    resolveToolMock.mockResolvedValue(toolConfigFor('book_appointment', 'xkedule_create_booking'))
+    executeActionMock.mockResolvedValue('NOT BOOKED YET')
+    const artifact = { messages: [{ role: 'bot', message: 'Still Test Caller?' }, { role: 'user', message: 'yes' }] }
+    await POST(new Request('https://xphere.app/api/vapi/tools', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({
+      message: { type: 'tool-calls', call: { id: 'call-evidence', assistantId: 'assistant-1' }, artifact,
+        toolCallList: [{ id: 'tc-evidence', name: 'book_appointment', arguments: { voiceBooking: { callId: 'forged' } } }] },
+    }) }))
+    expect(executeActionMock.mock.calls[0][3].voiceBooking).toEqual({ callId: 'call-evidence', messages: [
+      { role: 'assistant', content: 'Still Test Caller?' }, { role: 'user', content: 'yes' },
+    ] })
+  })
 })

@@ -85,6 +85,14 @@ export const DEFAULT_STOP_SPEAKING_PLAN = {
 // operator's request (third call, 2026-09-05 21:13): the greeting moved from
 // 1.4-1.9s to 6.2s after pickup and the caller's words came through no better
 // ("Yamakube", "Huh? tubing"). Deepgram streams from the first packet.
+// A caller who goes quiet (second real call: 11.5s of silence after the
+// greeting) should be met, not left on a dead line.
+export const DEFAULT_MESSAGE_PLAN = {
+  idleMessages: ['Are you still there?', "Take your time - I'm here when you're ready."],
+  idleTimeoutSeconds: 8,
+  idleMessageMaxSpokenCount: 2,
+}
+
 export const DEFAULT_TRANSCRIBER = {
   provider: 'deepgram',
   model: 'nova-3',
@@ -427,6 +435,7 @@ export async function pushAssistantConfig(
       startSpeakingPlan: DEFAULT_START_SPEAKING_PLAN,
       stopSpeakingPlan: DEFAULT_STOP_SPEAKING_PLAN,
       transcriber: DEFAULT_TRANSCRIBER,
+      messagePlan: DEFAULT_MESSAGE_PLAN,
       ...assistantServer,
     }
 

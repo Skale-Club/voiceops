@@ -387,7 +387,7 @@ export const NODES: NodeSpec[] = [
   {
     type: 'xkedule_create_booking',
     kind: 'action',
-    description: 'Create a booking in Xkedule. Xkedule computes duration, end time and price and re-validates the slot (409 if taken).',
+    description: 'Request a booking in Xkedule after customer confirmation. Without confirmed:true this only returns a read-back. Voice also requires the server-issued confirmationToken and a later affirmative customer turn. The returned status may be pending business approval.',
     integration_required: ['xkedule'],
     params_schema: {
       type: 'object',
@@ -400,6 +400,8 @@ export const NODES: NodeSpec[] = [
         customerPhone: { type: 'string' },
         customerEmail: { type: 'string' },
         customerAddress: { type: 'string' },
+        confirmed: { type: 'boolean', description: 'True only after the customer confirms the full read-back.' },
+        confirmationToken: { type: 'string', description: 'Voice only: copy the token from the previous unconfirmed booking response, with unchanged details.' },
         notes: { type: 'string', description: "What the customer asked for in their own words, e.g. 'short on the sides'." },
       },
       required: ['serviceIds', 'bookingDate', 'startTime', 'customerName', 'customerPhone'],

@@ -74,11 +74,13 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { checkDnd, dndBlockedMessage } from '@/lib/dnd'
 import { isDemoOrg } from '@/lib/demo/config'
 import { log } from '@/lib/logger'
+import type { VoiceBookingContext } from '@/lib/vapi/booking-confirmation'
 
 type ActionType = Database['public']['Enums']['action_type']
 type IntegrationProvider = Database['public']['Enums']['integration_provider']
 
 export interface ActionContext {
+  voiceBooking?: VoiceBookingContext
   organizationId: string
   supabase: SupabaseClient<Database>
   /** tool_configs.config JSONB | required for custom_webhook */
@@ -538,7 +540,7 @@ async function _executeActionInner(
       if (!xkCreds) throw new Error('Xkedule integration not configured for this organization')
       const orgId = ctx.organizationId
       const supabase = ctx.supabase
-      return createXkeduleBooking(params, xkCreds, (created) => {
+      return createXkeduleBooking({ ...params, ...(ctx.callerNumber ? { customerPhone: ctx.callerNumber } : {}) }, xkCreds, (created) => {
         // Fire-and-forget, AFTER the tool's own return string is already
         // computed: mirrors the booking + emits meeting.* immediately so
         // confirmation workflows fire without waiting for Xkedule's webhook
@@ -556,7 +558,7 @@ async function _executeActionInner(
             error_message: err instanceof Error ? err.message : String(err),
           })
         })
-      })
+      }, voiceGateFor(ctx))
     }
     // AGT-07: cancel/reschedule/quote/customer-lookup tools, registered the
     // same way as the three xkedule_* tools above.
@@ -566,7 +568,9 @@ async function _executeActionInner(
       }
       const xkCreds = await getXkeduleCredentialsForOrgCached(ctx.organizationId, ctx.supabase)
       if (!xkCreds) throw new Error('Xkedule integration not configured for this organization')
-      return cancelXkeduleBooking(params, xkCreds)
+      // Same consent gate as create: a cancellation is a write the customer
+      // must have heard read back and agreed to in a later turn.
+      return cancelXkeduleBooking(params, xkCreds, voiceGateFor(ctx))
     }
     case 'xkedule_reschedule_booking': {
       if (!ctx?.organizationId || !ctx?.supabase) {
@@ -574,7 +578,7 @@ async function _executeActionInner(
       }
       const xkCreds = await getXkeduleCredentialsForOrgCached(ctx.organizationId, ctx.supabase)
       if (!xkCreds) throw new Error('Xkedule integration not configured for this organization')
-      return rescheduleXkeduleBooking(params, xkCreds)
+      return rescheduleXkeduleBooking(params, xkCreds, voiceGateFor(ctx))
     }
     case 'xkedule_quote': {
       if (!ctx?.organizationId || !ctx?.supabase) {
@@ -658,4 +662,14 @@ async function _executeActionInner(
       throw new Error(`Unknown action type: ${String(_exhaustive)}`)
     }
   }
+}
+
+/**
+ * The voice consent gate applies when the tool's config asks for it and the
+ * call carried a conversation artifact. Absent either, the write path falls
+ * back to the `confirmed` flag alone (the widget, or a tool not opted in).
+ */
+function voiceGateFor(ctx: { toolConfig?: unknown; voiceBooking?: VoiceBookingContext } | undefined): VoiceBookingContext | undefined {
+  const cfg = ctx?.toolConfig as Record<string, unknown> | undefined
+  return cfg?.require_voice_confirmation === true ? ctx?.voiceBooking : undefined
 }

@@ -76,7 +76,8 @@ export async function checkXkeduleAvailability(
     return 'Please provide a serviceId to check availability.'
   }
   const serviceIds = ids.join(',')
-  const staffId = p.staffId ?? p.staffMemberId
+  const rawStaffId = Number(p.staffId ?? p.staffMemberId)
+  const staffId = Number.isInteger(rawStaffId) && rawStaffId > 0 ? rawStaffId : undefined
 
   // ── Range shape: "when is the next opening?" ────────────────────────────────
   // A one-day "range" (startDate === endDate, or no endDate) is a single-date

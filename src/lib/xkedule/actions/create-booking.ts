@@ -2,6 +2,7 @@
 // POST /api/v1/bookings — create a booking from the minimum the AI gathers.
 // Xkedule computes duration/endTime/price and re-validates the slot (409).
 import { xkeduleFetchJson, WRITE_TIMEOUT_MS, type XkeduleCredentials } from '../client'
+import { checkVoiceBookingConfirmation, type VoiceBookingContext } from '@/lib/vapi/booking-confirmation'
 
 export interface CreateBookingParams {
   /** Two-phase gate: only a call with confirmed=true writes; see createXkeduleBooking. */
@@ -51,6 +52,7 @@ export async function createXkeduleBooking(
   params: Record<string, unknown>,
   credentials: XkeduleCredentials,
   onCreated?: (created: XkeduleBookingCreated) => void,
+  voiceBooking?: VoiceBookingContext,
 ): Promise<string> {
   const p = params as CreateBookingParams
 
@@ -66,7 +68,13 @@ export async function createXkeduleBooking(
     return 'Missing required booking fields: customerName, customerPhone, bookingDate, startTime, serviceId(s).'
   }
 
-  const staff = p.staffMemberId ?? p.staffId
+  const rawStaff = Number(p.staffMemberId ?? p.staffId)
+  const staff = Number.isInteger(rawStaff) && rawStaff > 0 ? rawStaff : undefined
+
+  if (voiceBooking) {
+    const confirmation = checkVoiceBookingConfirmation(params, credentials.organizationId ?? '', voiceBooking)
+    if (!confirmation.allowed) return confirmation.instruction
+  }
 
   // Two-phase booking, enforced here so it holds on every channel and with
   // every model: the first call never writes. It hands the agent the
@@ -92,7 +100,8 @@ export async function createXkeduleBooking(
     customer: {
       name: p.customerName,
       phone: p.customerPhone,
-      ...(p.customerEmail ? { email: p.customerEmail } : {}),
+      ...(p.customerEmail && (!voiceBooking || voiceBooking.messages.some((m) => m.role === 'user'
+        && m.content.toLowerCase().includes(String(p.customerEmail).toLowerCase()))) ? { email: p.customerEmail } : {}),
       ...(p.customerAddress ? { address: p.customerAddress } : {}),
     },
   }
@@ -119,7 +128,11 @@ export async function createXkeduleBooking(
     }
     const end = booking.endTime ? `-${booking.endTime}` : ''
     const total = booking.totalPrice ? ` | Total: $${booking.totalPrice}` : ''
-    return `Booking confirmed. ID: ${booking.id} | ${booking.bookingDate ?? p.bookingDate} at ${booking.startTime ?? p.startTime}${end} | Status: ${booking.status}${total}`
+    const outcome = booking.status === 'confirmed' ? 'Booking confirmed.'
+      : ['pending', 'awaiting_approval'].includes(booking.status)
+        ? 'Appointment request received, awaiting the business approval. Tell the customer it is requested, not confirmed yet.'
+        : 'Booking response received. Do not claim confirmation; report the returned status.'
+    return `${outcome} ID: ${booking.id} | ${booking.bookingDate ?? p.bookingDate} at ${booking.startTime ?? p.startTime}${end} | Status: ${booking.status}${total}`
   } catch (err) {
     // /api/v1/bookings returns 409 slot_taken when the slot was filled meanwhile.
     const msg = (err as Error).message

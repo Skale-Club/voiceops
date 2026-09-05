@@ -4,6 +4,7 @@
 // re-validates the slot and rejects a cancelled/completed booking outright
 // (409 booking_terminal).
 import { xkeduleFetchJson, WRITE_TIMEOUT_MS, type XkeduleCredentials } from '../client'
+import { checkVoiceBookingConfirmation, type VoiceBookingContext } from '@/lib/vapi/booking-confirmation'
 
 interface RescheduleBookingParams {
   bookingId?: number | string
@@ -26,7 +27,15 @@ interface BookingResponse {
 export async function rescheduleXkeduleBooking(
   params: Record<string, unknown>,
   credentials: XkeduleCredentials,
+  voiceBooking?: VoiceBookingContext,
 ): Promise<string> {
+  // Voice consent gate (see booking-confirmation.ts): a cancellation or a
+  // move is a write the customer must have heard read back and agreed to in
+  // a later turn. Without a conversation artifact this returns the read-back.
+  if (voiceBooking) {
+    const consent = checkVoiceBookingConfirmation(params, credentials.organizationId ?? '', voiceBooking)
+    if (!consent.allowed) return consent.instruction
+  }
   const p = params as RescheduleBookingParams
   const id = p.bookingId ?? p.booking_id
   if (id == null || !p.bookingDate || !p.startTime) {

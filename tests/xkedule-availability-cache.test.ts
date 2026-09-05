@@ -201,6 +201,11 @@ describe('fetchXkeduleAvailabilityCached', () => {
 })
 
 describe('checkXkeduleAvailability + prefetch integration', () => {
+  it.each([0, '0', -1, '-1'])('does not send absent staff %s on a cold lookup', async (staffId) => {
+    vi.mocked(xkeduleFetchJson).mockResolvedValue(SLOTS)
+    await checkXkeduleAvailability({ date: '2099-02-01', serviceIds: '5', staffId }, CREDS)
+    expect(vi.mocked(xkeduleFetchJson).mock.calls[0][0]).not.toContain('staffId')
+  })
   it('a real check_availability call for a prefetched date/service set is a cache hit (byte-identical, no network call)', async () => {
     // 1 business-info call (timezone) + PREFETCH_WINDOW_DAYS availability calls.
     vi.mocked(xkeduleFetchJson).mockResolvedValueOnce({ timezone: 'UTC' })

@@ -68,6 +68,9 @@ export interface GateMember {
 // ---------------------------------------------------------------------------
 
 export const GATE_MEMBERS: GateMember[] = [
+  { file: 'tests/voice-booking-confirmation.test.ts', areas: [] },
+  { file: 'tests/xkedule-two-phase-booking.test.ts', areas: [] },
+  { file: 'tests/xkedule-availability-cache.test.ts', areas: [] },
   {
     file: 'tests/security-secdef-isolation.test.ts',
     areas: ['Tenant isolation'],
