@@ -9,8 +9,8 @@ last_activity: 2026-09-04
 progress:
   total_phases: 9
   completed_phases: 9
-  total_plans: 32
-  completed_plans: 32
+  total_plans: 33
+  completed_plans: 33
   percent: 100
   phase_note: 131-136 are the closed v3.5 milestone; 137-139 were opened afterwards from production findings and the duplicability requirement, and are executed and verified
 ---
@@ -29,30 +29,37 @@ See: `.planning/PROJECT.md` (last updated 2026-07-03)
 Phase: 139 (agent-mesh-as-a-template) — 8 of 8 plans executed and verified
 Next: the live walkthrough. Everything below that line is built, tested and deployed.
 **Milestone:** v3.5 Omnichannel Agent Orchestration
-**Phase:** 132 of 136 (2 of 6) — Authorized Specialist Orchestration
-**Plan:** 0 of 4 in current phase
-**Status:** Phase 132 planned; Wave 1 ready
-**Last Activity:** 2026-09-03
-**Last Activity Description:** Four Phase 132 execution plans reviewed across three dependency waves
+**Phase:** 139 of 139 (9 of 9)
+**Plan:** 8 of 8 in the final phase
+**Status:** Complete; two human-gated items remain
+**Last Activity:** 2026-09-04
+**Last Activity Description:** Phases 136-139 closed; ROADMAP, REQUIREMENTS and STATE reconciled against the 33 plan summaries
 
 ## Progress
 
-**Phases Complete:** 1 of 6
-**Progress:** [██░░░░░░░░] 17%
+**Phases Complete:** 9 of 9
+**Progress:** [██████████] 100%
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 3
-- Average duration: N/A
-- Total execution time: 0 hours
+- Total plans completed: 33
+- Phases: 9 (131-136 as the planned v3.5 milestone, 137-139 opened afterwards)
 
 **By Phase:**
 
-| Phase | Plans | Total | Avg/Plan |
-|-------|-------|-------|----------|
-| 131 | 3 | Completed | 3 plans |
+| Phase | Plans | Status |
+|-------|-------|--------|
+| 131 | 3 | Complete |
+| 132 | 4 | Complete |
+| 133 | 3 | Complete (SAFE-01 partial) |
+| 134 | 3 | Complete (ROLL-02 partial) |
+| 135 | 3 | Complete |
+| 136 | 3 | Complete — ROLL-03 closed by booking #471 |
+| 137 | 3 | Complete — MESH-04 closed by booking #471 |
+| 138 | 3 | Complete — migrations 1296/1297 applied; MODAL-03 partial |
+| 139 | 8 | Complete in code; live walkthrough outstanding |
 
 ## Accumulated Context
 
@@ -66,19 +73,32 @@ Recent decisions affecting current work:
 - All Xphere generative inference goes through OpenRouter.
 - The Action Engine remains the only provider execution substrate.
 - Cuts & Culture is the first tenant canary; its specialist graph is not a universal product default.
+- A template carries behaviour; a tenant supplies its facts. Cross-tenant binding is by
+  stable key, never by id, and installing never activates routing.
+- The engine, not the prompt author, decides whether a booking collects an address.
 
 ### Pending Todos
 
-None yet.
+Both are human-gated and outward-facing; neither is autonomous work.
+
+- Install the mesh into a real second organization through `Settings → Organization Templates`.
+  Every guarantee is proven against in-memory fakes; none of it substitutes for one real install.
+- Push a rendered config to the Vapi assistant (`pushAssistantConfig`, two deliberate clicks).
+  Until then the voice prompt still carries "do not ask for the caller's address, ever" as
+  static text — exactly the hardcoding Phase 138 exists to remove. Tracked as MODAL-03 partial.
 
 ### Blockers/Concerns
 
-- Preserve the Node.js, lean-payload, deferred-side-effect, always-HTTP-200 Vapi contract throughout implementation.
-- Migration 1290 is intentionally unapplied; apply only at a later authorized deployment gate.
-- Do not enable specialist routing for production traffic until Phase 135 release gates pass.
+- Preserve the Node.js, lean-payload, deferred-side-effect, always-HTTP-200 Vapi contract.
+- 24 write action types (`send_whatsapp_message`, `send_email`, the pipeline surface) are
+  still unclassified and bypass the idempotency guard. Deliberately out of scope; recorded in
+  `FINDINGS-OUTSIDE-SCOPE.md`.
+- Production schema has drifted from the repo before (migration 1295 reconciled one function).
+  A wider audit was not done.
+- Test booking #471 (2026-09-08 10:30) is real and sits in the demo calendar.
 
 ## Session Continuity
 
-**Last session:** 2026-09-03
-**Stopped at:** Phase 132 four-plan execution set reviewed; Wave 1 ready
-**Resume file:** `phases/131-trusted-omnichannel-invocation-foundation/.continue-here.md`
+**Last session:** 2026-09-04
+**Stopped at:** Milestone complete. Nothing autonomous remains.
+**Resume file:** none — see Pending Todos above.

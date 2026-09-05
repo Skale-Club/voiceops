@@ -1,14 +1,21 @@
 ---
 milestone: v3.5 Omnichannel Agent Orchestration
-status: built — remaining work is on the human gate
-completed: 2026-09-03
+status: complete — two items remain on the human gate
+completed: 2026-09-04
 workstream: omnichannel-agent-orchestration
 ---
 
 # v3.5 Omnichannel Agent Orchestration — Milestone Summary
 
-All six phases are built and verified to their gates. 31 of 32 requirements are done;
-ROLL-03 cannot be satisfied without a live canary and is blocked on a human.
+Nine phases, 33 plans, built and verified to their gates. 43 of 45 requirements are done;
+SAFE-01 and MODAL-03 are partial and named below.
+
+The milestone was planned as six phases. Phases 137-139 were opened afterwards — 137 because
+voice and text were still two brains, 138 because a prompt that hardcodes “never ask for an
+address” breaks the next tenant, and 139 because the mesh had been assembled by hand and could
+not be duplicated. **A real appointment (booking #471) was created end to end through the mesh
+on 2026-09-04**, which is what closed MESH-04 and ROLL-03 — the requirements no amount of
+further code could have satisfied.
 
 ## Final gate
 
@@ -57,6 +64,28 @@ boundary with legacy still the default, the tenant graph declared outside the pl
 path with only Booking holding Xkedule write grants, a dry-run-first provisioning script
 that was never run, and an activation runbook with an abort step per stage.
 
+**137 — Shared Specialist Mesh.** Six specialists and seven edges, provisioned as rows rather
+than described in a document, serving both voice and the widget from one set of definitions.
+`/api/vapi/tools` can dispatch an explicit tool call to its mapped specialist behind the channel
+routing mode, without adding a second inference to a live call. Only the Booking specialist holds
+Xkedule write grants. Proven by a real booking against the real calendar.
+
+**138 — Booking Modality.** `business_type` on the organization, set in `Settings → Company Info`,
+seeding a `service_location_mode` of `on_premises` / `at_customer` / `either`. The engine renders
+the modality into the prompt and transforms the `book_appointment` tool schema: for `at_customer`
+the address is *structurally* required, so the model cannot call the tool without one; for
+`on_premises` the field is deleted outright rather than left optional. An unrecognised mode fails
+closed to the mode that does not ask. Migrations 1296 and 1297 applied; all 350 organizations
+landed on the safe defaults with no backfill.
+
+**139 — Agent Mesh as a Template.** An `agents` asset group inside the existing `org_templates`
+mechanism: capture one tenant’s agents, prompts, tool grants, partner edges and channel defaults,
+and install them into another, bound by `slug` and `tool_name` rather than by id. Install always
+creates an active prompt version — the exact bug that left the first hand-provisioned mesh inert.
+Prompts carry behaviour and render the tenant’s own facts. Plus the first outbound Vapi sync
+(`pushAssistantConfig`), an operator surface for the routing mode, and an end-to-end proof that
+crosses the capture seam into a different, empty target.
+
 ## The distinction that matters most
 
 **Already on live paths.** Everything phases 132-134 put inside `runAgent` and the
@@ -64,15 +93,17 @@ that was never run, and an activation runbook with an abort step per stage.
 recording, redaction, and the idempotency guard. The widget chat route calls `runAgent`
 directly, so it inherits all of it today.
 
-**Beside the live paths, not in them.** The Phase 131 gateway, Phase 132 specialist routing,
-and the Phase 134 channel switch. `invokeAgent` has zero production callers. Flipping a
-routing row today changes nothing — which is why the runbook has an explicit step for a
-human to rewire an ingress route before any flip.
+**This changed in Phase 137, for one channel.** The widget now runs the mesh for real: booking
+#471 went orchestrator → Booking specialist → Action Engine → Xkedule. `/api/vapi/tools:170`
+consults `resolveChannelRoutingMode()` on the live voice path, and the agents page writes that
+table, so the switch is both read by code and reachable by an operator — which is what retired
+ROLL-02’s two named gaps.
 
-No phase was authorized to cut over, so this is by design. It is recorded prominently
-because the checked boxes could otherwise be misread.
+**Voice remains on legacy routing.** Flipping it is a deliberate operator action and the runbook
+still has the step. The Phase 131 gateway (`invokeAgent`) continues to have zero production
+callers; the widget reaches `runAgent` directly.
 
-## Two defects found that no phase was looking for
+## Four defects found that no phase was looking for
 
 **The Xkedule booking mutations never reached the idempotency guard.** Phase 133 built the
 entire mechanism around the mutation SAFE-02 names, and `xkedule_create_booking` was absent
@@ -92,6 +123,22 @@ That second one changed how the baseline should be read: a stable set of failing
 where real defects hide. It was found only because Phase 135 forced an audit of what the
 gate actually covers.
 
+**The mesh’s own booking path had no idempotency guard at all.** `build-workflow-tools.ts`
+applied the guard only to workflows with `kind === 'flow'`, under a comment asserting that
+`kind === 'tool'` went through `executeAction`, “which has its own guard”. It does not — and all
+three Xkedule mutations are `kind='tool'`. So the path SAFE-02 exists to protect was the one path
+it never covered. Found only by making a real booking.
+
+**A slow write told the customer it had failed while it was succeeding.** The Xkedule client had
+no per-call timeout; the booking took longer than the client’s patience, the turn aborted, and the
+agent reported failure to a customer whose appointment had in fact been created. Fixed with an
+explicit 30s write timeout, an abandoned-outcome record, and a completion finalizer that
+distinguishes an aborted turn from an empty one.
+
+Both share the pattern of the first two: a mechanism built correctly and never reached by the path
+that needed it. Four occurrences in one workstream is not four accidents; it is the argument for
+testing which callers reach a guard, not only that the guard works.
+
 ## Still open
 
 - **The migration directory has drifted from production.** `get_org_member_profiles` was
@@ -103,9 +150,28 @@ gate actually covers.
   not fixed autonomously: the change spans most of the product's integration surface and the
   guard fails closed, so a wrong classification suppresses real work. Pinned in a named
   bucket that fails the build if it grows. See `FINDINGS-OUTSIDE-SCOPE.md`.
-- **ROLL-03 is unproven** and stays that way until the canary runs.
+- **The voice prompt still hardcodes the address rule.** `canary/vapi-receptionist-prompt.md`
+  contains “Do not ask for the caller’s address, ever” as static text inside the Vapi assistant —
+  exactly what Phase 138 exists to remove. The widget path is engine-driven; voice cannot be until
+  someone pushes a rendered config. Tracked as MODAL-03 partial, with the mechanism (139-04,
+  surfaced in 139-07) already built and waiting.
+- **No tenant has actually been templated.** The capture → install pipeline is proven against
+  in-memory fakes, which is the right place to prove it, and `pushAssistantConfig()` has never
+  PATCHed a real assistant. TMPL-03 is recorded as “done in code, never run” rather than done.
 
 ## Where to start
 
-`docs/agents/canary-activation-runbook.md`. Six ordered steps, each with a precondition, an
-exact action, an observable signal, and an abort step. Nothing in it has been performed.
+Two human items, both outward-facing, neither of them code:
+
+1. **Install the mesh into a real second organization** — `Settings → Organization Templates`,
+   capture Cuts & Culture, install into the target. This is the difference between “the pipeline
+   is correct” and “a second tenant is running”.
+2. **Push a rendered config to the Vapi assistant** — the kebab menu on the assistant row, then
+   confirm in the dialog that names the assistant and warns it may be answering a real phone
+   number. That is what retires the static prompt text.
+
+`docs/agents/canary-activation-runbook.md` remains the reference for flipping voice from legacy
+to specialist routing: six ordered steps, each with a precondition, an exact action, an observable
+signal, and an abort step.
+
+Note: test booking **#471** (2026-09-08 10:30) is real and sits in the demo calendar.

@@ -13,9 +13,12 @@ This milestone extends the existing text-agent platform into a tenant-safe voice
 - [x] **Phase 131: Trusted Omnichannel Invocation Foundation** - Voice and widget enter the same tenant-resolved agent boundary on a repaired regression baseline.
 - [x] **Phase 132: Authorized Specialist Orchestration** - Agents route and delegate with typed contracts, least privilege, scoped knowledge, and centralized model access.
 - [x] **Phase 133: Idempotent Action and Vapi Safety** - Voice-triggered actions stay fast, replay-safe, timeout-safe, and compatible with the always-200 Vapi contract.
-- [~] **Phase 134: Traceability and Reversible Routing** - Operators can inspect complete invocation trees and switch each channel between legacy and specialist routing without data loss.
+- [x] **Phase 134: Traceability and Reversible Routing** - Operators can inspect complete invocation trees and switch each channel between legacy and specialist routing without data loss.
 - [x] **Phase 135: Release Verification and Hardening** - Automated, timed, build, workflow, and UAT gates prove the orchestration path is safe to expose to production traffic.
 - [x] **Phase 136: Cuts & Culture Canary Rollout** - The specialist graph is enabled and proven for one tenant without becoming platform-default behavior.
+- [x] **Phase 137: Shared Specialist Mesh** - Voice and text enter one mesh of specialists; only Booking can write to the calendar.
+- [x] **Phase 138: Booking Modality** - The engine, not the prompt, decides whether a booking needs the customer's address.
+- [x] **Phase 139: Agent Mesh as a Template** - Duplicating the mesh into a second tenant is an operator action, not an engineer's SQL.
 
 ## Phase Details
 
@@ -107,10 +110,58 @@ This milestone extends the existing text-agent platform into a tenant-safe voice
 - [x] 136-03-PLAN.md — Write the human activation runbook with an abort step per stage.
 **UI hint**: yes
 
+### Phase 137: Shared Specialist Mesh
+**Goal**: Voice and text stop being two brains. Both enter the same Xphere agent mesh: an entry orchestrator that delegates to specialists, specialists that can call each other under an authorized graph, only Booking able to write to the calendar, every Xphere inference through OpenRouter, and the Action Engine as the single executor.
+**Depends on**: Phase 136
+**Requirements**: MESH-01, MESH-02, MESH-03, MESH-04
+**Success Criteria** (what must be TRUE):
+  1. One set of specialist rows serves both the Vapi voice path and the web widget - not a per-channel duplicate.
+  2. An explicit Vapi tool call can reach its mapped specialist behind the channel routing mode, without adding a second inference to a live call.
+  3. Only the Booking specialist holds Xkedule write grants; every other specialist is read-only by construction.
+  4. A real appointment is created end to end through the mesh, on a real tenant, against the real calendar.
+**Plans**: 3 plans
+- [x] 137-01-PLAN.md - Conform the canary graph to the real tenant and provision it, so the specialists become rows.
+- [x] 137-02-PLAN.md - Let a Vapi tool call reach an Xphere specialist instead of always going straight to the Action Engine.
+- [x] 137-03-PLAN.md - Prove the mesh works end to end on both channels against the live tenant.
+
+### Phase 138: Booking Modality
+**Goal**: The booking engine serves a business the customer visits and a business that visits the customer, without a fork. The address is collected at the right moment when - and only when - the business needs it, and the engine decides that, not the prompt author.
+**Depends on**: Phase 137
+**Requirements**: MODAL-00, MODAL-01, MODAL-02, MODAL-03
+**Success Criteria** (what must be TRUE):
+  1. An operator sets what kind of business the tenant is, in the panel, and that seeds the booking modality.
+  2. An `on_premises` tenant is never asked for an address, and the field is absent from the schema the model is shown.
+  3. An `at_customer` tenant cannot reach `book_appointment` without an address, and it arrives at Xkedule as `address`.
+  4. No prompt hardcodes ask / never-ask; the engine renders the modality block.
+**Plans**: 3 plans
+- [x] 138-00-PLAN.md - Give an organization a business type set in the panel, and derive the modality from it.
+- [x] 138-01-PLAN.md - Add `service_location_mode` with a safe default and a fail-closed resolver.
+- [x] 138-02-PLAN.md - Wire the contracts into `buildWorkflowTools()` and both `runAgent()` paths.
+
+### Phase 139: Agent Mesh as a Template
+**Goal**: Standing up the mesh for a new tenant is an operator action in the product, not a sequence of scripts and SQL run by an engineer.
+**Depends on**: Phase 138
+**Requirements**: TMPL-01, TMPL-02, TMPL-03, TMPL-04, TMPL-05
+**Success Criteria** (what must be TRUE):
+  1. Capturing one org's mesh and installing it into another produces six agents that each have an active prompt version - the bug that made the first hand-provisioning inert cannot recur.
+  2. Cross-tenant binding is by stable key (`slug`, `tool_name`), never by id, and re-running an install changes nothing.
+  3. Installed prompts name the target business, not the source, and retain no unrendered token.
+  4. Installing never activates specialist routing and never repoints an existing channel default.
+  5. A Vapi assistant's prompt, function schemas and tool messages can be pushed from Xphere instead of hand-PATCHed.
+**Plans**: 8 plans
+- [x] 139-01-PLAN.md - Define the `agents` asset group contracts and implement `captureAgents()`.
+- [x] 139-02-PLAN.md - Build the tenant-facts resolver and the prompt-token renderer.
+- [x] 139-03-PLAN.md - Give an operator a Settings control for `agent_channel_routing_modes`.
+- [x] 139-04-PLAN.md - Build the outbound Vapi config renderer and the first PATCH path.
+- [x] 139-05-PLAN.md - Implement `installAgents()`, always creating an active prompt version.
+- [x] 139-06-PLAN.md - Tokenise the six live Cuts & Culture prompts, roundtrip-verified before any write.
+- [x] 139-07-PLAN.md - Surface agent-group counts and the assistant config push in the UI.
+- [x] 139-08-PLAN.md - Prove capture -> install across the seam, into a different, empty target.
+
 ## Progress
 
 **Execution Order:**
-Phases execute in numeric order: 131 → 132 → 133 → 134 → 135 → 136.
+Phases execute in numeric order: 131 → 132 → 133 → 134 → 135 → 136 → 137 → 138 → 139.
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
@@ -127,3 +178,4 @@ Phases execute in numeric order: 131 → 132 → 133 → 134 → 135 → 136.
 ---
 
 *Roadmap created: 2026-09-03 — 32/32 active v3.5 requirements mapped exactly once across 6 phases.*
+*Extended 2026-09-04: phases 137-139 opened from production findings and the duplicability requirement; 13 further requirements (MESH, MODAL, TMPL) mapped across them. 45/45 mapped, 33 plans, all executed and verified.*

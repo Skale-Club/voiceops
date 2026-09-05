@@ -112,7 +112,7 @@ Every active v3.5 requirement maps to exactly one implementation phase.
 | OBS-02 | Phase 134 | Done |
 | OBS-03 | Phase 133 | Done |
 | ROLL-01 | Phase 136 | Done — provisioned to cuts-culture-barbershop 2026-09-04 and verified in the database: 6 agents, 7 edges, write grants on Booking only |
-| ROLL-02 | Phase 134 | PARTIAL — switch and resolver exist; no code reads them, no operator surface writes them |
+| ROLL-02 | Phase 134 | Done — closed after the fact by later phases: /api/vapi/tools:170 reads resolveChannelRoutingMode() on the live voice path (137-02) and the agents page writes the table (139-03). Both gaps named in this row are gone. |
 | ROLL-03 | Phase 136 | Done — a real booking completed through the mesh; voice remains on legacy routing |
 | TEST-01 | Phase 131 | Complete |
 | TEST-02 | Phase 135 | Done |
