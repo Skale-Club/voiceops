@@ -16,7 +16,7 @@ vi.mock('@/lib/xkedule/client', async (importOriginal) => {
   }
 })
 
-import { xkeduleFetchJson, type XkeduleCredentials } from '@/lib/xkedule/client'
+import { xkeduleFetchJson, WRITE_TIMEOUT_MS, type XkeduleCredentials } from '@/lib/xkedule/client'
 import { cancelXkeduleBooking } from '@/lib/xkedule/actions/cancel-booking'
 import { rescheduleXkeduleBooking } from '@/lib/xkedule/actions/reschedule-booking'
 import { getXkeduleQuote } from '@/lib/xkedule/actions/quote'
@@ -40,14 +40,14 @@ describe('cancelXkeduleBooking', () => {
 
     const result = await cancelXkeduleBooking({ bookingId: 42 }, CREDS)
 
-    expect(vi.mocked(xkeduleFetchJson)).toHaveBeenCalledWith('/api/v1/bookings/42/cancel', 'POST', {}, CREDS)
+    expect(vi.mocked(xkeduleFetchJson)).toHaveBeenCalledWith('/api/v1/bookings/42/cancel', 'POST', {}, CREDS, WRITE_TIMEOUT_MS)
     expect(result).toBe('Booking 42 is now cancelled.')
   })
 
   it('accepts the snake_case booking_id alias', async () => {
     vi.mocked(xkeduleFetchJson).mockResolvedValueOnce({ id: 7, status: 'cancelled' })
     await cancelXkeduleBooking({ booking_id: 7 }, CREDS)
-    expect(vi.mocked(xkeduleFetchJson)).toHaveBeenCalledWith('/api/v1/bookings/7/cancel', 'POST', {}, CREDS)
+    expect(vi.mocked(xkeduleFetchJson)).toHaveBeenCalledWith('/api/v1/bookings/7/cancel', 'POST', {}, CREDS, WRITE_TIMEOUT_MS)
   })
 
   it('returns a friendly message on a 404 instead of throwing', async () => {
@@ -84,6 +84,7 @@ describe('rescheduleXkeduleBooking', () => {
       'POST',
       { bookingDate: '2026-08-01', startTime: '14:00' },
       CREDS,
+      WRITE_TIMEOUT_MS,
     )
     expect(result).toContain('rescheduled to 2026-08-01 at 14:00-14:30')
   })
@@ -99,6 +100,7 @@ describe('rescheduleXkeduleBooking', () => {
       'POST',
       { bookingDate: '2026-08-01', startTime: '14:00', staffMemberId: 3 },
       CREDS,
+      WRITE_TIMEOUT_MS,
     )
   })
 
