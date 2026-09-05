@@ -169,7 +169,7 @@ export async function pushAssistantConfig(
   // voice is wired.
   const { data: org } = await supabase
     .from('organizations')
-    .select('service_location_mode')
+    .select('service_location_mode, timezone')
     .eq('id', organizationId)
     .maybeSingle()
 
@@ -329,6 +329,7 @@ export async function pushAssistantConfig(
       systemPrompt: renderPromptTemplate(promptVersion.system_prompt, facts),
       workflows: assistantWorkflows,
       serviceLocationMode: org?.service_location_mode,
+      timeZone: org?.timezone ?? undefined,
       existingToolMessages: existingToolMessagesOf(current),
     })
 

@@ -57,6 +57,11 @@ export interface AssistantConfigSource {
   serviceLocationMode: unknown
   /** Messages the live assistant already carries, keyed by tool name. */
   existingToolMessages?: Record<string, VapiToolMessage[]>
+  /**
+   * IANA timezone the call's "today" is expressed in. Resolved by Vapi at
+   * call time, so the pushed prompt never goes stale. Invalid/missing → UTC.
+   */
+  timeZone?: string
 }
 
 export interface RenderedVapiFunction {
@@ -126,15 +131,35 @@ function renderFunction(workflow: AssistantConfigWorkflow): RenderedVapiFunction
  * Places the engine-rendered service location rule into a prompt: at the
  * token when the prompt declares one, appended as its own section otherwise.
  */
-export function renderSystemPrompt(template: string, serviceLocationMode: unknown): string {
+export function renderSystemPrompt(template: string, serviceLocationMode: unknown, timeZone?: string): string {
   const block = renderServiceLocationBlock(serviceLocationMode)
 
-  if (template.includes(SERVICE_LOCATION_TOKEN)) {
-    return template.replaceAll(SERVICE_LOCATION_TOKEN, block)
-  }
+  const withLocation = template.includes(SERVICE_LOCATION_TOKEN)
+    ? template.replaceAll(SERVICE_LOCATION_TOKEN, block)
+    : `${template}${template.endsWith('\n') ? '\n' : '\n\n'}## Service location\n${block}\n`
 
-  const separator = template.endsWith('\n') ? '\n' : '\n\n'
-  return `${template}${separator}## Service location\n${block}\n`
+  return `${withLocation}${withLocation.endsWith('\n') ? '\n' : '\n\n'}${todayLineForVapi(timeZone)}\n`
+}
+
+/**
+ * The widget gets "Today is …" from the runtime on every turn. Voice cannot:
+ * the prompt lives inside Vapi between pushes. Vapi's Liquid `date` filter
+ * resolves it per call, in the tenant's own timezone — without this the model
+ * guessed "the 8th" as October (rehearsal, 2026-09-05).
+ */
+export function todayLineForVapi(timeZone?: string): string {
+  const zone = isValidTimeZone(timeZone) ? (timeZone as string) : 'UTC'
+  return `Today is {{"now" | date: "%A, %Y-%m-%d", "${zone}"}} (${zone}). Resolve every relative day ("tomorrow", "Monday", "the 8th") to a full YYYY-MM-DD date in this year, counting from today, before using it.`
+}
+
+function isValidTimeZone(tz: unknown): boolean {
+  if (typeof tz !== 'string' || !tz.trim()) return false
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: tz })
+    return true
+  } catch {
+    return false
+  }
 }
 
 /**
@@ -145,7 +170,7 @@ export function renderAssistantConfig(source: AssistantConfigSource): RenderedAs
   const existing = source.existingToolMessages ?? {}
 
   return {
-    systemPrompt: renderSystemPrompt(source.systemPrompt, source.serviceLocationMode),
+    systemPrompt: renderSystemPrompt(source.systemPrompt, source.serviceLocationMode, source.timeZone),
     functions: source.workflows.map(renderFunction),
     toolMessages: source.workflows.map((w) => {
       const kept = existing[w.toolName]
