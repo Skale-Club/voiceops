@@ -102,8 +102,15 @@ interface BusinessInfoTimezone {
  * carry — the Xkedule tenant's own declared timezone is the "existing way"
  * that's actually cheap given only `credentials` in scope. Falls back to UTC
  * on any failure (unset, timeout, malformed) — never lets a timezone lookup
- * fail the quote path or throw out of a fire-and-forget prefetch. */
-async function resolveOrgTimezone(credentials: XkeduleCredentials): Promise<string> {
+ * fail the quote path or throw out of a fire-and-forget prefetch.
+ *
+ * Exported so the Action Engine's xkedule_create_booking emitter
+ * (src/lib/action-engine/executors/xkedule-booking-events.ts) can resolve
+ * the same tenant-local timezone the webhook mirror would have used, instead
+ * of a second network call's worth of duplicated logic -- the TTL cache
+ * above means a booking created moments after a quote/availability check
+ * usually hits it for free. */
+export async function resolveOrgTimezone(credentials: XkeduleCredentials): Promise<string> {
   const key = `xk-tz:${credentials.organizationId ?? credentials.tenantBaseUrl}`
   try {
     const info = await memoTtl(key, TIMEZONE_CACHE_TTL_MS, () =>

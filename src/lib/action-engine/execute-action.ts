@@ -52,6 +52,7 @@ import { getXkeduleCredentialsForOrg } from '@/lib/xkedule/credentials'
 import { getXkeduleServices } from '@/lib/xkedule/actions/get-services'
 import { checkXkeduleAvailability } from '@/lib/xkedule/actions/check-availability'
 import { createXkeduleBooking } from '@/lib/xkedule/actions/create-booking'
+import { emitXkeduleBookingCreatedEvents } from '@/lib/action-engine/executors/xkedule-booking-events'
 import { cancelXkeduleBooking } from '@/lib/xkedule/actions/cancel-booking'
 import { rescheduleXkeduleBooking } from '@/lib/xkedule/actions/reschedule-booking'
 import { getXkeduleQuote } from '@/lib/xkedule/actions/quote'
@@ -522,7 +523,27 @@ async function _executeActionInner(
       }
       const xkCreds = await getXkeduleCredentialsForOrg(ctx.organizationId, ctx.supabase)
       if (!xkCreds) throw new Error('Xkedule integration not configured for this organization')
-      return createXkeduleBooking(params, xkCreds)
+      const orgId = ctx.organizationId
+      const supabase = ctx.supabase
+      return createXkeduleBooking(params, xkCreds, (created) => {
+        // Fire-and-forget, AFTER the tool's own return string is already
+        // computed: mirrors the booking + emits meeting.* immediately so
+        // confirmation workflows fire without waiting for Xkedule's webhook
+        // round trip (not configured for every tenant, e.g. the demo org).
+        // Never allowed to affect this action's result -- see
+        // xkedule-booking-events.ts's own internal try/catch too.
+        void emitXkeduleBookingCreatedEvents(supabase, orgId, xkCreds, created).catch((err) => {
+          void log({
+            event_type: 'xkedule.booking_created_event_failed',
+            source: 'action-engine',
+            severity: 'error',
+            status: 'failed',
+            org_id: orgId,
+            actor_type: 'system',
+            error_message: err instanceof Error ? err.message : String(err),
+          })
+        })
+      })
     }
     // AGT-07: cancel/reschedule/quote/customer-lookup tools, registered the
     // same way as the three xkedule_* tools above.

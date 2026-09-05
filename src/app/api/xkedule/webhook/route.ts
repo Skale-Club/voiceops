@@ -30,10 +30,20 @@ import {
   rescheduleBooking,
   emitCalendarEvent,
 } from '@/lib/calendar/transition'
-import type { CalendarEvent } from '@/lib/calendar/events'
 import { normaliseEmail } from '@/lib/contacts/zod-schemas'
 import { canonicalizeContactPhone, countryForTimeZone } from '@/lib/phone-numbers/normalize'
 import type { BookingStatus } from '@/lib/calendar/booking-status'
+// Shared with the Action Engine's xkedule_create_booking emitter (Xkedule
+// booking-created platform gap fix) -- see src/lib/xkedule/mirror.ts's file
+// header for why these live there instead of here.
+import {
+  KNOWN_XKEDULE_STATUSES,
+  UNCONFIRMED_XKEDULE_STATUSES,
+  mapStatus,
+  calendarEventForNewRow,
+  getOrCreateEventType,
+  matchOrCreateContact,
+} from '@/lib/xkedule/mirror'
 
 export const runtime = 'nodejs'
 
@@ -70,61 +80,16 @@ const payloadSchema = z.object({
   }),
 })
 
-// Exhaustive set of Xkedule statuses this route knows how to handle.
-// A genuinely unrecognized value (typo, new provider status, malformed
-// payload) is logged and skipped BEFORE any DB access -- never silently
-// coerced to 'confirmed' (SYNC-02/D-02: no silent coercion).
-const KNOWN_XKEDULE_STATUSES = new Set([
-  'pending', 'awaiting_approval', 'confirmed', 'completed', 'cancelled', 'no_show',
-])
-
-// MIR-07: pending/awaiting_approval bookings must never mirror as confirmed
-// -- Xkedule's booking can still be rejected while in these states, so
-// mirroring it (and firing meeting.scheduled) would trigger reminder/
-// opportunity workflows for something that might never happen. There is no
-// DB-level "pending" bookings.status value (LIFE-02 deliberately keeps the
-// vocabulary to confirmed/cancelled/no_show/showed) -- rather than widen
-// that CHECK constraint and every transition's allowedFrom for a state that
-// may resolve to "never happened," this route simply does not mirror the
-// booking at all (no insert, no update, no contact write) until Xkedule
-// reports a decided status. The first event Xkedule sends with a decided
-// status creates the mirror row -- see calendarEventForNewRow below for why
-// that INSERT is always treated as a fresh "scheduled" moment.
-const UNCONFIRMED_XKEDULE_STATUSES = new Set(['pending', 'awaiting_approval'])
-
 // MIR-10: terminal native statuses (mirrors transition.ts's LIFE-02 note:
 // "cancelled/no_show/showed are terminal"). Once a mirror row reaches one of
 // these, an out-of-order retry must not silently revive it.
 const TERMINAL_STATUSES = new Set<BookingStatus>(['cancelled', 'no_show', 'showed'])
 
-// Xkedule status (pending|awaiting_approval|confirmed|completed|cancelled|no_show)
-// -> native enum. pending/awaiting_approval never reach this function (see
-// UNCONFIRMED_XKEDULE_STATUSES above); unrecognized values never reach it
-// either (rejected by the KNOWN_XKEDULE_STATUSES guard first). 'completed'
-// maps to 'showed' -- the DB's only attendance/completion value (LIFE-02).
-function mapStatus(s: string): BookingStatus {
-  if (s === 'cancelled') return 'cancelled'
-  if (s === 'no_show') return 'no_show'
-  if (s === 'completed') return 'showed'
-  return 'confirmed'
-}
-
-// MIR-04: called ONLY for a booking Xphere has never seen before (the INSERT
-// branch below). The first event for any booking is a "scheduled" moment
-// from this mirror's point of view, regardless of which Xkedule event name
-// triggered the insert -- an out-of-order `booking.updated` arriving before
-// `booking.created` (network reordering) must not be mislabeled as a
-// reschedule of something that never existed. (The bug this replaces: the
-// old calendarEventFor fell through to 'meeting.rescheduled' for exactly
-// this case -- "the only path that emits meeting.rescheduled is the
-// out-of-order INSERT", per the 2026-07 audit.) A booking that arrives
-// already cancelled/no_show/completed still gets its real terminal event.
-function calendarEventForNewRow(event: string, status: BookingStatus): CalendarEvent {
-  if (event === 'booking.cancelled' || status === 'cancelled') return 'meeting.cancelled'
-  if (status === 'no_show') return 'meeting.no_show'
-  if (status === 'showed') return 'meeting.completed'
-  return 'meeting.scheduled'
-}
+// KNOWN_XKEDULE_STATUSES, UNCONFIRMED_XKEDULE_STATUSES, mapStatus, and
+// calendarEventForNewRow now live in @/lib/xkedule/mirror (imported above)
+// so the Action Engine's xkedule_create_booking emitter shares the exact
+// same status vocabulary and "first-seen INSERT" event logic instead of a
+// second, possibly-drifting copy.
 
 // Dispatches an EXISTING mirrored booking's status transition through
 // Phase 127's canonical lifecycle service (SYNC-02, D-02) instead of a
@@ -144,94 +109,8 @@ async function runXkeduleTransition(
   }
 }
 
-// Lazily get-or-create a synthetic "Xkedule" event type for the org. bookings
-// requires event_type_id (NOT NULL); event_types requires a user_id (any member).
-async function getOrCreateEventType(supabase: ServiceClient, orgId: string): Promise<string | null> {
-  const { data: existing } = await supabase
-    .from('event_types')
-    .select('id')
-    .eq('org_id', orgId)
-    .eq('slug', 'xkedule')
-    .maybeSingle()
-  if (existing) return existing.id
-
-  const { data: member } = await supabase
-    .from('org_members')
-    .select('user_id')
-    .eq('organization_id', orgId)
-    .limit(1)
-    .maybeSingle()
-  if (!member) return null
-
-  const { data: created, error } = await supabase
-    .from('event_types')
-    .insert({
-      org_id: orgId,
-      user_id: member.user_id,
-      title: 'Xkedule',
-      slug: 'xkedule',
-      description: 'Bookings mirrored from Xkedule',
-      location_type: 'in_person',
-    })
-    .select('id')
-    .single()
-  if (error || !created) {
-    console.error('[xkedule/webhook] event_type create error:', error)
-    return null
-  }
-  return created.id
-}
-
-// Match by phone (E.164, MIR-02-reconciled against legacy loose-normalized
-// rows) -> email (normalized) -> create. Mirrors /api/v1/contacts.
-async function matchOrCreateContact(
-  supabase: ServiceClient,
-  orgId: string,
-  c: { name: string; phoneCandidates: string[]; emailNorm: string | null },
-): Promise<string | null> {
-  let existingId: string | null = null
-  if (c.phoneCandidates.length > 0) {
-    // .limit(1) instead of .maybeSingle(): with MIR-02's multi-candidate
-    // match, two DISTINCT existing contacts could each satisfy a different
-    // candidate (a legacy loose-form row and a separately-created E.164-form
-    // row for the same real number) -- .maybeSingle() would error on more
-    // than one match. Deterministically prefer the oldest (first-created)
-    // contact rather than crash the webhook over exactly the duplicate this
-    // feature exists to reconcile.
-    const { data } = await supabase
-      .from('contacts')
-      .select('id')
-      .eq('org_id', orgId)
-      .in('phone_e164', c.phoneCandidates)
-      .neq('identity_status', 'archived_duplicate')
-      .order('created_at', { ascending: true })
-      .limit(1)
-    if (data && data.length > 0) existingId = data[0].id
-  }
-  if (!existingId && c.emailNorm) {
-    const { data } = await supabase
-      .from('contacts')
-      .select('id')
-      .eq('org_id', orgId)
-      .eq('email_normalized', c.emailNorm)
-      .neq('identity_status', 'archived_duplicate')
-      .maybeSingle()
-    if (data) existingId = data.id
-  }
-  if (existingId) return existingId
-
-  const phoneToStore = c.phoneCandidates[0] ?? null
-  const { data, error } = await supabase
-    .from('contacts')
-    .insert({ org_id: orgId, name: c.name, phone: phoneToStore, email: c.emailNorm, source: 'api' })
-    .select('id')
-    .single()
-  if (error || !data) {
-    console.error('[xkedule/webhook] contact create error:', error)
-    return null
-  }
-  return data.id
-}
+// getOrCreateEventType and matchOrCreateContact now live in
+// @/lib/xkedule/mirror (imported above) -- see that file's header.
 
 export async function POST(request: Request): Promise<Response> {
   const ok = (extra?: Record<string, unknown>) => Response.json({ ok: true, ...extra })

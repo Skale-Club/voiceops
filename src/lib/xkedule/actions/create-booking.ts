@@ -3,7 +3,7 @@
 // Xkedule computes duration/endTime/price and re-validates the slot (409).
 import { xkeduleFetchJson, WRITE_TIMEOUT_MS, type XkeduleCredentials } from '../client'
 
-interface CreateBookingParams {
+export interface CreateBookingParams {
   customerName?: string
   customerEmail?: string
   customerPhone?: string
@@ -19,7 +19,7 @@ interface CreateBookingParams {
   [key: string]: unknown
 }
 
-interface BookingResponse {
+export interface BookingResponse {
   id: number
   status: string
   bookingDate?: string
@@ -29,9 +29,25 @@ interface BookingResponse {
   idempotent?: boolean
 }
 
+/**
+ * Fired synchronously, right after Xkedule confirms the write, with the raw
+ * response AND the input that produced it -- BEFORE this function formats
+ * its human-readable return string. Lets a caller (the Action Engine's
+ * xkedule_create_booking case) mirror the booking into the native
+ * `bookings` table and emit the platform's own meeting.* calendar events,
+ * without this file -- a pure Xkedule provider call -- knowing anything
+ * about Supabase, orgs, or the calendar event system. Never called for a
+ * validation failure, a 409 slot-taken, or a thrown error.
+ */
+export interface XkeduleBookingCreated {
+  booking: BookingResponse
+  input: CreateBookingParams
+}
+
 export async function createXkeduleBooking(
   params: Record<string, unknown>,
   credentials: XkeduleCredentials,
+  onCreated?: (created: XkeduleBookingCreated) => void,
 ): Promise<string> {
   const p = params as CreateBookingParams
 
@@ -72,6 +88,14 @@ export async function createXkeduleBooking(
       credentials,
       WRITE_TIMEOUT_MS,
     )
+    // Never let a caller's hook (Supabase writes, calendar event dispatch)
+    // affect this tool's own result -- swallow synchronously, same contract
+    // as every other best-effort side channel in this codebase.
+    try {
+      onCreated?.({ booking, input: p })
+    } catch (hookErr) {
+      console.error('[xkedule/create-booking] onCreated hook error:', hookErr)
+    }
     const end = booking.endTime ? `-${booking.endTime}` : ''
     const total = booking.totalPrice ? ` | Total: $${booking.totalPrice}` : ''
     return `Booking confirmed. ID: ${booking.id} | ${booking.bookingDate ?? p.bookingDate} at ${booking.startTime ?? p.startTime}${end} | Status: ${booking.status}${total}`
