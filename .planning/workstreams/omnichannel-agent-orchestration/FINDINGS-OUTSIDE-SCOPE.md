@@ -309,3 +309,34 @@ What a second real tenant still needs after this, and what the runbook covers
 set business type and modality in Company Info, create and map a Vapi assistant and push its
 config, then flip routing per channel when ready. The scratch org can be deleted or reused as
 the target for the UI walkthrough.
+
+## 12. The production widget had no conversation memory — FIXED (2026-09-05)
+
+Driving the production widget through service → price → day, the third turn answered
+“what service are you looking to book?” to a customer who had named it one message earlier;
+a direct test (“what is my name and which service did I ask for?”) got “this is the start of
+our conversation”. Every turn came back with a **new** `sessionId`.
+
+Cause: widget sessions were held in Redis only, `getSession()` returns null when Redis is not
+ready, and the production container has **no `REDIS_URL`** at all. So every message minted a
+new session and a new `conversations` row, and the agent saw an empty history — while the
+messages were being faithfully persisted to `conversation_messages` the whole time, and
+`loadSessionFromDb()` in `persist.ts` already knew how to rebuild the context from them.
+Nothing called it. The eighth instance of a mechanism built and never reached.
+
+**Fixed** in `9c7c1680`: the route resolves the organization first, tries Redis, then reloads
+the session from the database (org-scoped, last 20 rows), and only then applies the session
+rate limits — a resumed conversation counts as resumed (R3) instead of burning the per-IP
+new-session budget (R4), which without Redis would have blocked the eleventh message of an
+hour. A database error degrades to a fresh session, never a 500. Pinned in
+`tests/chat-api.test.ts`.
+
+**Also:** the entry orchestrator prompt (version 8, mirrored into `canary/cuts-and-culture.json`
+and kept as `canary/entry-orchestrator-prompt.md`) now carries the same conversation design as
+voice — service, price, day, name and phone only at booking — and states that a specialist
+sees only the handoff, so the service the customer named must travel in `summary` /
+`extracted_params`. Before this the orchestrator asked open questions and requested name and
+phone up front.
+
+Redis itself remains unprovisioned in production. With the database as the source of truth
+it is now an optimisation, not a dependency; the rate limiters already run in-memory without it.
