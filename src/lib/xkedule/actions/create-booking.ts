@@ -4,6 +4,8 @@
 import { xkeduleFetchJson, WRITE_TIMEOUT_MS, type XkeduleCredentials } from '../client'
 
 export interface CreateBookingParams {
+  /** Two-phase gate: only a call with confirmed=true writes; see createXkeduleBooking. */
+  confirmed?: boolean | string
   customerName?: string
   customerEmail?: string
   customerPhone?: string
@@ -39,6 +41,7 @@ export interface BookingResponse {
  * about Supabase, orgs, or the calendar event system. Never called for a
  * validation failure, a 409 slot-taken, or a thrown error.
  */
+// `confirmed` is the two-phase gate flag (see createXkeduleBooking).
 export interface XkeduleBookingCreated {
   booking: BookingResponse
   input: CreateBookingParams
@@ -64,6 +67,24 @@ export async function createXkeduleBooking(
   }
 
   const staff = p.staffMemberId ?? p.staffId
+
+  // Two-phase booking, enforced here so it holds on every channel and with
+  // every model: the first call never writes. It hands the agent the
+  // read-back to say and the question to ask; only a second call carrying
+  // confirmed=true books. Rehearsals on 2026-09-05 showed gpt-5.1 booking on
+  // the customer's answer to the NAME question, twice, despite a prompt that
+  // spelled out the order - a rule the customer can hear broken is not left
+  // to the prompt.
+  if (!isConfirmed(p.confirmed)) {
+    const who = String(p.customerName)
+    const staffNote = staff ? ` with staff member ${staff}` : ''
+    return (
+      `NOT BOOKED YET. Read this back to the customer in one sentence and ask whether there is anything else they would like to add: ` +
+      `${describeServices(ids)} on ${p.bookingDate} at ${p.startTime}${staffNote}, under the name ${who}, to the number ${p.customerPhone}. ` +
+      `Only when they answer no, call book_appointment again with exactly these details and confirmed: true.`
+    )
+  }
+
   const body: Record<string, unknown> = {
     serviceIds: ids.map((x) => Number(x)).filter(Boolean),
     bookingDate: p.bookingDate,
@@ -107,4 +128,13 @@ export async function createXkeduleBooking(
     }
     throw err
   }
+}
+
+function isConfirmed(value: unknown): boolean {
+  return value === true || (typeof value === 'string' && ['true', 'yes', '1'].includes(value.trim().toLowerCase()))
+}
+
+function describeServices(ids: Array<number | string>): string {
+  const list = ids.map((x) => String(x).trim()).filter(Boolean)
+  return list.length === 1 ? `service ${list[0]}` : `services ${list.join(', ')}`
 }

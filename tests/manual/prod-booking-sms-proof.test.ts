@@ -16,7 +16,7 @@ it.skipIf(process.env.APPLY !== '1')('books and watches for the request-received
   const list = (await (await fetch('https://api.vapi.ai/assistant', { headers: { Authorization: `Bearer ${key}` } })).json()) as any[]
   const secret: string = list.map((a) => a.server?.headers?.['x-vapi-secret']).find(Boolean)
   const since = new Date().toISOString()
-  const args = { serviceIds: '335', bookingDate: '2026-09-08', startTime: '11:40', customerName: 'Paul Joiner', customerPhone: PHONE, notes: 'SMS notification proof (test)' }
+  const args = { serviceIds: '335', bookingDate: '2026-09-08', startTime: '12:20', customerName: 'Paul Joiner', customerPhone: PHONE, notes: 'SMS notification proof (test)', confirmed: true }
   const tc = { id: 'toolu_proof', type: 'function', function: { name: 'book_appointment', arguments: JSON.stringify(args) } }
   const t = Date.now()
   const r = await fetch('https://xphere.app/api/vapi/tools', { method: 'POST', headers: { 'content-type': 'application/json', 'x-vapi-secret': secret }, body: JSON.stringify({ message: { type: 'tool-calls', call: { id: 'proof-' + Date.now(), assistantId: ASSISTANT_ID, customer: { number: PHONE } }, toolCallList: [tc] } }) })

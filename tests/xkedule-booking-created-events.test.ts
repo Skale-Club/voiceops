@@ -155,6 +155,8 @@ function bookingInput(overrides: Record<string, unknown> = {}) {
     bookingDate: '2026-08-01',
     startTime: '10:00',
     serviceId: 5,
+    // Two-phase gate: these cases exercise the hook AFTER a real create.
+    confirmed: true,
     ...overrides,
   }
 }
