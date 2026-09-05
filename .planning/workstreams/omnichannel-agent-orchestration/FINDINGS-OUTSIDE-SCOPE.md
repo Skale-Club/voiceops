@@ -394,3 +394,24 @@ not a defect.
 
 Voice, warm, through production as Vapi calls it: lookup 0.17s (warmed at pickup), business
 info 0.46s, services 0.86s, quote 2.3s, availability 0.56s. The greeting is instant.
+
+## 16. The first real call (booking #479) and what it changed — FIXED (2026-09-05), for both channels
+
+The operator called +1 224 551 6131 and booked a buzz cut for Monday 09-07 16:00 in 3m24s.
+The booking landed. The feedback, and where each fix lives (engine or shared config, never
+one channel's prompt):
+
+| Heard on the call | Cause | Fix |
+|---|---|---|
+| First second of the greeting lost | PSTN audio not yet up when Vapi starts speaking at 1.4s | Greeting now opens with "Hi there!" so the clipped second is not the business name |
+| Cut off mid-sentence ("I wanna book a-") and had to repeat | Default endpointing (0.4s pause = end of turn) plus the lookup's spoken line interrupting | `startSpeakingPlan` 0.8s + smart endpointing provisioned by the push; lookup has no spoken line (it is warmed at pickup); prompt continues the caller's own sentence |
+| "We have three options" | Prompt | Options named the way a person would; "which would you like?" |
+| "What day would you like to come in?" | Prompt | "What's the best day for you?" |
+| Sunday reported as "fully booked" | Provider returns an empty list for closed and for full | `check_availability` consults business hours (cached) and says "closed on Sunday", suggesting the next open day — proven in production |
+| Never asked "anyone, or someone in particular?" though staff have their own calendars | Prompt | Asked before any availability check, staff id carried into every later call, on voice and widget |
+| Redundant closing; no "anything else?" | Prompt | Read-back, then one "anything else you'd like to add?", then book |
+| 25s of silence while booking | Provider write took 24.4s; only a request-start line | 60s timeout on the three writes, "still working on that" at 8s, widget tool-turn budget 45s, `WRITE_TIMEOUT_MS` 60s |
+| Voice flat, slow, robotic; filler words | Stock `vapi/Elliot`; model openers | ElevenLabs "sarah" (turbo v2.5) provisioned by the push; prompt forbids "Perfect/Great/Sure thing" and self-narration |
+| Availability cold twice (10.8s + 13.4s) despite the prefetch | Model sent `includeStaff: true` unasked, a different cache key | Field described as "only when the customer asks who" (workflow schema, so both channels) |
+| Calls page shows the call as `ringing` | Raw `call.status` persisted from the report | `ended` |
+| No booking confirmation to the caller | Xkedule's webhook is not configured for this tenant (0 mirrored bookings), the org has no SMS channel, and the platform only emitted meeting events from that webhook | Engine now emits the booking-created event from the Action Engine itself (see item 17); an SMS-capable number is still an operator step |
