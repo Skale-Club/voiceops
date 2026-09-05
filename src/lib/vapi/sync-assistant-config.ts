@@ -30,6 +30,7 @@ import {
   type AssistantConfigWorkflow,
   type RenderedAssistantConfig,
   type VapiToolMessage,
+  spokenName,
 } from './render-assistant-config'
 
 /**
@@ -335,7 +336,10 @@ export async function pushAssistantConfig(
     // name in its first reply instead. The text is rendered from the tenant's
     // facts, so a template carries the behaviour and the tenant supplies the
     // name - never a hardcoded greeting inside Vapi again.
-    const firstMessage = renderPromptTemplate(FIRST_MESSAGE_TEMPLATE, facts)
+    const firstMessage = renderPromptTemplate(FIRST_MESSAGE_TEMPLATE, {
+      ...facts,
+      businessName: spokenName(facts.businessName),
+    })
 
     // Assistant-level server: where Vapi sends everything that is not a tool
     // call - the end-of-call report and the status updates that let the

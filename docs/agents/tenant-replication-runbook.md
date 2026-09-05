@@ -107,6 +107,10 @@ lookup is 8–14s cold). See `FINDINGS-OUTSIDE-SCOPE.md` item 9 for the levers.
      over from the assistant, and the push **refuses** if any tool would be left unrouted;
    - the fixed opening line, spoken instantly on pickup:
      `Thank you for calling <name>. Which service would you like to book today?`
+   - the assistant-level server (`https://xphere.app/api/vapi/calls`, same secret, 20s), so
+     status updates and the end-of-call report reach Xphere. The `in-progress` status update
+     carries the caller's number before anyone has spoken, and Xphere starts the customer
+     lookup right then — the robot's first reply is not waiting on the provider.
 4. Repeat the push whenever the prompt, the modality or the tool set changes. Nothing on the
    Vapi side is edited by hand anymore.
 

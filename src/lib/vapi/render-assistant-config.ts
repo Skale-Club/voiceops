@@ -79,6 +79,15 @@ export interface RenderedAssistantConfig {
 const DEFAULT_REQUEST_START = 'One moment.'
 
 /**
+ * A business name as it should be SPOKEN. Text-to-speech reads "&" as
+ * "ampersand" often enough to matter on a greeting; nothing else in a name
+ * is touched, so the tenant still hears its own name.
+ */
+export function spokenName(name: string): string {
+  return name.replace(/\s*&\s*/g, ' and ').replace(/\s{2,}/g, ' ').trim()
+}
+
+/**
  * The token a prompt uses to place the service location rule itself. A prompt
  * without it still gets the rule, appended as its own section — a prompt can
  * never end up with no location rule.

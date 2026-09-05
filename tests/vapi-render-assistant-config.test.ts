@@ -212,3 +212,12 @@ describe('MODAL-03: tuned per-tool lines survive a push', () => {
     expect(services?.messages[0].content).toBe('One moment.')
   })
 })
+
+describe('spokenName: the opening line is read aloud', () => {
+  it('turns an ampersand into "and" and leaves everything else alone', async () => {
+    const { spokenName } = await import('../src/lib/vapi/render-assistant-config')
+    expect(spokenName('Cuts & Culture Barbershop')).toBe('Cuts and Culture Barbershop')
+    expect(spokenName('Cuts&Culture')).toBe('Cuts and Culture')
+    expect(spokenName("Maria's Cleaning Co.")).toBe("Maria's Cleaning Co.")
+  })
+})
