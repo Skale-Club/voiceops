@@ -15,6 +15,8 @@ interface UpcomingBooking {
   status: string
   bookingDate: string
   startTime: string
+  staffMemberId?: number | null
+  totalPrice?: string | number | null
 }
 
 interface CustomerResponse {
@@ -40,7 +42,7 @@ export async function lookupXkeduleCustomer(
       credentials,
     )
     const upcoming = data.upcomingBookings.length
-      ? data.upcomingBookings.map((b) => `#${b.id} on ${b.bookingDate} at ${b.startTime} (${b.status})`).join('\n')
+      ? data.upcomingBookings.map((b) => `#${b.id} on ${b.bookingDate} at ${b.startTime} (${b.status})${b.staffMemberId ? `, staff member id ${b.staffMemberId}` : ''}${b.totalPrice != null ? `, $${b.totalPrice}` : ''}`).join('\n')
       : 'No upcoming bookings.'
     return `Found customer: ${data.customer.name}${data.customer.email ? ` (${data.customer.email})` : ''}\n${upcoming}`
   } catch (err) {

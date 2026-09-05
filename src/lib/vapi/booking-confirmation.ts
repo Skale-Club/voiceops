@@ -52,13 +52,17 @@ export function checkVoiceBookingConfirmation(
   }
   const hash = detailsHash(params)
   const token = typeof params.confirmationToken === 'string' ? params.confirmationToken : ''
-  const [payload, mac, extra] = token.split('.')
-  if (payload && mac && !extra) {
+  // Token shape: `<turn>.<issued-at base36>.<mac>`. Org, call id and the
+  // arguments hash are inside the MAC rather than the token, which keeps it
+  // ~40 characters: Vapi's model output is capped (maxTokens), and a long
+  // token was truncating the tool-call arguments mid-JSON (rehearsal, v27).
+  const [turnPart, atPart, mac, extra] = token.split('.')
+  if (turnPart && atPart && mac && !extra) {
     try {
-      const expected = Buffer.from(signature(payload))
+      const expected = Buffer.from(tokenMac(orgId, ctx.callId, hash, `${turnPart}.${atPart}`))
       const received = Buffer.from(mac)
       if (expected.length === received.length && timingSafeEqual(expected, received)) {
-        const p = JSON.parse(Buffer.from(payload, 'base64url').toString())
+        const p = { turn: Number(turnPart), at: parseInt(atPart, 36) }
         const lastUser = ctx.messages.findLastIndex((m) => m.role === 'user')
         const userIndices = ctx.messages.flatMap((m, index) => m.role === 'user' ? [index] : [])
         const proposalTurn = userIndices[p.turn - 1] ?? lastUser
@@ -72,14 +76,19 @@ export function checkVoiceBookingConfirmation(
         // "yes" to that question means an addition and is NOT consent.
         const nothingElse = /^(no|nope|nah|no thanks|no thank you|nothing|nothing else|no that's it|no that's all|no that is it|no that is all|that's it|that's all|that is it|that is all|that'll be all|that will be all|all good|i'm good|im good|we're good|no i'm good|no im good|no that's everything|that's everything)$/.test(answer)
         const affirmative = askedToBook ? yes : nothingElse
-        if (p.org === orgId && p.call === ctx.callId && p.hash === hash && Number.isInteger(p.turn)
+        if (Number.isInteger(p.turn) && Number.isFinite(p.at)
           && userCount > p.turn && Date.now() >= p.at && Date.now() - p.at <= MAX_AGE_MS
           && affirmative && asked && params.confirmed === true) return { allowed: true }
       }
     } catch { /* An invalid/expired proposal can only produce a new read-back. */ }
   }
-  const next = Buffer.from(JSON.stringify({ org: orgId, call: ctx.callId, hash, turn: userCount, at: Date.now() })).toString('base64url')
-  return { allowed: false, instruction: `${readBack(params)} Only when they answer no / that's all in a later turn, call this tool with exactly the same arguments, confirmed: true, and confirmationToken: ${next}.${signature(next)}. Never speak the token. If they add or change anything, read back again.` }
+  const next = `${userCount}.${Date.now().toString(36)}`
+  return { allowed: false, instruction: `${readBack(params)} Only when they answer no / that's all in a later turn, call this tool with exactly the same arguments, confirmed: true, and confirmationToken: ${next}.${tokenMac(orgId, ctx.callId, hash, next)}. Never speak the token. If they add or change anything, read back again.` }
+}
+
+/** 160-bit MAC over org, call, the arguments hash and the token's own turn/time. */
+function tokenMac(orgId: string, callId: string, hash: string, next: string): string {
+  return signature(`${orgId}|${callId}|${hash}|${next}`).slice(0, 27)
 }
 
 /** The read-back the model must speak before consent, per write kind. */

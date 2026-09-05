@@ -133,7 +133,7 @@ it('runs the voice rehearsal matrix', async () => {
     async function modelTurn(label: string): Promise<string> {
       const t0 = Date.now()
       for (let hop = 0; hop < 5; hop++) {
-        const r = await fetch('https://openrouter.ai/api/v1/chat/completions', { method: 'POST', headers: { Authorization: `Bearer ${orKey}`, 'content-type': 'application/json' }, body: JSON.stringify({ model, temperature, max_tokens: 250, tools, messages }) })
+        const r = await fetch('https://openrouter.ai/api/v1/chat/completions', { method: 'POST', headers: { Authorization: `Bearer ${orKey}`, 'content-type': 'application/json' }, body: JSON.stringify({ model, temperature, max_tokens: 600, tools, messages }) })
         const j = (await r.json()) as any
         const m = j.choices?.[0]?.message
         if (!m) { problems.push(`${label} model error ${JSON.stringify(j).slice(0, 80)}`); return '' }
