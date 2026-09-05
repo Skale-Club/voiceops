@@ -199,7 +199,15 @@ was verified by reading back the prompt and the messages it had rendered — exa
 knew about — and not the field it had never modelled. A PATCH that replaces an array must be
 verified against the array it replaced, not against its own output.
 
-## 9. The widget mesh cannot answer a cold availability question inside its turn budget — MEASURED, NOT FIXED
+## 9. The widget mesh cannot answer a cold availability question inside its turn budget — MEASURED; LEVERS 1 AND 2 SHIPPED 2026-09-05
+
+Shipped the same day, in `0025c5fe` and the xkedule changes carried in `c46a96c3`/`fc8efa26`:
+`runAgent` now logs `agent_turn_timings` per turn (resolve_agent, cost_cap, knowledge,
+invocation_insert, llm_provider, tool_build, model_first_call, total) on both paths, and the
+four independent pre-model reads (LLM provider, agent_tools rows, workflow tools, partner
+tools) run in parallel instead of in sequence; `check_availability` reads through a 60s cache
+that `get_quote` pre-warms for today and the next two days in the tenant's timezone. The
+production measurement of the effect is below the original analysis.
 
 Two widget turns through the real mesh, 2026-09-05 04:22Z, local runtime against the live
 tenant (`tests/manual/e2e-widget-mesh.test.ts`, traces in `agent_invocations`):

@@ -86,8 +86,11 @@ site (`Settings → Widget`).
 Check: ask the widget where the business is and what it offers. The answer must name the
 **new** business and come from its Xkedule data. No `{{` anywhere.
 
-Latency note: a cold availability question through the mesh can take ~30s (the calendar
-lookup is 8–14s cold). See `FINDINGS-OUTSIDE-SCOPE.md` item 9 for the levers.
+Latency note: the calendar lookup is 8–14s cold at the provider and under a second warm.
+Quoting a price pre-warms availability for the next three days, so the natural order —
+service, price, then day — keeps the day question fast. A cold availability question asked
+out of order still pays the provider's full cost. `agent_turn_timings` in the logs shows
+where each turn's time went. See `FINDINGS-OUTSIDE-SCOPE.md` item 9.
 
 ## Step 6 — The phone robot (voice)
 
