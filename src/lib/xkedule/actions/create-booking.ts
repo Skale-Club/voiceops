@@ -131,7 +131,7 @@ export async function createXkeduleBooking(
     const total = booking.totalPrice ? ` | Total: $${booking.totalPrice}` : ''
     const outcome = booking.status === 'confirmed' ? 'Booking confirmed.'
       : ['pending', 'awaiting_approval'].includes(booking.status)
-        ? 'Appointment request received, awaiting the business approval. Tell the customer it is requested, not confirmed yet.'
+        ? 'Appointment request received, awaiting the business approval. Tell the customer their request is in and the shop will confirm it shortly - never say booked, confirmed, all set or you are set.'
         : 'Booking response received. Do not claim confirmation; report the returned status.'
     return `${outcome} ID: ${booking.id} | ${booking.bookingDate ?? p.bookingDate} at ${booking.startTime ?? p.startTime}${end} | Status: ${booking.status}${total}`
   } catch (err) {

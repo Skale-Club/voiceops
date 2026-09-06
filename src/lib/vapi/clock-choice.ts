@@ -28,6 +28,11 @@ function digitize(text: string): string {
     // Calendar dates are not clock times: "2026-09-12" must not become 09:12.
     .replace(/\b\d{4}-\d{2}-\d{2}\b/g, ' ')
     .replace(/\b\d{1,2}\/\d{1,2}(?:\/\d{2,4})?\b/g, ' ')
+    // Days of the month are not clock times either: "on the 8th" / "the 12th"
+    // / "September 8" must not become 8:00 (rehearsal v39: an offer "on the
+    // 8th ... nine, eleven, or three" made "the first one" resolve to 8:00).
+    .replace(/\b\d{1,2}(?:st|nd|rd|th)\b/g, ' ')
+    .replace(/\b(?:january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sept?|oct|nov|dec)\.?\s+\d{1,2}(?:,?\s*\d{4})?\b/g, ' ')
     .replace(/[‐-―-]/g, ' ')
     .replace(/\ba\.?\s*m\.?(?![a-z])/g, 'am')
     .replace(/\bp\.?\s*m\.?(?![a-z])/g, 'pm')

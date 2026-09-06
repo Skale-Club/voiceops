@@ -288,3 +288,15 @@ describe('provider boundary', () => {
     expect(vi.mocked(xkeduleFetchJson).mock.calls.filter(([path]) => path.endsWith('/cancel'))).toHaveLength(1)
   })
 })
+
+describe('days of the month are not clock times', () => {
+  const offer = 'Tony has openings on the 8th - would you like nine in the morning, eleven in the morning, or three in the afternoon?'
+  const slots = { role: 'tool', content: 'Available times on 2026-09-08: 9:00 AM, 9:20 AM, 11:00 AM, 3:00 PM' }
+  it('"the first one" after an offer that mentions "the 8th" is nine, not eight', () => {
+    expect(callerChoseTime('09:00', [slots, { role: 'assistant', content: offer }, { role: 'user', content: 'the first one' }])).toBe(true)
+    expect(callerChoseTime('08:00', [slots, { role: 'assistant', content: offer }, { role: 'user', content: 'the first one' }])).toBe(false)
+  })
+  it('"September 7th at nine forty-five" yields only 9:45', () => {
+    expect(clocksIn('Monday, September 7th at nine forty-five').map((c) => `${c.hour}:${c.minute}`)).toEqual(['9:45'])
+  })
+})
