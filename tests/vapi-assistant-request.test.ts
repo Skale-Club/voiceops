@@ -33,6 +33,12 @@ describe('caller facts from the lookup text', () => {
     expect(f.facts).toContain('Returning customer: Vanildo Teste')
     expect(f.facts).toContain('#471')
   })
+  it('a provider error is not "no record": the model looks the caller up on the line', () => {
+    const f = callerFactsFromLookup('I could not verify that request right now. Please try again in a moment.')
+    expect(f.known).toBe(false)
+    expect(f.facts).toBe('Not looked up yet.')
+    expect(callerFactsFromLookup('').facts).toBe('Not looked up yet.')
+  })
   it('an unknown number asks for the name', () => {
     const f = callerFactsFromLookup("I don't have a record for that phone number yet.")
     expect(f.known).toBe(false)

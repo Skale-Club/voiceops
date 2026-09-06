@@ -110,9 +110,17 @@ export function callerFactsFromLookup(result: string | null | undefined): Caller
   // No answer within the budget (or no number): the model must still look the
   // caller up on its first turn - "Not looked up yet." is the prompt's cue.
   // Only a real "no record" answer makes the caller unknown.
-  if (!text) return { known: false, firstName: '', fullName: '', facts: 'Not looked up yet.' }
   const m = /^Found customer:\s*(.+?)\s*(?:\n|$)/.exec(text)
-  if (!m) return { known: false, firstName: '', fullName: '', facts: 'No record for the number calling. Ask who you are speaking with before the service.' }
+  if (!m) {
+    // Only the provider's own "no record" makes the caller unknown. Anything
+    // else - a timeout, a provider error text - leaves the lookup to the
+    // model's first turn (the 09:59 call greeted a known customer as a
+    // stranger after one slow provider answer).
+    const noRecord = /don't have a record|no record|not found/i.test(text)
+    return noRecord
+      ? { known: false, firstName: '', fullName: '', facts: 'No record for the number calling. Ask who you are speaking with before the service.' }
+      : { known: false, firstName: '', fullName: '', facts: 'Not looked up yet.' }
+  }
   const fullName = m[1].trim()
   const firstName = fullName.split(/\s+/)[0] ?? ''
   const rest = text.slice(m[0].length).trim()
