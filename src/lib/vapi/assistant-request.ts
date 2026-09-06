@@ -107,6 +107,10 @@ async function readNumber(
 /** "Found customer: Vanildo Teste\n#471 on …" → the facts block and the names. */
 export function callerFactsFromLookup(result: string | null | undefined): CallerFacts {
   const text = (result ?? '').trim()
+  // No answer within the budget (or no number): the model must still look the
+  // caller up on its first turn - "Not looked up yet." is the prompt's cue.
+  // Only a real "no record" answer makes the caller unknown.
+  if (!text) return { known: false, firstName: '', fullName: '', facts: 'Not looked up yet.' }
   const m = /^Found customer:\s*(.+?)\s*(?:\n|$)/.exec(text)
   if (!m) return { known: false, firstName: '', fullName: '', facts: 'No record for the number calling. Ask who you are speaking with before the service.' }
   const fullName = m[1].trim()
@@ -164,7 +168,11 @@ export async function answerAssistantRequest(
   if (!resolved) return null
   const phone = call.customer?.number?.trim() || ''
   try {
-    const lookup = phone ? await lookupWithin(resolved.organizationId, phone, options.lookupBudgetMs ?? 4_000, supabase) : null
+    // Vapi allows 7.5s end to end and asks for <6s; the lookup is a customer
+    // read plus one detail read per upcoming booking (4.1s cold for a known
+    // caller on 2026-09-06; the first real call on this path missed a 4s
+    // budget and greeted a known customer as a stranger).
+    const lookup = phone ? await lookupWithin(resolved.organizationId, phone, options.lookupBudgetMs ?? 6_000, supabase) : null
     const facts = callerFactsFromLookup(lookup)
     return {
       assistantId: resolved.assistantId,

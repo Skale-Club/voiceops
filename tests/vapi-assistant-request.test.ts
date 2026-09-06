@@ -70,6 +70,8 @@ describe('answerAssistantRequest', () => {
     expect(answer?.assistantId).toBe(ASSISTANT)
     expect(answer?.assistantOverrides?.firstMessage).toMatch(/Who am I speaking with\?$/)
     expect(answer?.assistantOverrides?.variableValues?.caller_known).toBe('no')
+    // A timeout is not "no record": the model must still look the caller up.
+    expect(answer?.assistantOverrides?.variableValues?.caller_facts).toBe('Not looked up yet.')
   })
 
   it('a call without a number still gets the assistant and the generic greeting', async () => {

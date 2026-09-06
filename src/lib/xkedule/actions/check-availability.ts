@@ -15,6 +15,7 @@
 import { xkeduleFetchJson, type XkeduleCredentials } from '../client'
 import { fetchXkeduleAvailabilityCached } from '../availability-cache'
 import { isBusinessOpenOn } from './business-info'
+import { getXkeduleCatalog } from './get-services'
 
 interface AvailabilityParams {
   date?: string
@@ -203,8 +204,20 @@ export async function checkXkeduleAvailability(
       return `The business is closed on ${day.weekday} (${date}). Suggest the next open day instead.`
     }
     // Late in the day "fully booked" is misleading: the day is simply over.
-    if (day?.today) return `No openings left today (${date}). Suggest another day.`
-    return `No available time slots on ${date} (fully booked). Suggest another day.`
+    // A pinned barber with nothing that day is not "fully booked" either (call
+    // 5, 2026-09-06: "Tony is fully booked tomorrow" when Tony does not work
+    // Mondays). Either way the model's next words should be the next real
+    // openings, so they come back in the same result instead of costing
+    // another turn and another provider round trip on the line.
+    const staffName = staffId ? await staffNameOf(credentials, staffId) : undefined
+    const who = staffId ? ` with ${staffName ?? 'that barber'}` : ''
+    const headline = day?.today
+      ? `No openings left today (${date})${who}.`
+      : staffId
+        ? `No openings${who} on ${day?.weekday ?? date} (${date}).`
+        : `No available time slots on ${date} (fully booked).`
+    const next = await nextOpeningsAfter(credentials, ids, staffId, date)
+    return next ? `${headline}\n${next}` : `${headline} Suggest another day.`
   }
 
   if (!wantsStaff || !data.staff?.length) {
@@ -218,4 +231,45 @@ export async function checkXkeduleAvailability(
     return names.length > 0 ? `${time} — ${names.join(', ')}` : time
   })
   return `Available slots on ${date} (with who can take them):\n${lines.join('\n')}`
+}
+
+/** The barber's name for a staff id, from the cached catalogue; undefined when unknown. */
+async function staffNameOf(credentials: XkeduleCredentials, staffId: number): Promise<string | undefined> {
+  try {
+    const catalog = await getXkeduleCatalog(credentials)
+    return catalog.staff.find((m) => m.id === staffId)?.name
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * The next days with openings after `date` (14 days, first three days that
+ * have any), in the same spoken shape as the range query, or null when there
+ * are none or the provider fails. One extra provider round trip, only ever
+ * paid when a day came back empty.
+ */
+async function nextOpeningsAfter(credentials: XkeduleCredentials, ids: number[], staffId: number | undefined, date: string): Promise<string | null> {
+  try {
+    const start = new Date(`${date}T12:00:00Z`)
+    if (!Number.isFinite(start.getTime())) return null
+    const from = new Date(start.getTime() + 24 * 3600 * 1000).toISOString().slice(0, 10)
+    const to = new Date(start.getTime() + 14 * 24 * 3600 * 1000).toISOString().slice(0, 10)
+    const query = new URLSearchParams({ startDate: from, endDate: to, serviceIds: ids.join(',') })
+    if (staffId) query.set('staffId', String(staffId))
+    const data = await xkeduleFetchJson<RangeResponse>(`/api/v1/availability?${query.toString()}`, 'GET', null, credentials)
+    const days = Object.entries(data.range ?? {})
+      .map(([d, slots]) => [d, (slots ?? []).filter((x) => x.available).map((x) => x.time)] as const)
+      .filter(([, times]) => times.length > 0)
+      .slice(0, 3)
+    if (days.length === 0) return null
+    const summary = days.map(([d, times]) => {
+      const shown = times.slice(0, 6)
+      const more = times.length > shown.length ? ` (+${times.length - shown.length} more)` : ''
+      return `${d} (${weekdayOf(d)}): ${spokenTimes(shown)}${more}`
+    }).join('\n')
+    return `Next openings${staffId ? ' with the same barber' : ''}:\n${summary}`
+  } catch {
+    return null
+  }
 }

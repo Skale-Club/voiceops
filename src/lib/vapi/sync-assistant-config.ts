@@ -105,7 +105,7 @@ export const DEFAULT_STOP_SPEAKING_PLAN = {
 // greeting) should be met, not left on a dead line.
 export const DEFAULT_MESSAGE_PLAN = {
   idleMessages: ['Are you still there?', "Take your time - I'm here when you're ready."],
-  idleTimeoutSeconds: 8,
+  idleTimeoutSeconds: 10,
   idleMessageMaxSpokenCount: 2,
 }
 
