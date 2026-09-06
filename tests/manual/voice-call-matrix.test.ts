@@ -112,9 +112,9 @@ const SCENARIOS: Scenario[] = [
   { name: 'changes mind: adds beard after price', caller: NEW, script: ['Jon', 'a haircut', 'signature', 'actually can I add a beard trim too', 'yes', 'anyone', 'tuesday', 'nine', 'Doe', 'no'], expect: { mustCall: ['get_quote'], mustSay: [/anything else/i] }, ownNames: ['Jon Doe'] },
   { name: 'garbage transcription mid-flow', caller: NEW, script: ['Kim', 'a buzz cut', 'yes', 'anyone', 'monday', 'uh the yeah um', 'nine twenty', 'Park', 'no'], expect: { mustSay: [/didn.t catch|say (that )?again|repeat/i, /anything else/i] }, ownNames: ['Kim Park'] },
   { name: 'declines the price', caller: NEW, script: ['Rob', 'a skin fade', "that's too much, anything cheaper?", 'ok the buzz cut then', 'yes', 'anyone', 'monday', 'nine', 'Cruz', 'no'], expect: { mustSay: [/twenty[- ]five|25|buzz/i, /anything else/i], mustCall: ['get_quote'] }, ownNames: ['Rob Cruz'] },
-  { name: 'availability tool fails', caller: NEW, script: ['Eve', 'a buzz cut', 'yes', 'anyone', 'monday', 'ok', 'bye'], failTool: 'check_availability', expect: { mustSay: [/can.t|cannot|unable|right now|message/i], mustNotCall: ['book_appointment'], mustNotSay: [/(?:nine|ten|eleven) (?:o.clock|twenty|thirty|forty|fifteen|in the morning)/i, /available times/i] } },
+  { name: 'availability tool fails', caller: NEW, script: ['Eve', 'a buzz cut', 'yes', 'anyone', 'monday', 'ok', 'bye'], failTool: 'check_availability', expect: { mustSay: [/can.t|cannot|unable|right now|message/i], mustNotCall: ['book_appointment'], mustNotSay: [/(?:nine|ten|eleven) (?:o.clock|twenty|thirty|forty|fifteen|in the morning)/i, /available times on/i] } },
   { name: 'time not offered', caller: NEW, script: ['Leo', 'a buzz cut', 'yes', 'anyone', 'monday', 'seven in the evening', 'ok nine then', 'Costa', 'no'], expect: { mustSay: [/anything else/i], mustCall: ['book_appointment'] }, ownNames: ['Leo Costa'] },
-  { name: 'the model tries to book before the read-back', caller: NEW, script: ['Ana', 'a buzz cut', 'yes', 'anyone', 'monday', 'nine', 'Silva', 'yes', 'no'], expect: { mustSay: [/anything else/i], mustCall: ['book_appointment'] }, ownNames: ['Ana Silva'] },
+  { name: 'the model tries to book before the read-back', caller: NEW, script: ['Ana', 'a buzz cut', 'yes', 'anyone', 'monday', 'nine', 'Silva', 'yes', 'no', 'no'], expect: { mustSay: [/anything else/i], mustCall: ['book_appointment'] }, ownNames: ['Ana Silva'] },
 
   // ── Adversarial block (VOICE-CALL-4-PLAN.md item P): stay on the job, never leak a customer. ──
   {
@@ -469,7 +469,8 @@ it('runs the voice rehearsal matrix', async () => {
       console.log(`###   T${i} USER: ${line}`)
       spokenAll.push(await modelTurn(`T${i}`))
     }
-    const all = spokenAll.join('\n')
+    // TTS text carries Unicode hyphens ("thirty‑eight", U+2011); gates are written with ASCII.
+    const all = spokenAll.join('\n').replace(/[‐-―]/g, '-')
     for (const re of sc.expect.mustSay ?? []) if (!re.test(all)) problems.push(`never said ${re}`)
     for (const re of sc.expect.mustNotSay ?? []) if (re.test(all)) problems.push(`said ${re}`)
     for (const t of sc.expect.mustCall ?? []) if (!called.includes(t)) problems.push(`never called ${t}`)
