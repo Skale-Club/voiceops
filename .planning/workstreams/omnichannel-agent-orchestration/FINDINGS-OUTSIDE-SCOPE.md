@@ -625,9 +625,9 @@ of the month parsed as an hour; "all set" on a pending request (exact wording no
 expected 24-hour slots.
 
 Scoreboard (20 scenarios, gpt-5.1, live prompt v41, reads against production `62e8a203`):
-v35 5 pass · v37 6 · v39 13 · v41 14 · **final 19 of 20** - the one left was "monday, same
-time if you can" on a move: the grammar had no notion of "same time" (fixed in the next
-commit: for a move it is the existing appointment's time). Residue is lint only: an
+v35 5 pass · v37 6 · v39 13 · v41 14 · 19 of 20 · **20 of 20** once "monday, same time if
+you can" on a move resolved to the existing appointment's time (the grammar had no notion
+of "same time"; it holds until the caller names a clock time). Residue is lint only: an
 occasional "Got it"/"No problem" opener and 46-53-word turns. Slowest model turn per
 scenario averaged 7.9s (max 9.9s), almost all of it the provider's cold availability read.
 
