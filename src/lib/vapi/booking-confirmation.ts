@@ -254,8 +254,13 @@ export function checkVoiceBookingConfirmation(
   const choiceHistory = validShape && turn > 0 && turn <= users.length ? ctx.messages.slice(0, users[turn - 1] + 1) : ctx.messages
   // A move to "the same time" is a choice: the existing appointment's time,
   // which the customer already knows and the provider verified (facts.existing).
-  const lastUserText = choiceHistory.slice().reverse().find((m) => m.role === 'user')?.content.toLowerCase() ?? ''
-  const sameTime = operation === 'reschedule' && /\bsame time\b/.test(lastUserText)
+  // "Same time" holds until the caller names a clock time after it (the model
+  // may skip the preparation and ask "anything else?" itself, so the consent
+  // "no" can be the last user turn when the choice is checked).
+  const userTurns = choiceHistory.filter((m) => m.role === 'user').map((m) => m.content.toLowerCase())
+  const sameTimeAt = userTurns.map((t) => /\bsame time\b/.test(t)).lastIndexOf(true)
+  const sameTime = operation === 'reschedule' && sameTimeAt >= 0
+    && userTurns.slice(sameTimeAt + 1).every((t) => clocksIn(t).length === 0)
     && Boolean(facts.existing?.time) && String(params.startTime ?? '') === facts.existing?.time
   if (operation !== 'cancel' && !sameTime
     && !callerChoseTime(String(params.startTime ?? ''), choiceHistory, listedSlotsIn(ctx.messages))) return { allowed: false,

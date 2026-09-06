@@ -270,6 +270,15 @@ describe('provider boundary', () => {
     expect(prepared).not.toContain('not the one the customer said')
     const other = await rescheduleXkeduleBooking({ bookingId: 471, bookingDate: '2026-09-07', startTime: '09:00' }, creds, ctx)
     expect(other).toContain('not the one the customer said')
+    // The model skipped the preparation and asked itself; the consent "no" is
+    // now the last user turn, and "same time" still stands.
+    const later = { ...ctx, messages: [...ctx.messages, { role: 'assistant', content: 'Moving it to Monday at ten thirty. Anything else you\'d like to change?' }, { role: 'user', content: "no that's it" }] }
+    const skipped = await rescheduleXkeduleBooking({ bookingId: 471, bookingDate: '2026-09-07', startTime: '10:30', confirmed: true }, creds, later)
+    expect(skipped).toContain('NOT MOVED YET')
+    expect(skipped).not.toContain('not the one the customer said')
+    // ...but a clock time named after "same time" replaces it.
+    const changed = { ...ctx, messages: [...ctx.messages, { role: 'assistant', content: 'Ten thirty on Monday?' }, { role: 'user', content: 'actually make it nine' }] }
+    expect(await rescheduleXkeduleBooking({ bookingId: 471, bookingDate: '2026-09-07', startTime: '10:30' }, creds, changed)).toContain('not the one the customer said')
   })
   it('reschedule needs both the old and the new appointment in the read-back', async () => {
     setup()
