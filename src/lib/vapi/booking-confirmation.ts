@@ -252,7 +252,12 @@ export function checkVoiceBookingConfirmation(
   const validShape = /^\d+$/.test(turnPart ?? '') && /^[a-z\d]+$/.test(atPart ?? '') && Boolean(mac) && !extra
   // Evaluate the choice before the proposal: later read-back/consent must not become a new choice.
   const choiceHistory = validShape && turn > 0 && turn <= users.length ? ctx.messages.slice(0, users[turn - 1] + 1) : ctx.messages
-  if (operation !== 'cancel'
+  // A move to "the same time" is a choice: the existing appointment's time,
+  // which the customer already knows and the provider verified (facts.existing).
+  const lastUserText = choiceHistory.slice().reverse().find((m) => m.role === 'user')?.content.toLowerCase() ?? ''
+  const sameTime = operation === 'reschedule' && /\bsame time\b/.test(lastUserText)
+    && Boolean(facts.existing?.time) && String(params.startTime ?? '') === facts.existing?.time
+  if (operation !== 'cancel' && !sameTime
     && !callerChoseTime(String(params.startTime ?? ''), choiceHistory, listedSlotsIn(ctx.messages))) return { allowed: false,
     instruction: `${prefix} The chosen time is not the one the customer said. Offer the times the availability tool listed, spoken naturally, and let the customer pick one; if they said an hour that could be morning or evening, ask which. Then prepare again. Never pick a time for them.` }
   let missing: string[] = []

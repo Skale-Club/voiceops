@@ -580,3 +580,56 @@ to explain nothing was booked and offer a message).
 
 Not exercised by construction: audio, transcription, TTS, endpointing. A real call proves
 those; everything above holds regardless of what the model does.
+
+## 22. Call 4 plan executed: identity from the line, greeting before pickup, one clock grammar — 2026-09-06
+
+Everything in VOICE-CALL-4-PLAN.md except the Xkedule-side latency work (provider,
+measured 7.5s cold with no provider-side warm; staffId cuts ~3s) shipped today, in
+production (`62e8a203`) and on the assistant (prompt v41, voice flash, first message
+spoken by Vapi, post-call analysis plan), with the demo number routed through the new
+assistant-request endpoint.
+
+**Guardrails that are server code, not prompt**
+- The identity on a phone call is the number Vapi verified. `lookup_customer` ignores any
+  phone the model passes ("look up my wife's number" reads nothing); cancel and reschedule
+  load the booking and refuse unless its contact phone is the caller's, before consent is
+  even asked; a call without a number cannot touch an existing booking; the lookup never
+  puts the email in front of the model. Unit-tested (`tests/voice-caller-binding.test.ts`).
+- Consent: token bound to operation, org, call, arguments and turn; the read-back is
+  verified by facts (time through the clock grammar, weekday or date, every service, first
+  name, price) in the model's own words; consent is a later no / that's all; a "yes" is an
+  addition and needs a new read-back. A time nobody said - resolved against the slots the
+  availability tool listed in the same call, "09:45", "nine forty-five", "quarter to ten",
+  "the second one" all count; "on the 8th" is a date, not eight o'clock - cannot even be
+  prepared. Replay of the real call 4 artifact passes (`tests/voice-call-replay.test.ts`).
+- Post-call: Vapi grades every call (off topic, other person revealed, caller PII spoken,
+  invented fact, outcome, frustration) into `calls.structured_data`.
+
+**Pickup**: `/api/vapi/assistant-request` answers Vapi while the phone rings (4.1s known
+caller cold, 2.3s unknown, 0.2s no number; budget 7.5s, fallback to the operator's line)
+with "Hi Vanildo! Thanks for calling Cuts and Culture Barbershop. Which service would you
+like to book?" and the caller's facts as prompt variables - no lookup tool on the line.
+
+**Rehearsal**: 20 scenarios (13 callers + 7 adversarial: foreign lookup, foreign cancel,
+other customers, off-topic x3, injection, prompt/robot, Portuguese), leak and leading-zero
+lints, tool results carried in the artifact like production, the assistant-request greeting
+seeded from the real lookup; `npm run call:last` prints any call's timeline, Vapi
+latencies, tool timings, refusals and lint, and saves the artifact as a fixture.
+
+**What the rehearsals found after the plan landed (all fixed the same day)**: the Liquid
+`{{caller_facts | default}}` was invisible to the model in the harness (rendered now); the
+model asked a known caller for a phone number (prompt: never); "you're booked" after three
+refusals (instruction opens "nothing has been booked", read-back starts "So that's"); a day
+of the month parsed as an hour; "all set" on a pending request (exact wording now:
+"Your request is in for … the shop will confirm it shortly"); the CI latency gate still
+expected 24-hour slots.
+
+Scoreboard (20 scenarios, gpt-5.1, live prompt v41, reads against production `62e8a203`):
+v35 5 pass · v37 6 · v39 13 · v41 14 · **final 19 of 20** - the one left was "monday, same
+time if you can" on a move: the grammar had no notion of "same time" (fixed in the next
+commit: for a move it is the existing appointment's time). Residue is lint only: an
+occasional "Got it"/"No problem" opener and 46-53-word turns. Slowest model turn per
+scenario averaged 7.9s (max 9.9s), almost all of it the provider's cold availability read.
+
+What only a real call proves now: the assistant-request greeting timing on the phone, the
+flash voice, Deepgram's "09:45" becoming a recognised choice on the line, and the SMS.

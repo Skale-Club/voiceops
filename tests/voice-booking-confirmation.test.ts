@@ -262,6 +262,15 @@ describe('provider boundary', () => {
     expect(out).toContain('NOT CANCELLED YET')
     expect(vi.mocked(xkeduleFetchJson).mock.calls.some(([path]) => path.endsWith('/cancel'))).toBe(false)
   })
+  it('"monday, same time" on a move is a choice: the existing appointment\'s time', async () => {
+    setup()
+    const ctx = { callId: 'call-1', messages: [{ role: 'assistant', content: 'What day would you like to move it to?' }, { role: 'user', content: 'monday same time if you can' }] }
+    const prepared = await rescheduleXkeduleBooking({ bookingId: 471, bookingDate: '2026-09-07', startTime: '10:30' }, creds, ctx)
+    expect(prepared).toContain(RESCHEDULE_QUESTION)
+    expect(prepared).not.toContain('not the one the customer said')
+    const other = await rescheduleXkeduleBooking({ bookingId: 471, bookingDate: '2026-09-07', startTime: '09:00' }, creds, ctx)
+    expect(other).toContain('not the one the customer said')
+  })
   it('reschedule needs both the old and the new appointment in the read-back', async () => {
     setup()
     const p = { bookingId: 471, bookingDate: '2026-09-07', startTime: '09:00' }
