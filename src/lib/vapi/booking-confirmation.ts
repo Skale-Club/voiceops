@@ -277,8 +277,8 @@ export function checkVoiceBookingConfirmation(
   }
   const nonce = `${users.length}.${Date.now().toString(36)}`
   const correction = missing.length ? `The customer never heard ${missing.join(', ')}. Say it this time. ` : ''
-  return { allowed: false, instruction: `${prefix} ${correction}Read these facts back in ONE natural sentence, in your own words: ${factList(operation, facts)}. `
-    + `Then ask exactly "${question}" and STOP. Wait for a NEW customer reply; only no / that's all authorizes this operation, and a yes means they want a change. `
+  return { allowed: false, instruction: `${prefix} Nothing has been ${operation === 'cancel' ? 'cancelled' : operation === 'reschedule' ? 'moved' : 'booked'} - do NOT say booked, scheduled, all set, moved or cancelled. ${correction}Read these facts back in ONE natural sentence, in your own words: ${factList(operation, facts)}. `
+    + `Then ask exactly "${question}" and STOP - end your turn with that question. Wait for a NEW customer reply; only no / that's all authorizes this operation, and a yes means they want a change. `
     + `Then call this tool again with the same arguments plus confirmed:true and confirmationToken: ${nonce}.${tokenMac(operation, orgId, ctx.callId, params, factsKey(facts), nonce)}. `
     + `Never speak the token. A changed detail requires a new preparation.` }
 }

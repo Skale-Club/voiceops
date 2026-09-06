@@ -20,6 +20,8 @@ import { decrypt } from '@/lib/crypto'
 const ORG_ID = process.env.VAPI_PUSH_TEST_ORG_ID
 const NUMBER = process.env.VAPI_NUMBER
 const SERVER_URL = 'https://xphere.app/api/vapi/assistant-request'
+// Where Vapi sends the call if the server cannot answer in time (never a dead line).
+const FALLBACK = process.env.VAPI_FALLBACK_NUMBER
 
 it.skipIf(!ORG_ID || !NUMBER)('routes the number through assistant-request', async () => {
   const s = createServiceRoleClient()
@@ -59,7 +61,7 @@ it.skipIf(!ORG_ID || !NUMBER)('routes the number through assistant-request', asy
     console.log('### db row updated')
   }
   if (process.env.DB_ONLY === '1') { console.log('### DB_ONLY: number registered, Vapi untouched'); return }
-  const r = await fetch(`https://api.vapi.ai/phone-number/${num.id}`, { method: 'PATCH', headers: h, body: JSON.stringify({ assistantId: null, server: { url: SERVER_URL, secret } }) })
+  const r = await fetch(`https://api.vapi.ai/phone-number/${num.id}`, { method: 'PATCH', headers: h, body: JSON.stringify({ assistantId: null, server: { url: SERVER_URL, secret }, ...(FALLBACK ? { fallbackDestination: { type: 'number', number: FALLBACK } } : {}) }) })
   const body = (await r.json()) as Record<string, any>
   console.log(`### APPLIED vapi ${r.status} assistantId=${body.assistantId ?? 'none'} server=${body.server?.url ?? 'none'}`)
 }, 60000)
