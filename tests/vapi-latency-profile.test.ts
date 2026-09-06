@@ -227,8 +227,9 @@ describe('Vapi path latency profile (TEST-03)', () => {
     // checkXkeduleAvailability() returns a natural-language string (built to
     // read back naturally on a voice call), not JSON — assert it reflects
     // the canned slot data returned by the mocked fetch() above.
-    expect(toolResult).toContain('14:00')
-    expect(toolResult).toContain('14:30')
+    // Spoken format (VOICE-CALL-4-PLAN.md item B): 12-hour, no leading zero.
+    expect(toolResult).toContain('2:00 PM')
+    expect(toolResult).toContain('2:30 PM')
   })
 
   it(`p95 over ${ITERATIONS} iterations of the simple voice lookup is under ${P95_TARGET_MS}ms (docs/agents/latency-profile.md)`, async () => {

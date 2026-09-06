@@ -517,8 +517,17 @@ export async function pushAssistantConfig(
 
     // Voice: keep an operator's non-default choice; replace only the stock
     // `vapi` voice nobody chose. Turn-taking plan: set when absent.
-    const currentVoice = current.voice as { provider?: string } | undefined
-    const voice = currentVoice && currentVoice.provider && currentVoice.provider !== 'vapi' ? currentVoice : DEFAULT_VOICE
+    const currentVoice = current.voice as { provider?: string; voiceId?: string; model?: string } | undefined
+    // A voice this platform itself provisioned earlier (same provider and
+    // voiceId as the default, older model) is not an operator's choice: it
+    // follows the default forward, so a model upgrade (turbo -> flash) reaches
+    // every assistant on the next push. Anything else is kept verbatim.
+    const platformProvisioned =
+      currentVoice?.provider === DEFAULT_VOICE.provider && currentVoice?.voiceId === DEFAULT_VOICE.voiceId
+    const voice =
+      currentVoice && currentVoice.provider && currentVoice.provider !== 'vapi' && !platformProvisioned
+        ? currentVoice
+        : DEFAULT_VOICE
     const patch = {
       model,
       // Vapi speaks `firstMessage` itself, the instant the call connects — no
