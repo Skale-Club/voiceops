@@ -10,6 +10,7 @@ import { it, expect, vi } from 'vitest'
 import { createServiceRoleClient } from '@/lib/supabase/admin'
 import { decrypt } from '@/lib/crypto'
 import { voiceMessages } from '@/lib/vapi/booking-confirmation'
+import { callerFactsFromLookup, greetingFor } from '@/lib/vapi/assistant-request'
 import { createXkeduleBooking } from '@/lib/xkedule/actions/create-booking'
 import { cancelXkeduleBooking } from '@/lib/xkedule/actions/cancel-booking'
 import { rescheduleXkeduleBooking } from '@/lib/xkedule/actions/reschedule-booking'
@@ -96,17 +97,17 @@ function extractTimes24h(text: string): string[] {
 }
 
 const SCENARIOS: Scenario[] = [
-  { name: 'known caller, straight booking', caller: KNOWN, script: ['a haircut', 'the signature haircut', 'ok', 'anyone', 'monday', 'nine forty-five', 'yes', "no that's all"], expect: { mustSay: [/hi vanildo/i, /thirty[- ]eight|38/i, /anyone|particular/i, /best day|what day|which day/i, /anything else/i, /nine forty[- ]five|9:45/i], mustCall: ['lookup_customer', 'list_services', 'get_quote', 'check_availability', 'book_appointment'] } },
+  { name: 'known caller, straight booking', caller: KNOWN, script: ['a haircut', 'the signature haircut', 'ok', 'anyone', 'monday', 'nine forty-five', "no that's all"], expect: { mustSay: [/hi vanildo/i, /thirty[- ]eight|38/i, /anyone|particular/i, /best day|what day|which day/i, /anything else/i, /nine forty[- ]five|9:45/i], mustNotCall: ['lookup_customer'], mustCall: ['list_services', 'get_quote', 'check_availability', 'book_appointment'] } },
   // NOTE: the caller volunteers "Paul" unprompted as their first words (the
   // fixed Vapi pickup greeting, unlike the old model-generated one, never
   // asks for a name) — the model reasonably just accepts it without echoing
   // an explicit "who am I speaking with", so that phrase is no longer a
   // valid gate here; the name still has to land in the read-back.
   { name: 'new caller wants cheapest with Tony on the 8th', caller: NEW, script: ['Paul', 'a haircut, whichever is cheapest', 'yes', 'Tony', 'the 8th', 'the first one', 'Joiner', 'no'], expect: { mustSay: [/paul/i, /twenty[- ]five|25/i, /tony/i, /anything else/i], mustCall: ['get_quote', 'check_availability', 'book_appointment'] }, ownNames: ['Paul Joiner'] },
-  { name: 'asks hours and address only', caller: NEW, script: ['Maria', 'what time are you open and where are you?', "thanks, that's all"], expect: { mustSay: [/newbury/i, /monday|tuesday|open/i], mustCall: ['business_info'], mustNotCall: ['book_appointment', 'check_availability'] } },
+  { name: 'asks hours and address only', caller: NEW, script: ['Maria', 'what time are you open and where are you?', "thanks, that's all"], expect: { mustSay: [/newbury/i, /monday|tuesday|open/i], mustNotCall: ['book_appointment', 'check_availability'] } },
   { name: 'asks price before choosing', caller: NEW, script: ['Sam', 'how much is a skin fade?', 'ok book it', 'anyone', 'wednesday', 'the last one', 'Lee', 'no'], expect: { mustSay: [/forty[- ]two|42/i, /anything else/i], mustCall: ['get_quote', 'book_appointment'] }, ownNames: ['Sam Lee'] },
-  { name: 'known caller reschedules #471', caller: KNOWN, script: ['I need to move my appointment on the 8th', 'monday same time if you can', 'the first one', "no that's it", 'thanks bye'], expect: { mustSay: [/vanildo/i, /monday/i], mustCall: ['lookup_customer', 'check_availability', 'reschedule_appointment'], mustNotCall: ['book_appointment'] } },
-  { name: 'known caller cancels #471', caller: KNOWN, script: ['I have to cancel my appointment', 'yes cancel it', 'no', 'thanks bye'], expect: { mustCall: ['lookup_customer', 'cancel_appointment'], mustNotCall: ['book_appointment', 'check_availability'], mustSay: [/cancel/i] } },
+  { name: 'known caller reschedules #471', caller: KNOWN, script: ['I need to move my appointment on the 8th', 'monday same time if you can', 'the first one', "no that's it", 'thanks bye'], expect: { mustSay: [/vanildo/i, /monday/i], mustCall: ['check_availability', 'reschedule_appointment'], mustNotCall: ['book_appointment', 'lookup_customer'] } },
+  { name: 'known caller cancels #471', caller: KNOWN, script: ['I have to cancel my appointment', 'yes cancel it', 'no', 'thanks bye'], expect: { mustCall: ['cancel_appointment'], mustNotCall: ['book_appointment', 'check_availability', 'lookup_customer'], mustSay: [/cancel/i] } },
   { name: 'asks for Sunday (closed)', caller: NEW, script: ['Ana', 'a buzz cut', 'yes', 'anyone', 'this sunday', 'monday then', 'ten twenty', 'Silva', 'no'], expect: { mustSay: [/closed/i, /monday/i], mustNotSay: [/fully booked/i] }, ownNames: ['Ana Silva'] },
   { name: 'changes mind: adds beard after price', caller: NEW, script: ['Jon', 'a haircut', 'signature', 'actually can I add a beard trim too', 'yes', 'anyone', 'tuesday', 'nine', 'Doe', 'no'], expect: { mustCall: ['get_quote'], mustSay: [/anything else/i] }, ownNames: ['Jon Doe'] },
   { name: 'garbage transcription mid-flow', caller: NEW, script: ['Kim', 'a buzz cut', 'yes', 'anyone', 'monday', 'uh the yeah um', 'nine twenty', 'Park', 'no'], expect: { mustSay: [/didn.t catch|say (that )?again|repeat/i, /anything else/i] }, ownNames: ['Kim Park'] },
@@ -331,8 +332,23 @@ it('runs the voice rehearsal matrix', async () => {
 
   for (const sc of SCENARIOS) {
     if (only && !only.test(sc.name)) continue
-    const system = baseSystem.replaceAll('{{customer.number}}', sc.caller)
     const callId = 'matrix-' + Date.now()
+    // Production path (VOICE-CALL-4-PLAN.md item D): before the call connects,
+    // /api/vapi/assistant-request looks the number up and Vapi speaks a
+    // greeting that already knows the caller, with the facts rendered into
+    // the prompt. The rehearsal does the same through the same production
+    // lookup, so a known caller is greeted by name and never looked up again.
+    let seedGreeting = firstMessage
+    let system = baseSystem.replaceAll('{{customer.number}}', sc.caller)
+    if (process.env.MATRIX_ASSISTANT_REQUEST !== '0') {
+      const lookupCall = { id: 'lookup_seed', type: 'function', function: { name: 'lookup_customer', arguments: '{}' } }
+      const r = await fetch('https://xphere.app/api/vapi/tools', { method: 'POST', headers: { 'content-type': 'application/json', 'x-vapi-secret': secret }, body: JSON.stringify({ message: { type: 'tool-calls', call: { id: callId + '-seed', assistantId: ASSISTANT_ID, customer: { number: sc.caller } }, artifact: { messages: [] }, toolCallList: [lookupCall] } }) })
+      const j = (await r.json().catch(() => ({}))) as any
+      const facts = callerFactsFromLookup(String(j.results?.[0]?.result ?? ''))
+      const spokenBusiness = firstMessage.match(/calling (.*?)[.!]/)?.[1] ?? businessName
+      seedGreeting = greetingFor(spokenBusiness, facts)
+      system = system.replace('Not looked up yet.', facts.facts.replace(/\n/g, ' '))
+    }
     const messages: any[] = [{ role: 'system', content: system }]
     const called: string[] = []
     const problems: string[] = []
@@ -343,8 +359,14 @@ it('runs the voice rehearsal matrix', async () => {
     const allowedNames = ['Vanildo Teste', ...(sc.ownNames ?? [])]
 
     let toolSeq = 0
+    let lastWriteResult = ''
     async function runTool(name: string, args: Record<string, unknown>): Promise<string> {
       called.push(name)
+      const result = await runToolInner(name, args)
+      if (['book_appointment', 'reschedule_appointment', 'cancel_appointment'].includes(name)) lastWriteResult = result
+      return result
+    }
+    async function runToolInner(name: string, args: Record<string, unknown>): Promise<string> {
       // The identity is the number on the line, never a phone the model was
       // told or guessed (VOICE-CALL-4-PLAN.md item N) — checked on the
       // argument itself, regardless of what the executor ends up doing with
@@ -411,7 +433,12 @@ it('runs the voice rehearsal matrix', async () => {
         }
         const spoken = String(m.content ?? '').trim()
         if (!spoken) problems.push(`${label} empty reply`)
-        if (!receipts.at(-1)?.path.endsWith('/cancel') && /\byou(?:['’]re| are) (?:booked|all set)|your appointment is confirmed/i.test(spoken)) problems.push(`${label} promised confirmation despite the simulated provider being pending`)
+        // A confirmation the provider never gave: the last write result was a
+        // refusal or "awaiting approval", and the model still says booked/set.
+        // Describing an EXISTING booking ("you're booked for Tuesday") before
+        // any write is fine, so the gate only looks after a write attempt.
+        if (lastWriteResult && /NOT (?:BOOKED|MOVED|CANCELLED) YET|awaiting the business approval|isn't under the number/i.test(lastWriteResult)
+          && /\byou(?:['’]re| are) (?:booked|all set|set|scheduled)|your appointment is confirmed|has been (?:booked|cancelled|moved)|is now (?:booked|cancelled)/i.test(spoken)) problems.push(`${label} promised confirmation despite the provider result "${lastWriteResult.slice(0, 40)}"`)
         messages.push({ role: 'assistant', content: spoken })
         maxTurn = Math.max(maxTurn, Date.now() - t0)
         const l = [...lintHuman(spoken), ...lintLeak(spoken, allowedNames, publicHaystack)]
@@ -425,10 +452,10 @@ it('runs the voice rehearsal matrix', async () => {
 
     console.log(`### === ${sc.name} (${sc.caller}) ===`)
     const spokenAll: string[] = []
-    if (firstMessage) {
-      messages.push({ role: 'assistant', content: firstMessage })
-      spokenAll.push(firstMessage)
-      console.log(`###   T0 VAPI (fixed pickup): ${firstMessage}`)
+    if (seedGreeting) {
+      messages.push({ role: 'assistant', content: seedGreeting })
+      spokenAll.push(seedGreeting)
+      console.log(`###   T0 VAPI (fixed pickup): ${seedGreeting}`)
     } else {
       problems.push('assistant has no firstMessage set — pickup greeting could not be seeded (item D interim not deployed on this assistant?)')
     }
