@@ -396,8 +396,13 @@ async function executeOneToolCall(params: {
         // The customer lookup is a read the calls route may already have
         // started when the call was answered (status-update). Same key, so
         // this either finds the answer waiting or joins the in-flight request.
+        // The identity is the number on the line; a phone the model passes is
+        // ignored (the executor overrides it too). Only when the call has no
+        // number does the model's argument decide the memo key.
         const lookupPhone =
-          toolConfig.action_type === CUSTOMER_LOOKUP_ACTION && typeof args.phone === 'string' ? args.phone : null
+          toolConfig.action_type === CUSTOMER_LOOKUP_ACTION
+            ? (call.customer?.number ?? (typeof args.phone === 'string' ? args.phone : null))
+            : null
         result = lookupPhone
           ? await memoTtl(customerLookupKey(orgId, lookupPhone), CUSTOMER_LOOKUP_TTL_MS, run)
           : await run()

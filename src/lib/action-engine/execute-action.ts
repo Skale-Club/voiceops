@@ -75,6 +75,7 @@ import { checkDnd, dndBlockedMessage } from '@/lib/dnd'
 import { isDemoOrg } from '@/lib/demo/config'
 import { log } from '@/lib/logger'
 import type { VoiceBookingContext } from '@/lib/vapi/booking-confirmation'
+import type { CallerIdentity } from '@/lib/xkedule/booking-ownership'
 
 type ActionType = Database['public']['Enums']['action_type']
 type IntegrationProvider = Database['public']['Enums']['integration_provider']
@@ -569,8 +570,9 @@ async function _executeActionInner(
       const xkCreds = await getXkeduleCredentialsForOrgCached(ctx.organizationId, ctx.supabase)
       if (!xkCreds) throw new Error('Xkedule integration not configured for this organization')
       // Same consent gate as create: a cancellation is a write the customer
-      // must have heard read back and agreed to in a later turn.
-      return cancelXkeduleBooking(params, xkCreds, voiceGateFor(ctx))
+      // must have heard read back and agreed to in a later turn. On a phone
+      // call the booking must also belong to the number on the line.
+      return cancelXkeduleBooking(params, xkCreds, voiceGateFor(ctx), callerIdentityFor(ctx))
     }
     case 'xkedule_reschedule_booking': {
       if (!ctx?.organizationId || !ctx?.supabase) {
@@ -578,7 +580,7 @@ async function _executeActionInner(
       }
       const xkCreds = await getXkeduleCredentialsForOrgCached(ctx.organizationId, ctx.supabase)
       if (!xkCreds) throw new Error('Xkedule integration not configured for this organization')
-      return rescheduleXkeduleBooking(params, xkCreds, voiceGateFor(ctx))
+      return rescheduleXkeduleBooking(params, xkCreds, voiceGateFor(ctx), callerIdentityFor(ctx))
     }
     case 'xkedule_quote': {
       if (!ctx?.organizationId || !ctx?.supabase) {
@@ -594,7 +596,14 @@ async function _executeActionInner(
       }
       const xkCreds = await getXkeduleCredentialsForOrgCached(ctx.organizationId, ctx.supabase)
       if (!xkCreds) throw new Error('Xkedule integration not configured for this organization')
-      return lookupXkeduleCustomer(params, xkCreds)
+      // On a phone call the identity is the number on the line, never a phone
+      // the model was told: "look up my wife's number" must not read another
+      // customer's record. Without a caller number (widget, web test call)
+      // the tool keeps the phone the conversation supplied.
+      return lookupXkeduleCustomer(
+        ctx.callerNumber ? { ...params, phone: ctx.callerNumber, customerPhone: ctx.callerNumber } : params,
+        xkCreds,
+      )
     }
     case 'xkedule_business_info': {
       if (!ctx?.organizationId || !ctx?.supabase) {
@@ -672,4 +681,15 @@ async function _executeActionInner(
 function voiceGateFor(ctx: { toolConfig?: unknown; voiceBooking?: VoiceBookingContext } | undefined): VoiceBookingContext | undefined {
   const cfg = ctx?.toolConfig as Record<string, unknown> | undefined
   return cfg?.require_voice_confirmation === true ? ctx?.voiceBooking : undefined
+}
+
+/**
+ * The caller identity a write to an existing booking must match. Present only
+ * for requests that came through the voice ingress (they carry the artifact):
+ * there the number on the line is the identity, and a call without one may
+ * not touch an existing booking at all. The widget passes nothing here.
+ */
+function callerIdentityFor(ctx: { callerNumber?: string; voiceBooking?: VoiceBookingContext } | undefined): CallerIdentity | undefined {
+  if (!ctx?.voiceBooking) return undefined
+  return { callerNumber: ctx.callerNumber }
 }

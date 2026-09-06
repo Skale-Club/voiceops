@@ -61,7 +61,10 @@ export async function lookupXkeduleCustomer(
       }
     }))
     const upcoming = details.length ? details.join('\n') : 'No upcoming bookings.'
-    return `Found customer: ${data.customer.name}${data.customer.email ? ` (${data.customer.email})` : ''}\n${upcoming}`
+    // Name and appointments only. The email, address and phone are never put
+    // in front of the model: on a phone line they would be read aloud, and
+    // the caller already knows their own.
+    return `Found customer: ${data.customer.name}\n${upcoming}`
   } catch (err) {
     const msg = (err as Error).message
     if (msg.includes('404')) return "I don't have a record for that phone number yet."

@@ -70,12 +70,12 @@
       "node_kind": "action",
       "access": "read",
       "name": "Lookup customer",
-      "description": "Identify a returning customer by phone number and retrieve their upcoming bookings and booking ids.",
+      "description": "Looks up the customer calling, by the number on the line, and lists their upcoming appointments with services and staff. Only ever the caller: it cannot look up anyone else, and no argument is needed on a phone call. Never asks for or reads out a phone number, email or address.",
       "input_schema": {
         "phone": {
           "type": "string",
-          "description": "Customer phone number.",
-          "required": true
+          "description": "Ignored on phone calls: the server uses the number the customer is calling from. Leave it out.",
+          "required": false
         }
       }
     },
