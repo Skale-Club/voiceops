@@ -26,6 +26,7 @@ import { applyServiceLocationMode } from '@/lib/agent-runtime/service-location-s
 import { renderPromptTemplate, resolveTenantFacts } from '@/lib/org-templates/prompt-template'
 import { getXkeduleCredentialsForOrgCached } from '@/lib/xkedule/credentials'
 import { fetchBusinessInfoCached } from '@/lib/xkedule/actions/business-info'
+import { getXkeduleCatalog } from '@/lib/xkedule/actions/get-services'
 import { vapiFetch, vapiFetchWrite, VapiApiError } from './client'
 import {
   renderAssistantConfig,
@@ -143,6 +144,9 @@ export const DEFAULT_TRANSCRIBER = {
   model: 'nova-3',
   language: 'en',
   smartFormat: true,
+  // "nine forty-five" as 9:45, not "nine 45": the clock grammar and the
+  // caller both read digits better than a mix.
+  numerals: true,
 }
 
 export interface PushAssistantConfigResult {
@@ -222,6 +226,44 @@ const WEEKDAY_KEYS: Weekday[] = ['monday', 'tuesday', 'wednesday', 'thursday', '
  * know the hours (see render-assistant-config.ts), rather than the push
  * failing or a stale/guessed hours block reaching a live phone line.
  */
+// Phone audio through a speaker or a car is what the transcriber struggles
+// with most; Vapi's smart denoising (Krisp) runs before Deepgram. Applied on
+// every push, same as the turn-taking plans.
+export const DEFAULT_DENOISING_PLAN = {
+  smartDenoisingPlan: { enabled: true },
+}
+
+/**
+ * Words the transcriber should expect on this tenant's line: every service
+ * name, every staff member's first and full name, the business name, and the
+ * generic booking vocabulary a barbershop caller uses. Deepgram nova-3
+ * keyterm prompting; capped at 50 terms. Empty when the catalogue cannot be
+ * read (the transcriber still works, just without the boost).
+ */
+async function resolveTranscriberKeyterms(
+  supabase: SupabaseClient<Database>,
+  organizationId: string
+): Promise<string[]> {
+  const generic = ['haircut', 'trim', 'beard trim', 'line up', 'buzz cut', 'skin fade', 'fade', 'appointment', 'book', 'reschedule', 'cancel', 'barber']
+  try {
+    const credentials = await getXkeduleCredentialsForOrgCached(organizationId, supabase)
+    if (!credentials) return generic
+    const [catalog, info] = await Promise.all([getXkeduleCatalog(credentials), fetchBusinessInfoCached(credentials)])
+    const terms = new Set<string>()
+    const add = (value: unknown) => {
+      const t = String(value ?? '').replace(/\s*&\s*/g, ' and ').replace(/[^\p{L}\p{N}' -]/gu, ' ').replace(/\s+/g, ' ').trim()
+      if (t.length >= 2) terms.add(t)
+    }
+    add(info.businessName)
+    for (const s of catalog.services ?? []) add(s.name)
+    for (const m of catalog.staff ?? []) { add(m.name); add(String(m.name ?? '').split(/\s+/)[0]) }
+    for (const g of generic) add(g)
+    return [...terms].slice(0, 50)
+  } catch {
+    return generic
+  }
+}
+
 async function resolveBusinessHours(
   supabase: SupabaseClient<Database>,
   organizationId: string
@@ -415,9 +457,10 @@ export async function pushAssistantConfig(
     // Opening hours: same push-time-I/O reasoning as tenant facts, fetched in
     // parallel with them. See resolveBusinessHours()'s own doc comment for
     // what a missing integration or a fetch failure produce.
-    const [facts, businessHours] = await Promise.all([
+    const [facts, businessHours, keyterms] = await Promise.all([
       resolveTenantFacts(supabase, organizationId),
       resolveBusinessHours(supabase, organizationId),
+      resolveTranscriberKeyterms(supabase, organizationId),
     ])
 
     const rendered = renderAssistantConfig({
@@ -540,7 +583,12 @@ export async function pushAssistantConfig(
       voice,
       startSpeakingPlan: DEFAULT_START_SPEAKING_PLAN,
       stopSpeakingPlan: DEFAULT_STOP_SPEAKING_PLAN,
-      transcriber: DEFAULT_TRANSCRIBER,
+      // The transcriber hears the tenant's own vocabulary: service names,
+      // barbers, the shop's name (call 5, 2026-09-06: "Vanildo" came through
+      // as "Pan noodle", "trim" as "shrimp"). Nova-3 takes keyterm prompting,
+      // not keyword boosting.
+      transcriber: { ...DEFAULT_TRANSCRIBER, ...(keyterms.length ? { keyterm: keyterms } : {}) },
+      backgroundSpeechDenoisingPlan: DEFAULT_DENOISING_PLAN,
       messagePlan: DEFAULT_MESSAGE_PLAN,
       analysisPlan: DEFAULT_ANALYSIS_PLAN,
       ...assistantServer,
