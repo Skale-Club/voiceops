@@ -48,8 +48,10 @@ describe('caller facts from the lookup text', () => {
 describe('answerAssistantRequest', () => {
   const call = { id: 'call-1', phoneNumberId: NUMBER_ID, customer: { number: '+15088018190' } }
 
-  it('returns null for a number that maps to no tenant', async () => {
+  it('returns null for a number that maps to no tenant, and does not remember the miss', async () => {
     expect(await answerAssistantRequest(call, supabaseWith({ number: null }))).toBeNull()
+    const answer = await answerAssistantRequest({ phoneNumberId: NUMBER_ID }, supabaseWith({ number: { organization_id: ORG, vapi_assistant_id: ASSISTANT }, org: { name: 'Shop' } }))
+    expect(answer?.assistantId).toBe(ASSISTANT)
   })
 
   it('personalises the greeting when the lookup answers within budget', async () => {

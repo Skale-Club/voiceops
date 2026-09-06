@@ -19,7 +19,7 @@
 // request body chooses which customer is looked up.
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { Database } from '@/types/database'
-import { memoTtl } from '@/lib/cache/ttl-memo'
+import { memoTtl, clearMemo } from '@/lib/cache/ttl-memo'
 import { customerLookupKey, CUSTOMER_LOOKUP_TTL_MS, warmCustomerLookup } from './customer-lookup-cache'
 import { spokenName } from './render-assistant-config'
 
@@ -64,7 +64,19 @@ export async function resolveNumber(
   phoneNumberId: string,
   supabase: SupabaseClient<Database>,
 ): Promise<NumberResolution | null> {
-  return memoTtl(`vapi:assistant-request:number:${phoneNumberId}`, ORG_TTL_MS, async () => {
+  const key = `vapi:assistant-request:number:${phoneNumberId}`
+  const resolved = await memoTtl(key, ORG_TTL_MS, () => readNumber(phoneNumberId, supabase))
+  // A miss is not worth five minutes: the operator registering the number
+  // must take effect on the next call, not after the memo expires.
+  if (!resolved) clearMemo(key)
+  return resolved
+}
+
+async function readNumber(
+  phoneNumberId: string,
+  supabase: SupabaseClient<Database>,
+): Promise<NumberResolution | null> {
+  {
     const { data: row } = await supabase
       .from('twilio_phone_numbers')
       .select('organization_id, vapi_assistant_id')
@@ -89,7 +101,7 @@ export async function resolveNumber(
     if (!assistantId) return null
     const { data: org } = await supabase.from('organizations').select('name').eq('id', row.organization_id).maybeSingle()
     return { organizationId: row.organization_id, assistantId, businessName: org?.name ?? '' }
-  })
+  }
 }
 
 /** "Found customer: Vanildo Teste\n#471 on …" → the facts block and the names. */

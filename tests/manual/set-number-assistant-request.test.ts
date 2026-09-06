@@ -8,6 +8,7 @@
 //             number's server URL + secret on Vapi and clears its assistantId
 //             (Vapi only asks the server when the number has no fixed assistant).
 //   REVERT=1  puts the assistantId back on the number and removes the server.
+//   DB_ONLY=1 with APPLY=1: only registers the number row (to probe the endpoint first).
 //
 // The secret is the one the assistant's tools already send (x-vapi-secret);
 // only its fingerprint is printed.
@@ -32,7 +33,7 @@ it.skipIf(!ORG_ID || !NUMBER)('routes the number through assistant-request', asy
   const assistantId: string = num.assistantId ?? mapping?.vapi_assistant_id
   if (!assistantId) throw new Error('No assistant for this number or org')
   const assistant = (await (await fetch(`https://api.vapi.ai/assistant/${assistantId}`, { headers: h })).json()) as Record<string, any>
-  const secret: string | undefined = (assistant.model?.tools ?? []).map((t: any) => t.server?.headers?.['x-vapi-secret']).find(Boolean) ?? assistant.server?.headers?.['x-vapi-secret']
+  const secret: string | undefined = (assistant.model?.tools ?? []).map((t: any) => t.server?.secret ?? t.server?.headers?.['x-vapi-secret']).find(Boolean) ?? assistant.server?.headers?.['x-vapi-secret']
   if (!secret) throw new Error('No x-vapi-secret on the assistant tools to reuse')
   const fp = createHash('sha256').update(secret).digest('hex').slice(0, 12)
   const { data: row } = await s.from('twilio_phone_numbers').select('id, vapi_phone_number_id, vapi_assistant_id, is_active').eq('organization_id', ORG_ID!).eq('e164', NUMBER!).maybeSingle()
@@ -57,6 +58,7 @@ it.skipIf(!ORG_ID || !NUMBER)('routes the number through assistant-request', asy
     if (error) throw new Error(error.message)
     console.log('### db row updated')
   }
+  if (process.env.DB_ONLY === '1') { console.log('### DB_ONLY: number registered, Vapi untouched'); return }
   const r = await fetch(`https://api.vapi.ai/phone-number/${num.id}`, { method: 'PATCH', headers: h, body: JSON.stringify({ assistantId: null, server: { url: SERVER_URL, secret } }) })
   const body = (await r.json()) as Record<string, any>
   console.log(`### APPLIED vapi ${r.status} assistantId=${body.assistantId ?? 'none'} server=${body.server?.url ?? 'none'}`)
