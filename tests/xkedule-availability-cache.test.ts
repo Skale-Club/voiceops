@@ -56,6 +56,7 @@ import {
 } from '@/lib/xkedule/availability-cache'
 import { checkXkeduleAvailability } from '@/lib/xkedule/actions/check-availability'
 import { getXkeduleQuote } from '@/lib/xkedule/actions/quote'
+import { listedSlotsIn } from '@/lib/vapi/clock-choice'
 
 const CREDS: XkeduleCredentials = {
   tenantBaseUrl: 'https://tenant.xkedule.com',
@@ -293,6 +294,20 @@ describe('checkXkeduleAvailability + prefetch integration', () => {
 // as the 24h digits Deepgram/the provider hands back. Another agent parses
 // these lines server-side, so the exact shape is a contract, pinned here.
 describe('checkXkeduleAvailability spoken time format (VOICE-CALL-4-PLAN.md item B)', () => {
+  it('marks only three options for speech while retaining every valid slot for matching', async () => {
+    vi.mocked(xkeduleFetchJson).mockResolvedValue({ slots: [
+      { time: '09:00', available: true }, { time: '10:00', available: true },
+      { time: '11:00', available: true }, { time: '12:00', available: true },
+      { time: '13:00', available: true }, { time: '14:00', available: true },
+      { time: '15:00', available: true }, { time: '16:00', available: true },
+      { time: '17:00', available: true },
+    ] })
+    const result = await checkXkeduleAvailability({ date: '2026-09-12', serviceIds: '333' }, CREDS)
+    expect(result).toBe('Available times on 2026-09-12: OFFER ONLY these three: 9:00 AM, 1:00 PM, 5:00 PM\nOther valid times (do not read unless the caller asks for one): 10:00 AM, 11:00 AM, 12:00 PM, 2:00 PM, 3:00 PM, 4:00 PM')
+    expect(listedSlotsIn([{ role: 'tool', content: result }])).toEqual([
+      '09:00', '10:00', '11:00', '12:00', '13:00', '14:00', '15:00', '16:00', '17:00',
+    ])
+  })
   it('single-date, no staff: "Available times on DATE: h:mm AM/PM, ..." comma-separated, no leading zero', async () => {
     vi.mocked(xkeduleFetchJson).mockResolvedValueOnce({
       slots: [

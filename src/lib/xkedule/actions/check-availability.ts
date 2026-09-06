@@ -88,6 +88,17 @@ function spokenTimes(times: string[]): string {
   return times.map(spokenTime).join(', ')
 }
 
+/** Keep the full server-verified slot set available for a requested time, but
+ * make three representative early/middle/late options unmistakable. */
+function singleDayAvailability(date: string, times: string[]): string {
+  if (times.length <= 3) return `Available times on ${date}: ${spokenTimes(times)}`
+  const offeredIndexes = new Set([0, Math.floor((times.length - 1) / 2), times.length - 1])
+  const offered = times.filter((_, index) => offeredIndexes.has(index))
+  const others = times.filter((_, index) => !offeredIndexes.has(index))
+  return `Available times on ${date}: OFFER ONLY these three: ${spokenTimes(offered)}\n`
+    + `Other valid times (do not read unless the caller asks for one): ${spokenTimes(others)}`
+}
+
 /** "Saturday" for "2026-09-12", read as a calendar date (UTC) so the weekday
  * never shifts with the process's local timezone. */
 function weekdayOf(date: string): string {
@@ -221,7 +232,7 @@ export async function checkXkeduleAvailability(
   }
 
   if (!wantsStaff || !data.staff?.length) {
-    return `Available times on ${date}: ${spokenTimes(available.map((s) => s.time))}`
+    return singleDayAvailability(date, available.map((s) => s.time))
   }
 
   const nameById = new Map(data.staff.map((m) => [m.id, m.name]))

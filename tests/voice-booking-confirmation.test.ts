@@ -71,7 +71,7 @@ describe('server-bound voice consent', () => {
   ])('accepts a paraphrase that carries every fact: %s', (content) => {
     expect(check({ ...args, confirmed: true, confirmationToken: token(check()) }, said(content)).allowed).toBe(true)
   })
-  it.each(["nope that's all", 'no that\'s all thank you', 'nothing else thanks', 'nothing', 'no', "that's it"])('accepts an unambiguous no: %s', (content) => {
+  it.each(["nope that's all", 'no that\'s all thank you', 'nothing else thanks', 'nothing', 'no', "that's it", 'No. All set.', "No, I'm all set."])('accepts an unambiguous no: %s', (content) => {
     expect(check({ ...args, confirmed: true, confirmationToken: token(check()) }, { ...consent, messages: [...consent.messages.slice(0, -1), { role: 'user', content }] }).allowed).toBe(true)
   })
   it('allows an identical repeated read-back', () => {
@@ -226,6 +226,19 @@ describe('chosen clock, not a mentioned clock', () => {
     expect(clocksIn('call me on +15088018190')).toEqual([])
     // Only a tool result lists slots; an assistant claim is not evidence.
     expect(listedSlotsIn([{ role: 'assistant', content: 'Available slots on 2026-09-12: 09:00' }])).toEqual([])
+  })
+  it('ignores an unrelated bare number said after the booking read-back', () => {
+    const history = [
+      { role: 'tool', content: 'Available times on 2026-09-08: 9:00 AM, 5:00 PM' },
+      { role: 'assistant', content: 'Nine AM or five PM. Which time works best?' },
+      { role: 'user', content: '5' },
+      { role: 'assistant', content: "So that's Tuesday at five PM. Anything else?" },
+      { role: 'user', content: 'No. All set.' },
+      { role: 'assistant', content: 'What would you like?' },
+      { role: 'user', content: 'You are doing the confirmation twice. You need to do just 1.' },
+    ]
+    expect(callerChoseTime('17:00', history)).toBe(true)
+    expect(callerChoseTime('13:00', history)).toBe(false)
   })
 })
 

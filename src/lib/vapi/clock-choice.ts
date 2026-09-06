@@ -162,6 +162,17 @@ function readAnswer(answer: string): Answer {
   return CORRECTION.test(digitized) ? { kind: 'time', time: kept[kept.length - 1] } : { kind: 'ambiguous' }
 }
 
+/** Bare numbers are clocks only when answering an actual clock question. */
+function isClockQuestion(text: string): boolean {
+  if (/\b(?:what|which)\s+time\b|\bwhat time works\b|\bwhich (?:one|slot)\b|\bmorning or (?:afternoon|evening)\b|\b(?:time|slot) works\b/i.test(text)) return true
+  const clocks = clocksIn(text)
+  // A multi-option offer can be declarative (call 4: "I can do nine,
+  // 9:45, or 10:30."). A short single-time question can be a confirmation
+  // ("Nine oh five AM?"). Do not treat a full booking read-back ending in
+  // "Anything else?" as another clock question.
+  return clocks.length >= 2 || (clocks.length === 1 && text.includes('?') && text.trim().split(/\s+/).length <= 8)
+}
+
 /**
  * Resolve an hour said without AM/PM. The slots the availability tool listed in
  * this call decide it; with no slot list at all, the previous offer decides it.
@@ -208,6 +219,10 @@ export function callerChoseTime(
       if (said.kind === 'rejected' || said.kind === 'ambiguous') return false
       if (said.kind === 'none') continue // "yeah" to the name question is not a new choice
       choice = said.time
+      // "just one" in a complaint after the read-back is not 1:00. A time
+      // with AM/PM/24h is self-identifying; a bare hour/minute must directly
+      // answer a question that asked the caller to choose a clock time.
+      if (!choice.explicit && !isClockQuestion(messages.slice(0, i).findLast((m) => m.role === 'assistant')?.content ?? '')) continue
     }
     const resolved = resolve(choice, slots, offered)
     if (resolved) return resolved.hour * 60 + resolved.minute === expected

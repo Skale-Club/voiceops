@@ -276,6 +276,7 @@ export function checkVoiceBookingConfirmation(
       const answer = normalizeReadBack(ctx.messages[users[turn]].content)
         .replace(/^nope(?= |$)/, 'no').replace(/ (?:thanks|thank you)$/, '')
       const nothingElse = /^(no|nope|nothing|no thanks|no thank you|nothing else|no that s it|no that s all|no that is it|no that is all|that s it|that s all|that is it|that is all|no i m good)$/.test(answer)
+        || /^(?:no )?(?:i m )?all set$/.test(answer)
       if (params.confirmed === true && nothingElse) {
         // The wording is the model's; every fact and the question must be in it.
         // A repeated identical read-back is fine — repetition preserves meaning.
@@ -288,7 +289,7 @@ export function checkVoiceBookingConfirmation(
   const nonce = `${users.length}.${Date.now().toString(36)}`
   const correction = missing.length ? `The customer never heard ${missing.join(', ')}. Say it this time. ` : ''
   return { allowed: false, instruction: `${prefix} Nothing has been ${operation === 'cancel' ? 'cancelled' : operation === 'reschedule' ? 'moved' : 'booked'} - do NOT say booked, scheduled, all set, moved or cancelled. ${correction}Read these facts back in ONE natural sentence, in your own words, starting "So that's" or "Just to confirm": ${factList(operation, facts)}. `
-    + `Then ask exactly "${question}" and STOP - end your turn with that question. Wait for a NEW customer reply; only no / that's all authorizes this operation, and a yes means they want a change. `
+    + `Then ask exactly "${question}" and STOP - end your turn with that question. Wait for a NEW customer reply; only no / that's all / I'm all set authorizes this operation, and a yes means they want a change. `
     + `Then call this tool again with the same arguments plus confirmed:true and confirmationToken: ${nonce}.${tokenMac(operation, orgId, ctx.callId, params, factsKey(facts), nonce)}. `
     + `Never speak the token. A changed detail requires a new preparation.` }
 }

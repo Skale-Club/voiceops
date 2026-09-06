@@ -13,7 +13,9 @@
 // Usage:
 //   npx tsx --env-file=.env.local scripts/call-last.ts              # latest call
 //   npx tsx --env-file=.env.local scripts/call-last.ts <callId>      # a specific call
-//   npx tsx --env-file=.env.local scripts/call-last.ts --no-save     # don't write the fixture
+//   npx tsx --env-file=.env.local scripts/call-last.ts --count 2      # latest two calls
+//   npx tsx --env-file=.env.local scripts/call-last.ts --download-audio # save audio under the OS temp directory
+//   npx tsx --env-file=.env.local scripts/call-last.ts --no-save      # don't write fixtures
 //   npm run call:last                                                # same, latest call
 //
 // Env: NEXT_PUBLIC_SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, ENCRYPTION_SECRET
@@ -22,6 +24,7 @@ import type { Database } from '../src/types/database'
 import { decrypt } from '../src/lib/crypto'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { tmpdir } from 'node:os'
 
 const ORG_ID = '31502b7d-f4bd-4493-91f7-fc6f2738a09d'
 const ASSISTANT_ID = '99518fa7-09f1-4c76-b7c8-58cd8a92105c'
@@ -79,7 +82,13 @@ function fmtSeconds(v: unknown): string {
 async function main() {
   const args = process.argv.slice(2)
   const noSave = args.includes('--no-save')
-  const callIdArg = args.find((a) => !a.startsWith('--'))
+  const downloadAudio = args.includes('--download-audio')
+  const countIndex = args.indexOf('--count')
+  const requestedCount = countIndex >= 0 ? Number(args[countIndex + 1]) : 1
+  if (!Number.isInteger(requestedCount) || requestedCount < 1 || requestedCount > 10) {
+    throw new Error('--count must be an integer from 1 to 10')
+  }
+  const callIdArg = args.find((a, index) => !a.startsWith('--') && index !== countIndex + 1)
 
   const supabase = createClient<Database>(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!, { auth: { persistSession: false } })
 
@@ -96,24 +105,50 @@ async function main() {
   }
   const vapiKey = await decrypt(vapiIntegration.encrypted_api_key)
 
-  let call: any
+  let calls: any[]
   if (callIdArg) {
     const r = await fetch(`https://api.vapi.ai/call/${callIdArg}`, { headers: { Authorization: `Bearer ${vapiKey}` } })
     if (!r.ok) { console.error(`Vapi returned HTTP ${r.status} for call ${callIdArg}`); process.exit(1) }
-    call = await r.json()
+    calls = [await r.json()]
   } else {
-    const r = await fetch(`https://api.vapi.ai/call?assistantId=${ASSISTANT_ID}&limit=1`, { headers: { Authorization: `Bearer ${vapiKey}` } })
+    const r = await fetch(`https://api.vapi.ai/call?assistantId=${ASSISTANT_ID}&limit=${requestedCount}`, { headers: { Authorization: `Bearer ${vapiKey}` } })
     if (!r.ok) { console.error(`Vapi returned HTTP ${r.status} listing calls`); process.exit(1) }
-    const calls = (await r.json()) as any[]
+    calls = (await r.json()) as any[]
     if (!calls.length) { console.error('No calls found for this assistant.'); process.exit(1) }
-    call = calls[0]
   }
+
+  for (const [index, call] of calls.entries()) {
+    if (index) console.log('\n')
+    await printCall(call, supabase, noSave, downloadAudio, vapiKey)
+  }
+}
+
+async function printCall(call: any, supabase: ReturnType<typeof createClient<Database>>, noSave: boolean, downloadAudio: boolean, vapiKey: string) {
 
   // ── Header ──────────────────────────────────────────────────────────────
   const started = call.startedAt ? new Date(call.startedAt) : null
   const ended = call.endedAt ? new Date(call.endedAt) : null
   const durationSec = started && ended ? (ended.getTime() - started.getTime()) / 1000 : null
   console.log('='.repeat(78))
+
+  if (downloadAudio) {
+    // Artifact URLs are private storage references, not download links. Vapi's
+    // authenticated endpoint returns a fresh short-lived redirect every time.
+    const url = `https://api.vapi.ai/call/${call.id}/stereo-recording`
+    const candidate = await fetch(url, { headers: { Authorization: `Bearer ${vapiKey}` }, redirect: 'follow' })
+    const response = candidate.ok ? candidate : undefined
+    if (response) {
+      const type = response.headers.get('content-type') ?? ''
+      const extension = type.includes('wav') ? 'wav' : type.includes('ogg') ? 'ogg' : 'mp3'
+      const dir = join(tmpdir(), 'xphere-call-audio')
+      mkdirSync(dir, { recursive: true })
+      const path = join(dir, `${call.id}.${extension}`)
+      writeFileSync(path, Buffer.from(await response.arrayBuffer()))
+      console.log(`  audio:       ${path}`)
+    } else {
+      console.log('  audio:       download failed')
+    }
+  }
   console.log(`Call ${call.id}`)
   console.log(`  started:     ${call.startedAt ?? 'unknown'}`)
   console.log(`  duration:    ${durationSec != null ? `${durationSec.toFixed(1)}s` : 'unknown'}`)

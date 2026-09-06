@@ -53,8 +53,12 @@ are:
 
 ## Adding a fixture
 
-Run `npm run call:last` right after a real call (or pass its id explicitly)
-— it fetches the call from Vapi, prints the report, and writes
+Run `npm run call:last -- --count 2` right after real calls (or pass one id
+explicitly). Add `--download-audio` when the recording is needed for review;
+the authenticated download is saved under the operating system's temporary
+directory and is never added to the fixture or git.
+
+The command fetches the call from Vapi, prints the report, and writes
 `tests/fixtures/calls/<id>.json` unless you pass `--no-save`. Nothing here is
 synthetic: every fixture is a call that actually happened against the live
 tenant. Do not hand-edit a saved fixture's `messages` — if a call needs a

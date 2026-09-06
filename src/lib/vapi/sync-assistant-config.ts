@@ -105,9 +105,9 @@ export const DEFAULT_STOP_SPEAKING_PLAN = {
 // A caller who goes quiet (second real call: 11.5s of silence after the
 // greeting) should be met, not left on a dead line.
 export const DEFAULT_MESSAGE_PLAN = {
-  idleMessages: ['Are you still there?', "Take your time - I'm here when you're ready."],
-  idleTimeoutSeconds: 10,
-  idleMessageMaxSpokenCount: 2,
+  idleMessages: ["Take your time - I'm here when you're ready."],
+  idleTimeoutSeconds: 15,
+  idleMessageMaxSpokenCount: 1,
 }
 
 // Post-call review Vapi runs on the transcript and sends in the end-of-call
