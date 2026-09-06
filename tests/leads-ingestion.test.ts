@@ -38,6 +38,21 @@ describe('lead ingestion contract', () => {
     expect(leadIngestionSchema.parse(validPayload)).toEqual(validPayload)
   })
 
+  it('accepts the Skale Club marketing-site product with its own tenant_ref', () => {
+    const skaleclubPayload = {
+      ...validPayload,
+      event_id: 'skaleclub:barbershop-leads:1e8dbf17-cda8-46a1-b279-e1e643d2979c',
+      source: { product: 'skaleclub' as const, tenant_ref: 'skaleclub', site_domain: 'skale.club', form: 'barbershop-leads' },
+    }
+    expect(leadIngestionSchema.parse(skaleclubPayload)).toEqual(skaleclubPayload)
+  })
+
+  it('rejects an unregistered source product', () => {
+    expect(() =>
+      leadIngestionSchema.parse({ ...validPayload, source: { ...validPayload.source, product: 'xtimator' } }),
+    ).toThrow()
+  })
+
   it('rejects producer-controlled organization identity and unknown fields', () => {
     expect(() => leadIngestionSchema.parse({ ...validPayload, org_id: 'attacker-org' })).toThrow()
   })

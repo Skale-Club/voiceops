@@ -347,6 +347,19 @@ deduplicates the CRM contact by normalized phone then email, and emits `lead.cap
 Accepted events return `201`; identical replays return `200` with
 `event_action: "duplicate"`; reusing an event ID with a different payload returns `409`.
 
+### `source.product` values
+
+`source.product` identifies which sibling product produced the lead. It is stored on the
+receipt and is part of the deduplication key, so every product must send **its own** value:
+
+| Value | Producer |
+|-------|----------|
+| `skaleclub_websites` | The Websites platform — one value shared by every Websites tenant; `tenant_ref` is the tenant slug |
+| `skaleclub` | The Skale Club marketing site (`skale.club`) and its landing-page lead forms; `tenant_ref` is `skaleclub`, `form` is the form slug (e.g. `barbershop-leads`) |
+
+Any other value is rejected with `422 invalid_payload`. Do not reuse another product's value —
+it silently merges two products' leads in reporting.
+
 ### Legacy Global-Key Example (Do Not Use)
 
 The following historical example is retained only to explain the superseded integration.

@@ -9,13 +9,27 @@ const LOCATION_LABELS = { video: 'Video call', phone: 'Phone call', in_person: '
 
 interface Props {
   params: Promise<{ slug: string; eventType: string }>
-  searchParams: Promise<{ debug?: string }>
+  searchParams: Promise<{ debug?: string; name?: string; email?: string; phone?: string }>
+}
+
+// Prefill values arrive via query string from sibling apps (e.g. a skale.club
+// lead form handing off to booking). They only seed the form's default values;
+// the booker can still edit them and createBooking re-validates server-side.
+const MAX_PREFILL = 200
+function prefillValue(v: string | undefined): string | undefined {
+  const s = typeof v === 'string' ? v.trim().slice(0, MAX_PREFILL) : ''
+  return s || undefined
 }
 
 export default async function PublicBookingPage({ params, searchParams }: Props) {
   const { slug, eventType: eventTypeSlug } = await params
   const sp = await searchParams
   const debugMode = sp.debug === '1'
+  const prefill = {
+    name: prefillValue(sp.name),
+    email: prefillValue(sp.email),
+    phone: prefillValue(sp.phone),
+  }
 
   const supabase = createServiceRoleClient()
 
@@ -87,6 +101,7 @@ export default async function PublicBookingPage({ params, searchParams }: Props)
               color={et.color}
               allowedLocationKinds={et.allowed_location_kinds ?? ['video']}
               debugMode={debugMode}
+              prefill={prefill}
             />
           </div>
         </div>

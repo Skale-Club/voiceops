@@ -46,6 +46,8 @@ interface BookingFormProps {
   allowedLocationKinds?: string[]
   selectedLocationKind?: string
   onLocationKindChange?: Dispatch<SetStateAction<string>>
+  /** Seeds the inputs (booker can still edit). Comes from the page's query string. */
+  prefill?: { name?: string; email?: string; phone?: string }
 }
 
 export function BookingForm({
@@ -55,12 +57,18 @@ export function BookingForm({
   allowedLocationKinds = [],
   selectedLocationKind,
   onLocationKindChange,
+  prefill,
 }: BookingFormProps) {
   const [isPending, startTransition] = useTransition()
 
   const form = useForm<FormValues>({
     resolver: zodResolver(schema),
-    defaultValues: { name: '', email: '', phone: '', notes: '' },
+    defaultValues: {
+      name: prefill?.name ?? '',
+      email: prefill?.email ?? '',
+      phone: prefill?.phone ?? '',
+      notes: '',
+    },
   })
 
   function handleSubmit(values: FormValues) {

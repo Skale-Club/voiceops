@@ -16,6 +16,8 @@ interface BookingPageClientProps {
   color: string
   allowedLocationKinds: string[]
   debugMode?: boolean
+  /** Optional booker details to seed the confirm step (from ?name=&email=&phone=). */
+  prefill?: { name?: string; email?: string; phone?: string }
 }
 
 export function BookingPageClient({
@@ -25,6 +27,7 @@ export function BookingPageClient({
   color,
   allowedLocationKinds,
   debugMode = false,
+  prefill,
 }: BookingPageClientProps) {
   const [step, setStep] = useState<Step>('pick')
   const [selectedSlot, setSelectedSlot] = useState<TimeSlot | null>(null)
@@ -108,6 +111,7 @@ export function BookingPageClient({
           allowedLocationKinds={allowedLocationKinds}
           selectedLocationKind={selectedLocationKind}
           onLocationKindChange={setSelectedLocationKind}
+          prefill={prefill}
         />
       </div>
     )

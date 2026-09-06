@@ -3,12 +3,20 @@ import { z } from 'zod'
 
 const nullableText = (max: number) => z.string().trim().max(max).nullable().optional()
 
+// Sibling products allowed to push leads. `source_product` is stored as plain
+// text and is part of the receipt dedup key, so each product MUST keep its own
+// value — never reuse another product's value to "get through" validation.
+//   skaleclub_websites — the forkable Websites platform (github.com/Skale-Club/websites)
+//   skaleclub          — the Skale Club marketing site (skale.club) and its landing forms
+export const LEAD_SOURCE_PRODUCTS = ['skaleclub_websites', 'skaleclub'] as const
+export type LeadSourceProduct = (typeof LEAD_SOURCE_PRODUCTS)[number]
+
 export const leadIngestionSchema = z.object({
   schema_version: z.literal('1.0'),
   event_id: z.string().trim().min(1).max(300),
   occurred_at: z.string().datetime({ offset: true }),
   source: z.object({
-    product: z.literal('skaleclub_websites'),
+    product: z.enum(LEAD_SOURCE_PRODUCTS),
     tenant_ref: z.string().trim().min(1).max(100),
     site_domain: z.string().trim().min(1).max(255),
     form: z.string().trim().min(1).max(100),
