@@ -2,7 +2,8 @@
 // POST /api/v1/bookings — create a booking from the minimum the AI gathers.
 // Xkedule computes duration/endTime/price and re-validates the slot (409).
 import { xkeduleFetchJson, WRITE_TIMEOUT_MS, type XkeduleCredentials } from '../client'
-import { checkVoiceBookingConfirmation, type VoiceBookingContext } from '@/lib/vapi/booking-confirmation'
+import type { VoiceBookingContext } from '@/lib/vapi/booking-confirmation'
+import { verifyVoiceBooking } from '@/lib/xkedule/voice-booking-summary'
 
 export interface CreateBookingParams {
   /** Two-phase gate: only a call with confirmed=true writes; see createXkeduleBooking. */
@@ -72,7 +73,7 @@ export async function createXkeduleBooking(
   const staff = Number.isInteger(rawStaff) && rawStaff > 0 ? rawStaff : undefined
 
   if (voiceBooking) {
-    const confirmation = checkVoiceBookingConfirmation(params, credentials.organizationId ?? '', voiceBooking)
+    const confirmation = await verifyVoiceBooking('create', params, credentials, voiceBooking)
     if (!confirmation.allowed) return confirmation.instruction
   }
 

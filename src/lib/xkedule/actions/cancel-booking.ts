@@ -3,7 +3,9 @@
 // Idempotent on Xkedule's side: cancelling an already-terminal booking
 // returns its current state instead of erroring.
 import { xkeduleFetchJson, WRITE_TIMEOUT_MS, type XkeduleCredentials } from '../client'
-import { checkVoiceBookingConfirmation, type VoiceBookingContext } from '@/lib/vapi/booking-confirmation'
+import type { VoiceBookingContext } from '@/lib/vapi/booking-confirmation'
+import { verifyVoiceBooking } from '@/lib/xkedule/voice-booking-summary'
+import { clearMemo } from '@/lib/cache/ttl-memo'
 
 interface CancelBookingParams {
   bookingId?: number | string
@@ -25,7 +27,7 @@ export async function cancelXkeduleBooking(
   // move is a write the customer must have heard read back and agreed to in
   // a later turn. Without a conversation artifact this returns the read-back.
   if (voiceBooking) {
-    const consent = checkVoiceBookingConfirmation(params, credentials.organizationId ?? '', voiceBooking)
+    const consent = await verifyVoiceBooking('cancel', params, credentials, voiceBooking)
     if (!consent.allowed) return consent.instruction
   }
   const p = params as CancelBookingParams
@@ -42,6 +44,7 @@ export async function cancelXkeduleBooking(
       credentials,
       WRITE_TIMEOUT_MS,
     )
+    clearMemo(`xk:consent:${credentials.organizationId}:${credentials.tenantBaseUrl}:booking:${Number(id)}`)
     return `Booking ${booking.id} is now ${booking.status}.`
   } catch (err) {
     const msg = (err as Error).message

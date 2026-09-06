@@ -1,104 +1,131 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { checkVoiceBookingConfirmation, voiceMessages, type VoiceBookingContext } from '@/lib/vapi/booking-confirmation'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { checkVoiceBookingConfirmation, CONFIRMATION_QUESTION, voiceMessages, type BookingOperation } from '@/lib/vapi/booking-confirmation'
+import { callerChoseTime, clocksIn } from '@/lib/vapi/clock-choice'
+import { clearMemo } from '@/lib/cache/ttl-memo'
 vi.mock('@/lib/xkedule/client', () => ({ xkeduleFetchJson: vi.fn(), WRITE_TIMEOUT_MS: 60000 }))
 import { xkeduleFetchJson } from '@/lib/xkedule/client'
 import { createXkeduleBooking } from '@/lib/xkedule/actions/create-booking'
+import { cancelXkeduleBooking } from '@/lib/xkedule/actions/cancel-booking'
+import { rescheduleXkeduleBooking } from '@/lib/xkedule/actions/reschedule-booking'
 
 const args = { serviceIds: '333', bookingDate: '2026-09-08', startTime: '09:00', customerName: 'Test Caller', customerPhone: '+15555550100' }
-const creds = { tenantBaseUrl: 'https://example.test', apiKey: 'test', organizationId: 'org-1' }
-const initial: VoiceBookingContext = { callId: 'call-1', messages: [{ role: 'assistant', content: 'Nine or ten?' }, { role: 'user', content: 'nine' }, { role: 'assistant', content: 'Still Test Caller?' }, { role: 'user', content: 'yes' }] }
-const consent: VoiceBookingContext = { ...initial, messages: [...initial.messages,
-  { role: 'assistant', content: 'Haircut, Tuesday at nine, under Test Caller. Shall I request that appointment?' },
-  { role: 'user', content: 'yes please' }] }
-function proposal() {
-  const result = checkVoiceBookingConfirmation(args, 'org-1', initial)
-  if (result.allowed) throw new Error('unexpected write')
+const creds = { tenantBaseUrl: 'https://example.test', apiKey: 'mock', organizationId: 'org-1' }
+const initial = { callId: 'call-1', messages: [{ role: 'assistant', content: 'Nine AM or ten AM?' }, { role: 'user', content: 'nine' }, { role: 'assistant', content: 'Still Test Caller?' }, { role: 'user', content: 'yes' }] }
+const summary = 'I will request a haircut on Tuesday, September 8, 2026 at 9:00 AM, under Test Caller.'
+const consent = { ...initial, messages: [...initial.messages, { role: 'assistant', content: `${summary} ${CONFIRMATION_QUESTION}` }, { role: 'user', content: "no, that's all" }] }
+function check(p = args as Record<string, unknown>, ctx = initial, op: BookingOperation = 'create', text = summary, org = 'org-1') {
+  return checkVoiceBookingConfirmation(p, org, ctx, op, text)
+}
+function token(result: ReturnType<typeof check>) {
+  if (result.allowed) throw new Error('Unexpected authorization')
   return result.instruction.match(/confirmationToken: ([A-Za-z\d_.-]+)/)![1].replace(/\.$/, '')
 }
-beforeEach(() => { vi.stubEnv('ENCRYPTION_SECRET', 'ab'.repeat(32)); vi.mocked(xkeduleFetchJson).mockReset() })
-describe('voice booking consent', () => {
-  it('a call with confirmed:true but no token cannot write; it gets the read-back and a token', async () => {
-    const result = await createXkeduleBooking({ ...args, confirmed: true }, creds, undefined,
-      { callId: 'call-1', messages: [{ role: 'assistant', content: 'Nine or ten?' }, { role: 'user', content: 'nine' }] })
-    expect(result).toContain('NOT BOOKED YET')
-    expect(result).toContain('Anything else')
-    expect(result).toContain('confirmationToken:')
-    expect(xkeduleFetchJson).not.toHaveBeenCalled()
+beforeEach(() => { vi.stubEnv('ENCRYPTION_SECRET', 'ab'.repeat(32)); vi.mocked(xkeduleFetchJson).mockReset(); clearMemo() })
+afterEach(() => { vi.unstubAllEnvs(); vi.restoreAllMocks() })
+
+describe('server-bound voice consent', () => {
+  it('first-call true never authorizes, and the token stays compact', () => {
+    const r = check({ ...args, confirmed: true })
+    expect(r.allowed).toBe(false)
+    expect(token(r).length).toBeLessThan(55)
   })
-  it('a time nobody said cannot even be prepared', async () => {
-    const result = await createXkeduleBooking({ ...args, confirmed: true }, creds, undefined,
-      { callId: 'call-1', messages: [{ role: 'user', content: 'Monday' }] })
-    expect(result).toContain('has not chosen')
-    expect(result).not.toContain('confirmationToken:')
-    expect(xkeduleFetchJson).not.toHaveBeenCalled()
+  it('authorizes only the exact canonical read-back and the immediately following no', () => {
+    expect(check({ ...args, confirmed: true, confirmationToken: token(check()) }, consent).allowed).toBe(true)
   })
-  it('a first call with confirmed true cannot write', async () => {
-    expect(await createXkeduleBooking({ ...args, confirmed: true }, creds, undefined, initial)).toContain('NOT BOOKED YET')
-    expect(xkeduleFetchJson).not.toHaveBeenCalled()
+  it.each(["nope that's all", "no that's all thank you", 'nothing else thanks'])('accepts an unambiguous no with politeness: %s', (content) => {
+    expect(check({ ...args, confirmed: true, confirmationToken: token(check()) }, { ...consent, messages: [...consent.messages.slice(0, -1), { role: 'user', content }] }).allowed).toBe(true)
   })
-  it('cannot use the name confirmation or a same-turn token to write', () => {
-    expect(checkVoiceBookingConfirmation({ ...args, confirmed: true, confirmationToken: proposal() }, 'org-1', initial).allowed).toBe(false)
+  it('allows an identical repeated read-back, but never a conflicting repetition', () => {
+    const p = { ...args, confirmed: true, confirmationToken: token(check()) }
+    const speech = `${summary} ${CONFIRMATION_QUESTION}`
+    const ctx = { ...initial, messages: [...initial.messages, { role: 'assistant', content: speech }, { role: 'assistant', content: speech }, { role: 'user', content: 'no' }] }
+    expect(check(p, ctx).allowed).toBe(true)
+    ctx.messages[initial.messages.length].content = speech.replace('9:00', '10:00')
+    expect(check(p, ctx).allowed).toBe(false)
   })
-  it('only later explicit consent with unchanged details writes, and pending is not called confirmed', async () => {
-    vi.mocked(xkeduleFetchJson).mockResolvedValue({ id: 42, status: 'pending' })
-    const result = await createXkeduleBooking({ ...args, confirmed: true, confirmationToken: proposal() }, creds, undefined, consent)
-    expect(xkeduleFetchJson).toHaveBeenCalledTimes(1)
-    expect(result).toContain('awaiting the business approval')
-    expect(result).not.toContain('Booking confirmed.')
+  it.each(['cancel', 'reschedule'] as const)('create consent cannot authorize %s even with identical arguments', (op) => {
+    expect(check({ ...args, confirmed: true, confirmationToken: token(check()) }, consent, op).allowed).toBe(false)
   })
-  it.each(['startTime', 'bookingDate', 'serviceIds', 'customerName', 'customerPhone', 'notes'])('changed %s requires new consent', (field) => {
-    expect(checkVoiceBookingConfirmation({ ...args, [field]: 'changed', confirmed: true, confirmationToken: proposal() }, 'org-1', consent).allowed).toBe(false)
+  it.each(['startTime', 'bookingDate', 'serviceIds', 'customerName', 'customerPhone', 'notes'])('rejects changed %s', (field) => {
+    expect(check({ ...args, [field]: 'changed', confirmed: true, confirmationToken: token(check()) }, consent).allowed).toBe(false)
   })
-  it('rejects cross-call, cross-org, tampered and expired proposals', () => {
-    const p = { ...args, confirmed: true, confirmationToken: proposal() }
-    expect(checkVoiceBookingConfirmation(p, 'org-2', consent).allowed).toBe(false)
-    expect(checkVoiceBookingConfirmation(p, 'org-1', { ...consent, callId: 'call-2' }).allowed).toBe(false)
-    expect(checkVoiceBookingConfirmation({ ...p, confirmationToken: p.confirmationToken + 'x' }, 'org-1', consent).allowed).toBe(false)
-    const spy = vi.spyOn(Date, 'now').mockReturnValue(Date.now() + 11 * 60_000)
-    expect(checkVoiceBookingConfirmation(p, 'org-1', consent).allowed).toBe(false)
-    spy.mockRestore()
+  it.each(['Anything else?', summary.replace('9:00', '10:00') + ' ' + CONFIRMATION_QUESTION, 'Do not proceed. ' + summary + ' ' + CONFIRMATION_QUESTION])('rejects missing, changed or contradicted summary: %s', (content) => {
+    const ctx = { ...initial, messages: [...initial.messages, { role: 'assistant', content }, { role: 'user', content: 'no' }] }
+    expect(check({ ...args, confirmed: true, confirmationToken: token(check()) }, ctx).allowed).toBe(false)
   })
-  it.each(['no', 'yes but make it ten', 'no that is it', 'maybe', 'cancel it'])('does not mistake %s for consent', (content) => {
-    expect(checkVoiceBookingConfirmation({ ...args, confirmed: true, confirmationToken: proposal() }, 'org-1', {
-      ...consent, messages: [...consent.messages.slice(0, -1), { role: 'user', content }],
-    }).allowed).toBe(false)
+  it.each(['yes', 'maybe', 'no but make it ten', 'cancel it', 'no actually change the day'])('rejects additions or ambiguous consent: %s', (content) => {
+    expect(check({ ...args, confirmed: true, confirmationToken: token(check()) }, { ...consent, messages: [...consent.messages.slice(0, -1), { role: 'user', content }] }).allowed).toBe(false)
   })
-  it('missing artifact fails closed', () => {
-    expect(voiceMessages(undefined)).toEqual([])
-    expect(checkVoiceBookingConfirmation(args, 'org-1', { callId: 'call-1', messages: [] }).allowed).toBe(false)
+  it('rejects same turn, cross-call, cross-org, expired and tampered tokens', () => {
+    const p = { ...args, confirmed: true, confirmationToken: token(check()) }
+    expect(check(p, initial).allowed).toBe(false)
+    expect(check(p, { ...consent, callId: 'other' }).allowed).toBe(false)
+    expect(check(p, consent, 'create', summary, 'other').allowed).toBe(false)
+    expect(check({ ...p, confirmationToken: p.confirmationToken + 'x' }, consent).allowed).toBe(false)
+    vi.spyOn(Date, 'now').mockReturnValue(Date.now() + 11 * 60_000)
+    expect(check(p, consent).allowed).toBe(false)
   })
-  it('accepts native and OpenAI Vapi conversation artifacts without treating tool outputs as consent', () => {
-    expect(voiceMessages({ messages: [{ role: 'bot', message: 'Shall I request that appointment?' }, { role: 'user', message: 'yes' }, { role: 'tool', result: 'yes' }] })).toEqual(consent.messages.slice(-2).map((m) => ({ ...m, content: m.role === 'user' ? 'yes' : 'Shall I request that appointment?' })))
-    expect(voiceMessages({ messagesOpenAIFormatted: consent.messages })).toEqual(consent.messages)
+  it('does not reuse consent after an intervening user turn', () => {
+    const ctx = { ...consent, messages: [...consent.messages, { role: 'assistant', content: `${summary} ${CONFIRMATION_QUESTION}` }, { role: 'user', content: 'no' }] }
+    expect(check({ ...args, confirmed: true, confirmationToken: token(check()) }, ctx).allowed).toBe(false)
+  })
+  it('fails closed without evidence; supports both Vapi transcript formats', () => {
+    expect(check(args, { callId: 'call-1', messages: [] }).allowed).toBe(false)
+    expect(voiceMessages({ messagesOpenAIFormatted: initial.messages })).toEqual(initial.messages)
+    expect(voiceMessages({ messages: [{ role: 'bot', message: 'Nine AM?' }, { role: 'user', message: 'yes' }, { role: 'tool', result: 'no' }] })).toHaveLength(2)
   })
 })
 
-import { timeWasSpoken } from '@/lib/vapi/booking-confirmation'
-describe('the caller chooses the time', () => {
-  const offer = (t: string) => [{ role: 'assistant', content: t }, { role: 'user', content: 'the second one' }]
+describe('chosen clock, not a mentioned clock', () => {
   it.each([
-    ['09:45', 'I have nine, nine forty-five, or ten thirty.', true],
-    ['09:00', 'I have nine, nine forty-five, or ten thirty.', true],
-    ['09:00', 'I have nine forty-five or ten thirty.', false],
-    ['09:00', 'I have 9:45 or 10:30.', false],
-    ['13:00', 'I have twelve, one, or four.', true],
-    ['13:20', 'I have twelve, one, or four.', false],
-    ['10:30', 'How about half past ten?', true],
-    ['09:45', 'Quarter to ten works.', true],
-    ['09:05', 'I have nine oh five.', true],
-    ['11:00', 'Eleven a.m. is open.', true],
-    ['10:30', 'We open at nine.', false],
-  ])('%s after "%s" -> %s', (time, said, expected) => {
-    expect(timeWasSpoken(time, offer(said))).toBe(expected)
+    ['09:00', 'Nine AM or ten AM?', 'ten', false],
+    ['10:00', 'Nine AM or ten AM?', 'ten', true],
+    ['10:00', 'Nine AM or ten AM?', 'the second one', true],
+    ['09:00', 'Nine AM or ten AM?', 'the second one', false],
+    ['13:00', 'One PM or two PM?', 'one am', false],
+    ['13:00', 'One PM or two PM?', 'one', true],
+    ['09:45', 'Nine AM or nine forty-five AM?', 'nine forty-five', true],
+    ['09:00', 'Nine AM or nine forty-five AM?', 'nine forty-five', false],
+    ['09:45', 'Nine forty-five AM?', 'quarter to ten am', true],
+    ['10:30', 'Ten thirty AM?', 'half past ten am', true],
+    ['09:00', 'Nine or ten?', 'nine', false],
+    ['09:00', 'Nine AM or ten AM?', 'not nine', false],
+    ['09:00', 'What day?', 'Monday', false],
+  ])('%s after %s / %s -> %s', (time, offer, answer, expected) => {
+    expect(callerChoseTime(time, [{ role: 'assistant', content: offer }, { role: 'user', content: answer }])).toBe(expected)
   })
-  it('refuses to prepare a time nobody said, without issuing a token', () => {
-    const r = checkVoiceBookingConfirmation(args, 'org-1', { callId: 'call-1', messages: [{ role: 'assistant', content: 'What day?' }, { role: 'user', content: 'Monday' }] })
-    expect(r.allowed).toBe(false)
-    if (!r.allowed) { expect(r.instruction).toContain('has not chosen'); expect(r.instruction).not.toContain('confirmationToken:') }
+  it('does not manufacture clock times from malformed input', () => {
+    expect(callerChoseTime('25:99', initial.messages)).toBe(false)
+    expect(clocksIn('I am good')).toEqual([])
   })
-  it('does not judge a cancellation', () => {
-    const r = checkVoiceBookingConfirmation({ bookingId: 471 }, 'org-1', { callId: 'call-1', messages: [{ role: 'user', content: 'cancel it' }] })
-    expect(r.allowed).toBe(false)
-    if (!r.allowed) expect(r.instruction).toContain('NOT CANCELLED YET')
+})
+
+describe('provider boundary', () => {
+  function setup() {
+    vi.mocked(xkeduleFetchJson).mockImplementation(async (path) => {
+      if (path === '/api/v1/quote') return { items: [{ serviceId: 333, serviceName: 'Signature Haircut' }], subtotal: '38', currency: 'USD' }
+      if (path === '/api/v1/bookings/471') return { bookingDate: '2026-09-08', startTime: '10:30', items: [{ serviceId: 333, serviceName: 'Signature Haircut' }] }
+      return { id: 999, status: 'pending' }
+    })
+  }
+  function answered(instruction: string) {
+    const speech = instruction.match(/numbers: "([\s\S]*?)" Then STOP/)![1]
+    return { ...initial, messages: [...initial.messages, { role: 'assistant', content: speech }, { role: 'user', content: 'no' }] }
+  }
+  it('create uses the real canonical summary and returns pending, with exactly one provider write', async () => {
+    setup()
+    const prepared = await createXkeduleBooking(args, creds, undefined, initial)
+    expect(vi.mocked(xkeduleFetchJson).mock.calls.some(([path]) => path === '/api/v1/bookings')).toBe(false)
+    const out = await createXkeduleBooking({ ...args, confirmed: true, confirmationToken: token({ allowed: false, instruction: prepared }) }, creds, undefined, answered(prepared))
+    expect(out).toContain('awaiting the business approval')
+    expect(vi.mocked(xkeduleFetchJson).mock.calls.filter(([path]) => path === '/api/v1/bookings')).toHaveLength(1)
+  })
+  it('a reschedule token cannot execute cancellation even when all extra arguments are retained', async () => {
+    setup()
+    const p = { bookingId: 471, bookingDate: '2026-09-07', startTime: '09:00' }
+    const prepared = await rescheduleXkeduleBooking(p, creds, initial)
+    const out = await cancelXkeduleBooking({ ...p, confirmed: true, confirmationToken: token({ allowed: false, instruction: prepared }) }, creds, answered(prepared))
+    expect(out).toContain('NOT CANCELLED YET')
+    expect(vi.mocked(xkeduleFetchJson).mock.calls.some(([path]) => path.endsWith('/cancel'))).toBe(false)
   })
 })

@@ -387,7 +387,7 @@ export const NODES: NodeSpec[] = [
   {
     type: 'xkedule_create_booking',
     kind: 'action',
-    description: 'Request a booking in Xkedule after customer confirmation. Without confirmed:true this only returns a read-back. Voice also requires the server-issued confirmationToken and a later affirmative customer turn. The returned status may be pending business approval.',
+    description: 'Request a booking in Xkedule after customer confirmation. Without confirmed:true this only returns a read-back. Gated voice requires the server-issued confirmationToken, the exact returned summary and a later no to the anything-else question. The returned status may be pending business approval.',
     integration_required: ['xkedule'],
     params_schema: {
       type: 'object',
@@ -419,6 +419,8 @@ export const NODES: NodeSpec[] = [
       type: 'object',
       properties: {
         bookingId: { type: 'number', description: 'The Xkedule booking id to cancel.' },
+        confirmed: { type: 'boolean', description: 'Gated voice: true only after the exact returned summary and a later no to its anything-else question.' },
+        confirmationToken: { type: 'string', description: 'Gated voice: copy the token from this operation preparation, with unchanged arguments.' },
       },
       required: ['bookingId'],
     },
@@ -433,6 +435,8 @@ export const NODES: NodeSpec[] = [
       type: 'object',
       properties: {
         bookingId: { type: 'number', description: 'The Xkedule booking id to reschedule.' },
+        confirmed: { type: 'boolean', description: 'Gated voice: true only after the exact returned summary and a later no to its anything-else question.' },
+        confirmationToken: { type: 'string', description: 'Gated voice: copy the token from this operation preparation, with unchanged arguments.' },
         bookingDate: { type: 'string', description: 'YYYY-MM-DD' },
         startTime: { type: 'string', description: 'HH:MM' },
         staffMemberId: { type: 'number', description: 'Optional: reassign to a different staff member.' },

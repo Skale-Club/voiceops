@@ -44,11 +44,7 @@ export async function getXkeduleServices(
   _params: Record<string, unknown>,
   credentials: XkeduleCredentials,
 ): Promise<string> {
-  const data = await memoTtl(
-    `xk:services:${credentials.tenantBaseUrl}`,
-    SERVICES_CACHE_TTL_MS,
-    () => xkeduleFetchJson<CatalogV2Response>('/api/v1/catalog/v2', 'GET', null, credentials),
-  )
+  const data = await getXkeduleCatalog(credentials)
 
   if (!data.services || data.services.length === 0) {
     return 'No services available.'
@@ -79,4 +75,9 @@ export async function getXkeduleServices(
     : ''
 
   return `Available services:\n${summary}${roster}`
+}
+
+export function getXkeduleCatalog(credentials: XkeduleCredentials): Promise<CatalogV2Response> {
+  return memoTtl(`xk:services:${credentials.organizationId ?? ''}:${credentials.tenantBaseUrl}`, SERVICES_CACHE_TTL_MS,
+    () => xkeduleFetchJson<CatalogV2Response>('/api/v1/catalog/v2', 'GET', null, credentials))
 }

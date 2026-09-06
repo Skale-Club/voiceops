@@ -1,14 +1,32 @@
 // The full desk rehearsal matrix for the voice receptionist: many callers,
 // many intents, tool failures injected, garbage transcription, mind changes.
-// Same mechanics as voice-call-simulation.test.ts (live assistant prompt,
-// model and schemas; read tools against production; writes intercepted and
-// their ARGUMENTS validated), plus a humanity lint on every spoken line and
+// Live assistant prompt, model and schemas; reads against production, writes
+// intercepted at the provider boundary AFTER the real executor authorizes
+// them, plus a humanity lint on every spoken line and
 // per-scenario expectations. Prints one verdict line per scenario and a
 // final table. Nothing is booked, moved or cancelled for real.
-import { it, expect } from 'vitest'
+import { it, expect, vi } from 'vitest'
 import { createServiceRoleClient } from '@/lib/supabase/admin'
 import { decrypt } from '@/lib/crypto'
-import { checkVoiceBookingConfirmation, voiceMessages } from '@/lib/vapi/booking-confirmation'
+import { voiceMessages } from '@/lib/vapi/booking-confirmation'
+import { createXkeduleBooking } from '@/lib/xkedule/actions/create-booking'
+import { cancelXkeduleBooking } from '@/lib/xkedule/actions/cancel-booking'
+import { rescheduleXkeduleBooking } from '@/lib/xkedule/actions/reschedule-booking'
+import { getXkeduleCredentialsForOrg } from '@/lib/xkedule/credentials'
+import { readFileSync } from 'node:fs'
+
+const receipts = vi.hoisted(() => [] as Array<{ path: string; body: unknown }>)
+vi.mock('@/lib/xkedule/client', async (original) => {
+  const real = await original<typeof import('@/lib/xkedule/client')>()
+  return { ...real, xkeduleFetchJson: async (path: string, method: 'GET' | 'POST', body: unknown, credentials: import('@/lib/xkedule/client').XkeduleCredentials, timeout?: number) => {
+    if (method === 'POST' && /^\/api\/v1\/bookings(?:\/\d+\/(?:cancel|reschedule))?$/.test(path)) {
+      receipts.push({ path, body })
+      return { id: path === '/api/v1/bookings' ? 999 : 471, status: path.endsWith('/cancel') ? 'cancelled' : 'pending', ...(body as object) }
+    }
+    if (method !== 'GET' && path !== '/api/v1/quote') throw new Error(`Rehearsal refused provider write: ${path}`)
+    return real.xkeduleFetchJson(path, method, body, credentials, timeout)
+  } }
+})
 const ORG_ID = '31502b7d-f4bd-4493-91f7-fc6f2738a09d'
 const ASSISTANT_ID = '99518fa7-09f1-4c76-b7c8-58cd8a92105c'
 const KNOWN = '+15088018190' // Vanildo Teste, has booking #471 on 2026-09-08 10:30
@@ -68,18 +86,28 @@ function lintHuman(text: string): string[] {
 
 it('runs the voice rehearsal matrix', async () => {
   const s = createServiceRoleClient()
+  const xkedule = await getXkeduleCredentialsForOrg(ORG_ID, s)
+  if (!xkedule) throw new Error('Xkedule is not configured')
   const { data: vapi } = await s.from('integrations').select('encrypted_api_key').eq('organization_id', ORG_ID).eq('provider', 'vapi').eq('is_active', true).maybeSingle()
   const { data: orr } = await s.from('integrations').select('encrypted_api_key').eq('organization_id', ORG_ID).eq('provider', 'openrouter').maybeSingle()
   const vapiKey = await decrypt(vapi!.encrypted_api_key)
   const orKey = await decrypt(orr!.encrypted_api_key)
   const a = (await (await fetch(`https://api.vapi.ai/assistant/${ASSISTANT_ID}`, { headers: { Authorization: `Bearer ${vapiKey}` } })).json()) as any
   const secret: string = a.server?.headers?.['x-vapi-secret']
-  const model: string = a.model?.model
+  const model: string = process.env.MATRIX_MODEL ?? a.model?.model
   const temperature: number = a.model?.temperature ?? 0.3
   const tools = (a.model?.tools ?? []).map((t: any) => ({ type: 'function', function: { name: t.function.name, description: t.function.description, parameters: t.function.parameters } }))
   const todayNy = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York', weekday: 'long', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date())
   const get = (t: string) => todayNy.find((p) => p.type === t)?.value ?? ''
-  const baseSystem = String(a.model?.messages?.[0]?.content ?? '').replace(/\{\{"now" \| date: "[^"]*", "[^"]*"\}\}/g, `${get('weekday')}, ${get('year')}-${get('month')}-${get('day')}`)
+  let baseSystem = String(a.model?.messages?.[0]?.content ?? '').replace(/\{\{"now" \| date: "[^"]*", "[^"]*"\}\}/g, `${get('weekday')}, ${get('year')}-${get('month')}-${get('day')}`)
+  if (process.env.MATRIX_PREDEPLOY === '1') {
+    const business = baseSystem.match(/front desk at (.*?)\. You are/)?.[1]
+    const location = baseSystem.match(/## Where the appointment happens\s+([\s\S]*?)## Day and time/)?.[1]
+    if (!business || !location) throw new Error('Cannot resolve tenant facts for rehearsal')
+    baseSystem = readFileSync('.planning/workstreams/omnichannel-agent-orchestration/canary/vapi-receptionist-prompt.md', 'utf8')
+      .replaceAll('{{business_location}}', business).replaceAll('{{service_location_block}}', location)
+      + '\n' + (baseSystem.match(/Today is .*$/m)?.[0] ?? '')
+  }
 
   const only = process.env.MATRIX_ONLY ? new RegExp(process.env.MATRIX_ONLY, 'i') : null
   const summary: string[] = []
@@ -93,6 +121,7 @@ it('runs the voice rehearsal matrix', async () => {
     const called: string[] = []
     const problems: string[] = []
     const lints: string[] = []
+    receipts.length = 0
     let offered = ''
     let maxTurn = 0
 
@@ -100,28 +129,22 @@ it('runs the voice rehearsal matrix', async () => {
     async function runTool(name: string, args: Record<string, unknown>): Promise<string> {
       called.push(name)
       if (sc.failTool === name) return 'Service unavailable.'
-      if (name === 'book_appointment' && (args.confirmed === true || args.confirmed === 'true') && typeof args.confirmationToken === 'string') {
+      if (['book_appointment', 'reschedule_appointment', 'cancel_appointment'].includes(name)) {
         // A confirmed booking with a token could pass production's real consent
         // check now that we send it a real artifact — never let that hit prod.
         // Run the exact same guard locally instead of posting to production.
         const ctx = { callId, messages: voiceMessages({ messages: toArtifactMessages(messages) }) }
-        const result = checkVoiceBookingConfirmation(args, ORG_ID, ctx)
-        if (!result.allowed) return result.instruction
-        if (offered && typeof args.startTime === 'string' && !offered.includes(args.startTime)) problems.push(`booked ${args.startTime}, not an offered slot`)
-        if (typeof args.customerEmail === 'string' && args.customerEmail.length > 0) problems.push(`invented email ${args.customerEmail}`)
-        return `Booking confirmed. ID: 999 | ${args.bookingDate} at ${args.startTime} | Status: pending | Total: $0.00 (SIMULATED)`
+        if (process.env.MATRIX_PREDEPLOY === '1' || (args.confirmed !== undefined && args.confirmed !== false)) {
+          const before = receipts.length
+          const result = name === 'book_appointment' ? await createXkeduleBooking({ ...args, customerPhone: sc.caller }, xkedule!, undefined, ctx)
+            : name === 'reschedule_appointment' ? await rescheduleXkeduleBooking(args, xkedule!, ctx) : await cancelXkeduleBooking(args, xkedule!, ctx)
+          if (receipts.length > before && name !== 'cancel_appointment' && (!offered || !offered.includes(String(args.startTime)))) problems.push('write used a slot not returned by availability')
+          return result
+        }
+        // Even unexpected truthy values or stale production must never cause a real write.
+        args = { ...args, confirmed: false, confirmationToken: undefined }
       }
-      if (name === 'reschedule_appointment' || name === 'cancel_appointment') {
-        // Same consent gate production runs (require_voice_confirmation is on
-        // for these workflows); the write itself is simulated. Never hits prod.
-        const ctx = { callId, messages: voiceMessages({ messages: toArtifactMessages(messages) }) }
-        const result = checkVoiceBookingConfirmation(args, ORG_ID, ctx)
-        if (!result.allowed) return result.instruction
-        if (String(args.bookingId) !== '471') problems.push(`${name} used bookingId ${args.bookingId}, expected 471 from lookup`)
-        if (name === 'cancel_appointment') return 'Booking 471 is now cancelled. (SIMULATED)'
-        if (offered && typeof args.startTime === 'string' && !offered.includes(args.startTime)) problems.push(`rescheduled to ${args.startTime}, not an offered slot`)
-        return `Booking 471 rescheduled to ${args.bookingDate} at ${args.startTime}. (SIMULATED)`
-      }
+      if (!['book_appointment', 'reschedule_appointment', 'cancel_appointment', 'get_quote', 'list_services', 'lookup_customer', 'business_info', 'check_availability'].includes(name)) throw new Error(`Unexpected rehearsal tool: ${name}`)
       const tc = { id: `toolu_${++toolSeq}`, type: 'function', function: { name, arguments: JSON.stringify(args) } }
       const r = await fetch('https://xphere.app/api/vapi/tools', { method: 'POST', headers: { 'content-type': 'application/json', 'x-vapi-secret': secret }, body: JSON.stringify({ message: { type: 'tool-calls', call: { id: callId, assistantId: ASSISTANT_ID, customer: { number: sc.caller } }, artifact: { messages: toArtifactMessages(messages) }, toolCallList: [tc] } }) })
       const body = await r.text()
@@ -140,17 +163,20 @@ it('runs the voice rehearsal matrix', async () => {
         const m = j.choices?.[0]?.message
         if (!m) { problems.push(`${label} model error ${JSON.stringify(j).slice(0, 80)}`); return '' }
         if (m.tool_calls?.length) {
+          if (m.content?.trim()) console.log(`###   ${label} BOT (before tool): ${m.content}`)
           messages.push({ role: 'assistant', content: m.content ?? null, tool_calls: m.tool_calls })
           for (const c of m.tool_calls) {
             let args: Record<string, unknown> = {}
             try { args = JSON.parse(c.function.arguments || '{}') } catch { problems.push(`${label} malformed tool args`) }
             const result = await runTool(c.function.name, args)
-            console.log(`###   ${label} TOOL ${c.function.name}(${JSON.stringify(args).slice(0, 400)}) :: ${result.slice(0, 70).replace(/\n/g, ' ')}`)
+            console.log(`###   ${label} TOOL ${c.function.name}(${JSON.stringify({ ...args, confirmationToken: args.confirmationToken ? '[redacted]' : undefined }).slice(0, 400)}) :: ${result.slice(0, 110).replace(/\n/g, ' ')}`)
             messages.push({ role: 'tool', tool_call_id: c.id, content: result })
           }
           continue
         }
         const spoken = String(m.content ?? '').trim()
+        if (!spoken) problems.push(`${label} empty reply`)
+        if (!receipts.at(-1)?.path.endsWith('/cancel') && /\byou(?:['’]re| are) (?:booked|all set)|your appointment is confirmed/i.test(spoken)) problems.push(`${label} promised confirmation despite the simulated provider being pending`)
         messages.push({ role: 'assistant', content: spoken })
         maxTurn = Math.max(maxTurn, Date.now() - t0)
         const l = lintHuman(spoken)
@@ -177,11 +203,14 @@ it('runs the voice rehearsal matrix', async () => {
     for (const re of sc.expect.mustNotSay ?? []) if (re.test(all)) problems.push(`said ${re}`)
     for (const t of sc.expect.mustCall ?? []) if (!called.includes(t)) problems.push(`never called ${t}`)
     for (const t of sc.expect.mustNotCall ?? []) if (called.includes(t)) problems.push(`called ${t}`)
-    // Booking gate: a confirmed booking must come after an "anything else" question that the user answered.
-    const bookIdx = messages.findIndex((m) => m.role === 'assistant' && m.tool_calls?.some((c: any) => c.function.name === 'book_appointment' && /"confirmed":\s*(true|"true")/.test(c.function.arguments)))
-    const askIdx = messages.findIndex((m) => m.role === 'assistant' && typeof m.content === 'string' && /anything else/i.test(m.content))
-    if (bookIdx >= 0 && (askIdx < 0 || bookIdx < askIdx)) problems.push('GATE: booked before "anything else"')
-    if (bookIdx >= 0 && askIdx >= 0 && bookIdx > askIdx && !messages.slice(askIdx + 1, bookIdx).some((m) => m.role === 'user')) problems.push('GATE: booked in the read-back turn')
+    const expectedPath = sc.name.includes('hours and address') || sc.failTool ? null
+      : sc.name.includes('reschedules') ? '/api/v1/bookings/471/reschedule'
+        : sc.name.includes('cancels') ? '/api/v1/bookings/471/cancel' : '/api/v1/bookings'
+    if (receipts.length !== (expectedPath ? 1 : 0) || (expectedPath && receipts[0]?.path !== expectedPath)) {
+      problems.push(`expected ${expectedPath ?? 'no write'} exactly ${expectedPath ? 1 : 0} time(s); authorized provider receipts: ${JSON.stringify(receipts.map((r) => r.path))}`)
+    }
+    // Only real executor receipts count as completion. Rejected model attempts
+    // may recover; their mere presence must never count as successful booking.
     const verdict = problems.length === 0 ? 'PASS' : 'FAIL'
     if (verdict === 'FAIL') failures.push(sc.name)
     summary.push(`${verdict} | ${sc.name} | slowest turn ${maxTurn}ms | ${problems.join('; ') || '-'} | lint: ${lints.join(' / ') || '-'}`)
