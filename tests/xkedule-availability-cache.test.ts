@@ -222,7 +222,7 @@ describe('checkXkeduleAvailability + prefetch integration', () => {
     // Still only the calls from the prefetch itself — the real lookup was
     // served from cache, no new network call.
     expect(vi.mocked(xkeduleFetchJson)).toHaveBeenCalledTimes(1 + PREFETCH_WINDOW_DAYS)
-    expect(result).toBe('Available slots on ' + dates[0] + ': 09:00')
+    expect(result).toBe('Available times on ' + dates[0] + ': 9:00 AM')
   })
 
   it('a different date is a cache miss and still hits the provider', async () => {
@@ -235,7 +235,7 @@ describe('checkXkeduleAvailability + prefetch integration', () => {
     const result = await checkXkeduleAvailability({ serviceId: 5, date: '2099-01-01' }, CREDS)
 
     expect(vi.mocked(xkeduleFetchJson)).toHaveBeenCalledTimes(1)
-    expect(result).toContain('15:00')
+    expect(result).toContain('3:00 PM')
   })
 
   it('a different service-id set is a cache miss', async () => {
@@ -284,7 +284,98 @@ describe('checkXkeduleAvailability + prefetch integration', () => {
 
     // No new network call: the exact model shape hit the prefetch-warmed entry.
     expect(vi.mocked(xkeduleFetchJson)).toHaveBeenCalledTimes(callsFromPrefetch)
-    expect(result).toBe('Available slots on ' + dates[1] + ': 09:00')
+    expect(result).toBe('Available times on ' + dates[1] + ': 9:00 AM')
+  })
+})
+
+// VOICE-CALL-4-PLAN.md item B: every slot leaves this module the way a
+// person says it out loud (12-hour, no leading zero, uppercase AM/PM), never
+// as the 24h digits Deepgram/the provider hands back. Another agent parses
+// these lines server-side, so the exact shape is a contract, pinned here.
+describe('checkXkeduleAvailability spoken time format (VOICE-CALL-4-PLAN.md item B)', () => {
+  it('single-date, no staff: "Available times on DATE: h:mm AM/PM, ..." comma-separated, no leading zero', async () => {
+    vi.mocked(xkeduleFetchJson).mockResolvedValueOnce({
+      slots: [
+        { time: '09:00', available: true },
+        { time: '09:45', available: true },
+        { time: '10:30', available: true },
+        { time: '13:15', available: false }, // filtered out: not available
+      ],
+    })
+    const result = await checkXkeduleAvailability({ date: '2026-09-12', serviceIds: '333' }, CREDS)
+    expect(result).toBe('Available times on 2026-09-12: 9:00 AM, 9:45 AM, 10:30 AM')
+  })
+
+  it('midnight and noon: 00:00 -> 12:00 AM, 12:00 -> 12:00 PM, 15:00 -> 3:00 PM', async () => {
+    vi.mocked(xkeduleFetchJson).mockResolvedValueOnce({
+      slots: [
+        { time: '00:00', available: true },
+        { time: '12:00', available: true },
+        { time: '15:00', available: true },
+      ],
+    })
+    const result = await checkXkeduleAvailability({ date: '2026-09-12', serviceIds: '333' }, CREDS)
+    expect(result).toBe('Available times on 2026-09-12: 12:00 AM, 12:00 PM, 3:00 PM')
+  })
+
+  it('with-staff: one line per slot, spoken time, unchanged header/name format', async () => {
+    vi.mocked(xkeduleFetchJson).mockResolvedValueOnce({
+      slots: [{ time: '09:45', available: true, staffIds: [1, 2] }],
+      staff: [
+        { id: 1, name: 'Nina' },
+        { id: 2, name: 'Tony' },
+      ],
+    })
+    const result = await checkXkeduleAvailability(
+      { date: '2026-09-12', serviceIds: '333', includeStaff: true },
+      CREDS,
+    )
+    expect(result).toBe('Available slots on 2026-09-12 (with who can take them):\n9:45 AM — Nina, Tony')
+  })
+
+  it('range shape: intro line, "DATE (Weekday): h:mm AM/PM, ..." per day, capped to the first 3 days with openings', async () => {
+    // 2026-09-12 is a Saturday. 5 days of range data, only 4 with openings —
+    // the empty day must be dropped before the cap, not counted against it.
+    vi.mocked(xkeduleFetchJson).mockResolvedValueOnce({
+      range: {
+        '2026-09-11': [{ time: '09:00', available: false }],
+        '2026-09-12': [
+          { time: '09:00', available: true },
+          { time: '09:45', available: true },
+          { time: '10:30', available: true },
+        ],
+        '2026-09-13': [{ time: '14:00', available: true }],
+        '2026-09-14': [{ time: '10:00', available: true }],
+        '2026-09-15': [{ time: '11:00', available: true }],
+      },
+      nextAvailable: { date: '2026-09-12', time: '09:00' },
+    })
+    const result = await checkXkeduleAvailability(
+      { startDate: '2026-09-06', endDate: '2026-09-20', serviceIds: '333' },
+      CREDS,
+    )
+    expect(result).toBe(
+      'Next openings from 2026-09-06:\n' +
+        '2026-09-12 (Saturday): 9:00 AM, 9:45 AM, 10:30 AM\n' +
+        '2026-09-13 (Sunday): 2:00 PM\n' +
+        '2026-09-14 (Monday): 10:00 AM',
+    )
+  })
+
+  it('range shape: caps a single busy day to 6 times with a "(+N more)" suffix, still spoken', async () => {
+    const many = Array.from({ length: 8 }, (_, i) => ({ time: `${9 + i}:00`, available: true }))
+    vi.mocked(xkeduleFetchJson).mockResolvedValueOnce({
+      range: { '2026-09-12': many },
+      nextAvailable: null,
+    })
+    const result = await checkXkeduleAvailability(
+      { startDate: '2026-09-06', endDate: '2026-09-20', serviceIds: '333' },
+      CREDS,
+    )
+    expect(result).toBe(
+      'Next openings from 2026-09-06:\n' +
+        '2026-09-12 (Saturday): 9:00 AM, 10:00 AM, 11:00 AM, 12:00 PM, 1:00 PM, 2:00 PM (+2 more)',
+    )
   })
 })
 
@@ -350,7 +441,7 @@ describe('getXkeduleQuote prefetch', () => {
     const [today] = datesFromToday('UTC', 1)
     const avail = await checkXkeduleAvailability({ serviceId: 5, date: today }, CREDS)
     expect(vi.mocked(xkeduleFetchJson)).toHaveBeenCalledTimes(1)
-    expect(avail).toContain('09:00')
+    expect(avail).toContain('9:00 AM')
   })
 
   it('does not prefetch when credentials carry no organizationId', async () => {
@@ -486,5 +577,9 @@ describe('executeAction("xkedule_quote", ...) triggers the availability prefetch
     expect(vi.mocked(mockedLog)).not.toHaveBeenCalledWith(
       expect.objectContaining({ event_type: 'xkedule.prefetch_availability_skipped' }),
     )
-  })
+  }, 60000) // vi.resetModules() + a real dynamic import of execute-action.ts's full executor
+  // catalog is consistently 10-20s on this suite even alone (measured), and the
+  // default 30s test timeout flakes under load when other suites' test files
+  // share the worker pool (observed here, not caused by PREFETCH_WINDOW_DAYS:
+  // the fetch calls themselves are already-resolved mocks either way).
 })

@@ -45,7 +45,7 @@
       "node_kind": "action",
       "access": "read",
       "name": "Check availability",
-      "description": "Open times for a set of service ids on a given date (YYYY-MM-DD). Pinning a staffId materially speeds up the lookup. Call it ONLY for a date the customer named out loud, one date per call - never for today, tomorrow or a guessed day on your own, and never before the customer answered \"what day works for you?\". The date of an existing booking returned by lookup_customer is not a date the customer named.",
+      "description": "Open times for a set of service ids on a given date (YYYY-MM-DD). Pinning a staffId materially speeds up the lookup. Call it ONLY for a date the customer named out loud, one date per call - never for today, tomorrow or a guessed day on your own, and never before the customer answered \"what day works for you?\". The date of an existing booking returned by lookup_customer is not a date the customer named. For \"how soon\", \"earliest\" or \"first opening\", pass startDate=today and endDate=today+14 instead of date.",
       "input_schema": {
         "service_ids": {
           "type": "array",

@@ -59,10 +59,40 @@ function isTruthy(value: boolean | string | undefined): boolean {
   return value === true || value === 'true' || value === '1'
 }
 
-/** "09:00, 09:45 and 10:30" — reads back naturally on a voice call. */
-function listTimes(times: string[]): string {
-  if (times.length <= 1) return times.join('')
-  return `${times.slice(0, -1).join(', ')} and ${times[times.length - 1]}`
+// The engine used to hand the model raw 24h "09:45", which the voice model
+// then read back digit-by-digit ("oh nine forty-five") -- see
+// .planning/workstreams/omnichannel-agent-orchestration/VOICE-CALL-4-PLAN.md
+// item B. Every slot the model ever sees now leaves this module already in
+// the shape a person says out loud: 12-hour, no leading zero, uppercase
+// AM/PM. Another agent parses these lines server-side (voice-call-replay,
+// clock-choice), so the exact shape below is a contract: "h:mm AM/PM",
+// comma-separated, never "and"-joined.
+
+/** "09:45" / "9:45" (24h, zero-padded or not) -> "9:45 AM". Anything that
+ * doesn't look like a time is returned unchanged rather than thrown away. */
+function spokenTime(time: string): string {
+  const m = /^(\d{1,2}):(\d{2})/.exec(time.trim())
+  if (!m) return time
+  const minute = m[2]
+  let hour = Number(m[1]) % 24
+  const period = hour >= 12 ? 'PM' : 'AM'
+  hour = hour % 12
+  if (hour === 0) hour = 12
+  return `${hour}:${minute} ${period}`
+}
+
+/** "9:00 AM, 9:45 AM, 10:30 AM" — plain comma-separated, never "and"-joined
+ * (see the contract note above: a server-side parser splits on ", "). */
+function spokenTimes(times: string[]): string {
+  return times.map(spokenTime).join(', ')
+}
+
+/** "Saturday" for "2026-09-12", read as a calendar date (UTC) so the weekday
+ * never shifts with the process's local timezone. */
+function weekdayOf(date: string): string {
+  const parsed = new Date(`${date}T00:00:00Z`)
+  if (Number.isNaN(parsed.getTime())) return ''
+  return new Intl.DateTimeFormat('en-US', { weekday: 'long', timeZone: 'UTC' }).format(parsed)
 }
 
 export async function checkXkeduleAvailability(
@@ -107,28 +137,29 @@ export async function checkXkeduleAvailability(
       credentials,
     )
 
-    const days = Object.entries(data.range ?? {})
+    const allDays = Object.entries(data.range ?? {})
       .map(([date, slots]) => [date, (slots ?? []).filter((s) => s.available).map((s) => s.time)] as const)
       .filter(([, times]) => times.length > 0)
 
-    if (days.length === 0) {
+    if (allDays.length === 0) {
       return `No availability between ${p.startDate} and ${p.endDate}.`
     }
 
-    const next = data.nextAvailable
-      ? `Next available: ${data.nextAvailable.date} at ${data.nextAvailable.time}.`
-      : ''
-    // Cap the per-day list: the model needs enough to offer a choice, not a
-    // wall of 12 times per day across a fortnight.
+    // Cap to the first 3 days that actually have openings: the model needs
+    // enough to offer a choice, not a wall of a fortnight of days, and the
+    // days are already in date order from the provider.
+    const days = allDays.slice(0, 3)
+
+    // Cap the per-day time list too, same reasoning, one level down.
     const summary = days
       .map(([date, times]) => {
         const shown = times.slice(0, 6)
         const more = times.length > shown.length ? ` (+${times.length - shown.length} more)` : ''
-        return `${date}: ${listTimes(shown)}${more}`
+        return `${date} (${weekdayOf(date)}): ${spokenTimes(shown)}${more}`
       })
       .join('\n')
 
-    return `${next}\n${summary}`.trim()
+    return `Next openings from ${p.startDate}:\n${summary}`
   }
 
   // ── Single-date shape ──────────────────────────────────────────────────────
@@ -177,13 +208,14 @@ export async function checkXkeduleAvailability(
   }
 
   if (!wantsStaff || !data.staff?.length) {
-    return `Available slots on ${date}: ${available.map((s) => s.time).join(', ')}`
+    return `Available times on ${date}: ${spokenTimes(available.map((s) => s.time))}`
   }
 
   const nameById = new Map(data.staff.map((m) => [m.id, m.name]))
   const lines = available.map((slot) => {
     const names = (slot.staffIds ?? []).map((id) => nameById.get(id) ?? `#${id}`)
-    return names.length > 0 ? `${slot.time} — ${names.join(', ')}` : slot.time
+    const time = spokenTime(slot.time)
+    return names.length > 0 ? `${time} — ${names.join(', ')}` : time
   })
   return `Available slots on ${date} (with who can take them):\n${lines.join('\n')}`
 }

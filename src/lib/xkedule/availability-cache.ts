@@ -1,8 +1,13 @@
 // src/lib/xkedule/availability-cache.ts
 //
 // check_availability is the slowest step on both the phone call and the web
-// widget: 8-14s cold, ~150ms once the provider's own cache is warm within
-// ~60s of the last call. The conversation design guarantees a get_quote call
+// widget: 8-14s cold, ~150ms once THIS MODULE's own cache is warm within
+// ~60s of the last call (measured 2026-09-06,
+// tests/manual/measure-availability-latency.test.ts: re-querying the exact
+// same date/service against the raw provider endpoint, bypassing this file
+// entirely, showed NO speedup at all — Xkedule has no short-lived cache of
+// its own for a plain re-query to land in; the "warm" number below always
+// was this module, not the provider). The conversation design guarantees a get_quote call
 // (src/lib/xkedule/actions/quote.ts), followed by a human confirming the
 // price out loud, BEFORE the customer is ever asked for a day — a 5-10s
 // window in which the likely dates' availability can already be in flight.
@@ -25,11 +30,12 @@ import { xkeduleFetchJson, type XkeduleCredentials } from './client'
 import { memoTtl } from '@/lib/cache/ttl-memo'
 import { log } from '@/lib/logger'
 
-// 60s: mirrors the provider's own warm window (measured: ~150ms when hit
-// within ~60s of a prior call, 8-14s cold). Caching longer would risk
-// serving a slot that just got booked by someone else past the point the
-// provider itself would still consider "fresh"; caching shorter throws away
-// hits inside the confirm-then-ask-for-a-day window we're targeting.
+// 60s: this module's own warm window (measured: ~150ms when hit within ~60s
+// of a prior call through this cache, 8-14s cold — see the file header on
+// why that speedup is entirely this memo, not the provider). Caching longer
+// would risk serving a slot that just got booked by someone else; caching
+// shorter throws away hits inside the confirm-then-ask-for-a-day window
+// we're targeting.
 export const AVAILABILITY_CACHE_TTL_MS = 60_000
 
 // Business timezone barely ever changes; this only exists so a burst of
@@ -38,12 +44,17 @@ export const AVAILABILITY_CACHE_TTL_MS = 60_000
 // "today" only right at midnight in that zone.
 const TIMEZONE_CACHE_TTL_MS = 10 * 60 * 1000
 
-// How many days ahead (inclusive of today) get prefetched after a quote. A
-// week: the demo's own question was "Monday", three days out, and a 3-day
-// window missed it (measured 2026-09-05: the day turn paid the full cold cost
-// and blew the widget's turn budget). Nearest days first, so the likeliest
+// How many days ahead (inclusive of today) get prefetched after a quote.
+// Started at a week after the demo's own "Monday" question (three days out)
+// missed a 3-day window (measured 2026-09-05: the day turn paid the full cold
+// cost and blew the widget's turn budget). A week itself then missed too: a
+// live call on 2026-09-05 asked for "next Saturday", which was day 8 — one
+// past a 7-day window — and paid the same 9s cold cost live on the phone
+// (see VOICE-CALL-4-PLAN.md item E). 14 covers two full weeks, so every
+// weekday name a caller says ("Saturday", "next Tuesday") lands inside the
+// window regardless of what today is. Nearest days first, so the likeliest
 // answers are warm soonest.
-export const PREFETCH_WINDOW_DAYS = 7
+export const PREFETCH_WINDOW_DAYS = 14
 // Provider requests in flight at once for one prefetch. The demo provider
 // answers a cold availability query in 8-14s; three at a time keeps a quote
 // from turning into seven simultaneous heavy queries against it.

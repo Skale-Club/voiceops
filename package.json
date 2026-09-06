@@ -23,7 +23,8 @@
     "workflows:validate-all": "tsx scripts/validate-workflows.ts",
     "workflows:load-seeds": "tsx scripts/load-workflow-seeds.ts",
     "workflows:load-seeds:dry": "tsx scripts/load-workflow-seeds.ts --dry-run",
-    "release-gate": "tsx scripts/release-gate.ts"
+    "release-gate": "tsx scripts/release-gate.ts",
+    "call:last": "tsx --env-file=.env.local scripts/call-last.ts"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.78",

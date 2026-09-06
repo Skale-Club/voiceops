@@ -13,7 +13,9 @@ import { describe, it, expect } from 'vitest'
 import {
   renderAssistantConfig,
   SERVICE_LOCATION_TOKEN,
+  BUSINESS_HOURS_TOKEN,
   type AssistantConfigSource,
+  type BusinessHours,
 } from '../src/lib/vapi/render-assistant-config'
 
 /** Every source needs a mode; these tests default to the safest one. */
@@ -191,7 +193,7 @@ describe('MODAL-03: tuned per-tool lines survive a push', () => {
     expect(availability?.messages).toEqual(existing.check_availability)
   })
 
-  it('uses the generic fallback only for a tool the assistant has no message for', () => {
+  it('after a live read, a tool with no message stays silent (lookup, prepare calls)', () => {
     const rendered = renderAssistantConfig(
       source({
         workflows,
@@ -201,15 +203,106 @@ describe('MODAL-03: tuned per-tool lines survive a push', () => {
       })
     )
     const services = rendered.toolMessages.find((m) => m.toolName === 'list_services')
-    expect(services?.messages).toEqual([{ type: 'request-start', content: 'One moment.' }])
+    expect(services?.messages).toEqual([])
   })
 
-  it('treats an empty message array as absent rather than as a deliberate silence', () => {
+  it('an explicitly empty message array is a deliberate silence', () => {
     const rendered = renderAssistantConfig(
       source({ workflows, existingToolMessages: { list_services: [] } })
     )
     const services = rendered.toolMessages.find((m) => m.toolName === 'list_services')
-    expect(services?.messages[0].content).toBe('One moment.')
+    expect(services?.messages).toEqual([])
+  })
+
+  it('without any live read, every tool gets the generic fallback', () => {
+    const rendered = renderAssistantConfig(source({ workflows }))
+    const services = rendered.toolMessages.find((m) => m.toolName === 'list_services')
+    expect(services?.messages).toEqual([{ type: 'request-start', content: 'One moment.' }])
+  })
+})
+
+describe('C: opening hours rendered from businessHours, never invented', () => {
+  const fullWeek: BusinessHours = {
+    timezone: 'America/New_York',
+    days: {
+      monday: { open: true, start: '09:00', end: '18:00' },
+      tuesday: { open: true, start: '09:00', end: '18:00' },
+      wednesday: { open: true, start: '09:00', end: '18:00' },
+      thursday: { open: true, start: '09:00', end: '18:00' },
+      friday: { open: true, start: '09:00', end: '18:00' },
+      saturday: { open: true, start: '09:00', end: '17:00' },
+      sunday: { open: false },
+    },
+  }
+
+  it('groups identical consecutive days into one spoken range', () => {
+    const rendered = renderAssistantConfig(source({ businessHours: fullWeek }))
+    expect(rendered.systemPrompt).toContain(
+      'Monday to Friday 9 AM to 6 PM, Saturday 9 AM to 5 PM, Sunday closed'
+    )
+  })
+
+  it('states the open/closed-comes-only-from-hours-and-clock rule, and that availability comes only from the tool', () => {
+    const rendered = renderAssistantConfig(source({ businessHours: fullWeek }))
+    expect(rendered.systemPrompt).toContain('comes ONLY from')
+    expect(rendered.systemPrompt).toContain("these hours combined with today's date and time")
+    expect(rendered.systemPrompt).toContain('Availability for booking comes ONLY from check_availability')
+  })
+
+  it('formats a non-hour boundary without a leading zero', () => {
+    const rendered = renderAssistantConfig(
+      source({
+        businessHours: {
+          timezone: 'UTC',
+          days: { monday: { open: true, start: '09:30', end: '17:15' } },
+        },
+      })
+    )
+    expect(rendered.systemPrompt).toContain('9:30 AM to 5:15 PM')
+    expect(rendered.systemPrompt).not.toContain('09:30')
+  })
+
+  it('places the block at the token when the prompt declares one', () => {
+    const rendered = renderAssistantConfig(
+      source({
+        systemPrompt: `## Hours\n${BUSINESS_HOURS_TOKEN}\n\n## Voice\nShort sentences.`,
+        businessHours: fullWeek,
+      })
+    )
+    expect(rendered.systemPrompt).not.toContain(BUSINESS_HOURS_TOKEN)
+    expect(rendered.systemPrompt).toContain('## Hours\nOpening hours:')
+    expect(rendered.systemPrompt).toContain('## Voice\nShort sentences.')
+  })
+
+  it('appends the block as its own section when the prompt declares no token', () => {
+    const rendered = renderAssistantConfig(
+      source({ systemPrompt: 'You are the front desk.', businessHours: fullWeek })
+    )
+    expect(rendered.systemPrompt).toContain('You are the front desk.')
+    expect(rendered.systemPrompt).toContain('## Opening hours\nOpening hours:')
+  })
+
+  it('states plainly that it does not know the hours, and never guesses, when none were resolved', () => {
+    const rendered = renderAssistantConfig(source({}))
+    expect(rendered.systemPrompt).toContain('you do not know them')
+    expect(rendered.systemPrompt).toContain('business_info')
+    expect(rendered.systemPrompt).not.toContain('Monday to Friday')
+  })
+})
+
+describe('C: todayLineForVapi carries both the date and the time', () => {
+  it('emits a date filter and a time filter, both in the tenant timezone', async () => {
+    const { todayLineForVapi } = await import('../src/lib/vapi/render-assistant-config')
+    const line = todayLineForVapi('America/New_York')
+    expect(line).toContain('"now" | date: "%A, %Y-%m-%d", "America/New_York"')
+    expect(line).toContain('"now" | date: "%I:%M %p", "America/New_York"')
+    expect(line).toContain('and the time is')
+  })
+
+  it('falls back to UTC for an invalid or missing timezone', async () => {
+    const { todayLineForVapi } = await import('../src/lib/vapi/render-assistant-config')
+    expect(todayLineForVapi('not-a-real-zone')).toContain('"UTC"')
+    expect(todayLineForVapi(undefined)).toContain('"UTC"')
   })
 })
 
