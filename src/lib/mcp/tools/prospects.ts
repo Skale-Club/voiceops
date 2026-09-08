@@ -360,20 +360,47 @@ type VerifiableProspect = { kind: 'person' | 'company'; id: string; email: strin
 
 /**
  * Resolves `external_run_id` (+ optional `source_type`) to the matching
- * `prospect_sources.id` row(s) for this org. Returns `null` when
+ * `prospect_sources` row(s) (id + metadata) for this org. Returns `null` when
  * `external_run_id` was given but nothing matches -- the caller distinguishes
  * "no such run" from "run exists, nothing eligible in it".
+ *
+ * Fetches `metadata` alongside `id` so callers needing xcraper-reported run
+ * metadata (e.g. `emails_lost_to_placeholder`, see `extractPlaceholdersRejected`)
+ * can reuse this lookup instead of re-querying `prospect_sources`.
  */
-async function resolveProspectSourceIds(
+async function resolveProspectSources(
   orgId: string,
   externalRunId: string,
   sourceType?: string,
-): Promise<string[] | null> {
-  let q = db().from('prospect_sources').select('id').eq('org_id', orgId).eq('external_run_id', externalRunId)
+): Promise<Array<{ id: string; metadata: unknown }> | null> {
+  let q = db().from('prospect_sources').select('id, metadata').eq('org_id', orgId).eq('external_run_id', externalRunId)
   if (sourceType) q = q.eq('source_type', sourceType)
   const { data } = await q
-  const ids = ((data ?? []) as Array<{ id: string }>).map((row) => row.id)
-  return ids.length > 0 ? ids : null
+  const rows = (data ?? []) as Array<{ id: string; metadata: unknown }>
+  return rows.length > 0 ? rows : null
+}
+
+/**
+ * Reads xcraper's `emails_lost_to_placeholder` metric (businesses that ended
+ * up with NO contact email because the only address on offer was
+ * website-template filler, e.g. `filler@godaddy.com`) from a resolved
+ * `prospect_sources` row's metadata. Renamed from `emails_rejected_as_placeholder`
+ * on the Xcraper side -- do not look for the old key.
+ *
+ * Returns `undefined` (not 0) when the key is absent or not a finite number,
+ * so "not measured" stays distinguishable from a measured zero -- the caller
+ * must omit `placeholdersRejected` from the Xmail payload in that case, never
+ * send a fabricated 0.
+ */
+function extractPlaceholdersRejected(rows: Array<{ metadata: unknown }>): number | undefined {
+  for (const row of rows) {
+    const metadata = row.metadata
+    if (metadata && typeof metadata === 'object' && !Array.isArray(metadata)) {
+      const value = (metadata as Record<string, unknown>).emails_lost_to_placeholder
+      if (typeof value === 'number' && Number.isFinite(value)) return value
+    }
+  }
+  return undefined
 }
 
 /**
@@ -391,11 +418,14 @@ async function loadVerifiableProspects(
   orgId: string,
   filters: { externalRunId?: string; sourceType?: string },
   cap: number,
-): Promise<{ prospects: VerifiableProspect[] } | { notFound: true }> {
+): Promise<{ prospects: VerifiableProspect[]; placeholdersRejected?: number } | { notFound: true }> {
   let sourceIds: string[] | null = null
+  let placeholdersRejected: number | undefined
   if (filters.externalRunId) {
-    sourceIds = await resolveProspectSourceIds(orgId, filters.externalRunId, filters.sourceType)
-    if (!sourceIds) return { notFound: true }
+    const sources = await resolveProspectSources(orgId, filters.externalRunId, filters.sourceType)
+    if (!sources) return { notFound: true }
+    sourceIds = sources.map((row) => row.id)
+    placeholdersRejected = extractPlaceholdersRejected(sources)
   }
 
   let contactsQuery = db()
@@ -435,6 +465,7 @@ async function loadVerifiableProspects(
   withCreatedAt.sort((a, b) => a.createdAt.localeCompare(b.createdAt))
   return {
     prospects: withCreatedAt.slice(0, cap).map(({ kind, id, email }) => ({ kind, id, email })),
+    placeholdersRejected,
   }
 }
 
@@ -694,7 +725,7 @@ export const prospectsTools: McpToolDef[] = [
         }
       }
 
-      const { prospects } = resolved
+      const { prospects, placeholdersRejected } = resolved
       const verifiedAt = new Date().toISOString()
       if (prospects.length === 0) {
         return {
@@ -725,10 +756,24 @@ export const prospectsTools: McpToolDef[] = [
         { force: input.force },
       )
       const creditsAfter = await getMillionVerifierCredits()
-      const creditsUsed =
+      const rawCreditsDelta =
         creditsBefore.credits != null && creditsAfter.credits != null
           ? creditsBefore.credits - creditsAfter.credits
           : null
+      // MillionVerifier supports auto top-up (a documented +10% refill when the
+      // balance runs low). If a refill lands mid-batch, the balance goes UP
+      // between the before/after reads and this delta goes negative -- at that
+      // point the delta is contaminated by an unknown top-up amount, so we
+      // genuinely do not know how many credits this batch consumed.
+      //
+      // Do NOT clamp to 0: 0 is a distinct, real claim in this contract ("this
+      // batch measurably cost nothing", e.g. an all-cache-hit batch), while
+      // `null` already means "we could not measure it" (see the balance-read
+      // failure above). Reporting a contaminated negative delta as 0 would
+      // assert a measured-zero-cost claim about a batch we could not actually
+      // measure -- a clamp would be a lie. Emit `null` instead, mirroring the
+      // `cost_usd` semantics documented in Xcraper's `buildSourceMetadata`.
+      const creditsUsed = rawCreditsDelta != null && rawCreditsDelta < 0 ? null : rawCreditsDelta
 
       const verificationProvider = resolveVerificationProvider(batch.results)
       const results = prospects.map((p, i) => {
@@ -764,6 +809,10 @@ export const prospectsTools: McpToolDef[] = [
           invalid: output.invalid,
           creditsUsed: output.credits_used,
           verificationProvider: output.verification_provider,
+          // Absent must stay distinguishable from zero -- only sent when
+          // prospect_sources.metadata.emails_lost_to_placeholder was present
+          // and finite (extractPlaceholdersRejected), zero included.
+          ...(placeholdersRejected !== undefined ? { placeholdersRejected } : {}),
           verifiedAt: output.verified_at,
         })
         if (!notify.ok) {

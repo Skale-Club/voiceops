@@ -377,4 +377,89 @@ describe('prospects_verify handler', () => {
     expect(result.verification_provider).toBe('millionverifier')
     expect((result.results as Array<Record<string, unknown>>)[0].status).toBe('blocked_no_credits')
   })
+
+  // MillionVerifier auto top-up: a refill landing mid-batch makes the balance
+  // go UP, so `before - after` goes negative. That delta is contaminated (we
+  // don't know how many credits the top-up added), so it must be reported as
+  // `null` ("not measured"), never clamped to 0 ("measured, cost nothing").
+  it('reports credits_used: null (not a clamped 0) when the balance rose mid-batch (auto top-up)', async () => {
+    createServiceRoleClient.mockReturnValue(
+      makeDb({
+        prospect_sources: [{ id: 'src-1' }],
+        contacts: [{ id: 'c1', email: 'alice@example.com', created_at: '2026-01-01T00:00:00.000Z' }],
+        accounts: [],
+      }),
+    )
+    getMillionVerifierCredits.mockResolvedValueOnce({ configured: true, credits: 100, ok: true })
+    getMillionVerifierCredits.mockResolvedValueOnce({ configured: true, credits: 110, ok: true })
+    verifyProspectsBatch.mockResolvedValue({
+      results: [{ kind: 'contact', id: 'c1', email: 'alice@example.com', result: { status: 'ok', risk: 'low', provider: 'millionverifier', verifiedAt: 'x', cached: false }, sendable: true }],
+      aggregate: { ok: 1, catch_all: 0, unknown: 0, invalid: 0, disposable: 0, bounced: 0, blocked: 0 },
+    })
+    xmailNotifyVerificationComplete.mockResolvedValue({ ok: true, runId: 'r', eventId: 'e', costEntryId: 'c', idempotentReplay: false })
+
+    const input = tool().inputSchema.parse({ external_run_id: 'run-42' })
+    const result = (await tool().handler(input, { auth: { orgId: 'org-1' } } as never)) as Record<string, unknown>
+
+    expect(result.credits_used).toBeNull()
+    expect(xmailNotifyVerificationComplete).toHaveBeenCalledWith(
+      'run-42',
+      expect.objectContaining({ creditsUsed: null }),
+    )
+  })
+
+  // Xcraper's `emails_lost_to_placeholder` (businesses left with no contact
+  // email because the only address on offer was website-template filler)
+  // rides in prospect_sources.metadata and must reach Xmail as
+  // `placeholdersRejected` -- present and finite -> sent (0 included, since 0
+  // is a real reportable value here); absent -> omitted, never faked as 0.
+  describe('placeholdersRejected (emails_lost_to_placeholder from prospect_sources.metadata)', () => {
+    function stubRun(prospectSourceRow: Record<string, unknown>) {
+      createServiceRoleClient.mockReturnValue(
+        makeDb({
+          prospect_sources: [prospectSourceRow],
+          contacts: [{ id: 'c1', email: 'alice@example.com', created_at: '2026-01-01T00:00:00.000Z' }],
+          accounts: [],
+        }),
+      )
+      getMillionVerifierCredits.mockResolvedValue({ configured: true, credits: 100, ok: true })
+      verifyProspectsBatch.mockResolvedValue({
+        results: [{ kind: 'contact', id: 'c1', email: 'alice@example.com', result: { status: 'ok', risk: 'low', provider: 'millionverifier', verifiedAt: 'x', cached: false }, sendable: true }],
+        aggregate: { ok: 1, catch_all: 0, unknown: 0, invalid: 0, disposable: 0, bounced: 0, blocked: 0 },
+      })
+      xmailNotifyVerificationComplete.mockResolvedValue({ ok: true, runId: 'r', eventId: 'e', costEntryId: 'c', idempotentReplay: false })
+    }
+
+    it('sends placeholdersRejected when the metadata key is present with a positive value', async () => {
+      stubRun({ id: 'src-1', metadata: { emails_lost_to_placeholder: 7 } })
+
+      const input = tool().inputSchema.parse({ external_run_id: 'run-42' })
+      await tool().handler(input, { auth: { orgId: 'org-1' } } as never)
+
+      expect(xmailNotifyVerificationComplete).toHaveBeenCalledWith(
+        'run-42',
+        expect.objectContaining({ placeholdersRejected: 7 }),
+      )
+    })
+
+    it('sends placeholdersRejected: 0 when the metadata key is present as 0 (a real, reportable value)', async () => {
+      stubRun({ id: 'src-1', metadata: { emails_lost_to_placeholder: 0 } })
+
+      const input = tool().inputSchema.parse({ external_run_id: 'run-42' })
+      await tool().handler(input, { auth: { orgId: 'org-1' } } as never)
+
+      const call = xmailNotifyVerificationComplete.mock.calls[0][1] as Record<string, unknown>
+      expect(call).toHaveProperty('placeholdersRejected', 0)
+    })
+
+    it('omits placeholdersRejected entirely when the metadata key is absent — absent must stay distinguishable from zero', async () => {
+      stubRun({ id: 'src-1', metadata: {} })
+
+      const input = tool().inputSchema.parse({ external_run_id: 'run-42' })
+      await tool().handler(input, { auth: { orgId: 'org-1' } } as never)
+
+      const call = xmailNotifyVerificationComplete.mock.calls[0][1] as Record<string, unknown>
+      expect(call).not.toHaveProperty('placeholdersRejected')
+    })
+  })
 })
