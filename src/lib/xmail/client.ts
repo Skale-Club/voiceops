@@ -28,11 +28,18 @@ export function isXmailConfigured(): boolean {
   return Boolean(XMAIL_API_URL && XMAIL_USER_ID && XMAIL_ORG_ID && XMAIL_SERVICE_KEY)
 }
 
-/** Low-level fetch against the Xmail outreach API with the service identity header. */
+/** Low-level fetch against the Xmail outreach API with the service identity header.
+ *  `status` is included on both branches (undefined only when the request never
+ *  reached Xmail at all) so callers that need to distinguish HTTP codes — e.g.
+ *  xmailNotifyVerificationComplete telling a 404 "unknown run" apart from a 5xx —
+ *  don't have to re-parse `error`. */
 async function xmailFetch(
   path: string,
   init: { method?: string; body?: unknown; query?: Record<string, string> } = {},
-): Promise<{ ok: true; data: Record<string, unknown> } | { ok: false; error: string }> {
+): Promise<
+  | { ok: true; status: number; data: Record<string, unknown> }
+  | { ok: false; status?: number; error: string }
+> {
   if (!isXmailConfigured()) {
     return {
       ok: false,
@@ -53,9 +60,9 @@ async function xmailFetch(
     })
     const data = (await res.json().catch(() => ({}))) as Record<string, unknown>
     if (!res.ok) {
-      return { ok: false, error: (data.error as string) || `Xmail returned HTTP ${res.status}` }
+      return { ok: false, status: res.status, error: (data.error as string) || `Xmail returned HTTP ${res.status}` }
     }
-    return { ok: true, data }
+    return { ok: true, status: res.status, data }
   } catch (err) {
     console.error(`[xmail] request failed (${path}):`, err)
     return { ok: false, error: 'Could not reach Xmail.' }
@@ -163,6 +170,11 @@ export interface XmailRegisterExternalRunParams {
   location?: string
   resultCount?: number
   importedCount?: number
+  /** The scrape's requested batch size (e.g. Apify `maxResults`), NOT the
+   *  number of results actually returned (`resultCount`). Xmail's
+   *  `prospecting_runs.requested_limit` defaults to 25 when this is omitted —
+   *  see external-run-mapping.ts's TODO on why Xcraper doesn't send this yet. */
+  requestedLimit?: number
   /** Number of source results that went through contact enrichment. */
   enrichedCount?: number
   /** The ACTUAL total cost the provider (Apify) reported for this run, in USD. */
@@ -227,4 +239,75 @@ export async function xmailSendMessage(
     return { ok: false, error: (res.data.error as string) || 'Xmail send-message did not report success.' }
   }
   return { ok: true, messageId: (res.data.messageId as string) ?? '' }
+}
+
+// ── Verification-as-a-run-step (Fase 34, Xphere part) ───────────────────────
+
+export interface XmailVerificationSummaryParams {
+  /** Only value this integration has ever sent — mirrors XmailRegisterExternalRunParams.provider. */
+  provider: 'xcraper'
+  checked: number
+  ok: number
+  catchAll: number
+  unknown: number
+  invalid: number
+  /** Measured as a MillionVerifier balance delta (before - after), not a count
+   *  of calls made — see src/lib/email-verification/credits.ts and the
+   *  prospects_verify handler. Null when either balance read failed. */
+  creditsUsed: number | null
+  verificationProvider: 'millionverifier' | 'neverbounce' | 'mixed'
+  /** Xcraper-side placeholder-email rejections (Fase 33) — omitted, not
+   *  zero, when prospects_verify has no such count to report. */
+  placeholdersRejected?: number
+  verifiedAt: string
+}
+
+export type XmailVerificationNotifyResult =
+  | { ok: true; runId: string; eventId: string; costEntryId: string; idempotentReplay: boolean }
+  | { ok: false; error: string; runNotFound?: boolean }
+
+/**
+ * Notify Xmail that a `prospects_verify` batch completed for one of its
+ * registered external runs: `POST /api/outreach/prospecting/external-runs/
+ * :externalRunId/verification`, the same service credential + organizationId
+ * query as `xmailRegisterExternalRun`. Contract: 201 with
+ * `{ runId, eventId, costEntryId }` on first call, 200 with
+ * `{ idempotentReplay: true }` on a repeat, 404 if Xmail never registered
+ * this externalRunId.
+ *
+ * All three outcomes (success, idempotent replay, 404) are reported back to
+ * the caller rather than thrown — per Fase 34, a failure to notify Xmail must
+ * never fail the verification itself, since the verification result was
+ * already persisted locally (on the contacts/accounts rows) before this call
+ * happens. The caller (prospects_verify) decides what `xmail_notified: false`
+ * means for its own output; this function only reports what happened.
+ */
+export async function xmailNotifyVerificationComplete(
+  externalRunId: string,
+  params: XmailVerificationSummaryParams,
+): Promise<XmailVerificationNotifyResult> {
+  const res = await xmailFetch(
+    `/api/outreach/prospecting/external-runs/${encodeURIComponent(externalRunId)}/verification`,
+    {
+      method: 'POST',
+      query: { organizationId: XMAIL_ORG_ID },
+      body: params,
+    },
+  )
+  if (!res.ok) {
+    return {
+      ok: false,
+      runNotFound: res.status === 404,
+      error: res.status === 404
+        ? `Xmail does not know external run "${externalRunId}" (404) — it may never have been registered via POST /external-runs.`
+        : res.error,
+    }
+  }
+  return {
+    ok: true,
+    runId: (res.data.runId as string) ?? '',
+    eventId: (res.data.eventId as string) ?? '',
+    costEntryId: (res.data.costEntryId as string) ?? '',
+    idempotentReplay: res.data.idempotentReplay === true,
+  }
 }

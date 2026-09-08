@@ -2934,6 +2934,10 @@ export interface Database {
           created_by: string | null
           created_at: string
           updated_at: string
+          /** Migration 1298: the prospect_sources row (run) that ingested this
+           *  prospect, populated by POST /api/v1/prospects. NULL for rows
+           *  ingested before this migration. */
+          prospect_source_id: string | null
           /** Migration 1085: DND — true when any channel is blocked */
           dnd_enabled: boolean
           /** Migration 1085: DND — blocked channel keys, e.g. ['sms','email','all'] */
@@ -2984,6 +2988,7 @@ export interface Database {
           source_payload?: Json
           external_id?: string | null
           account_id?: string | null
+          prospect_source_id?: string | null
           created_by?: string | null
           created_at?: string
           updated_at?: string
@@ -3024,6 +3029,7 @@ export interface Database {
           source_payload?: Json
           external_id?: string | null
           account_id?: string | null
+          prospect_source_id?: string | null
           updated_at?: string
           dnd_enabled?: boolean
           dnd_channels?: string[]
@@ -3273,6 +3279,10 @@ export interface Database {
           source_type: string | null
           source_id: string | null
           source_payload: Json
+          /** Migration 1298: the prospect_sources row (run) that ingested this
+           *  prospect, populated by POST /api/v1/prospects. NULL for rows
+           *  ingested before this migration. */
+          prospect_source_id: string | null
           assigned_to: string | null
           /** Migration 1158: prospects full system — lead score + engagement summary */
           score: number
@@ -3312,6 +3322,7 @@ export interface Database {
           source_type?: string | null
           source_id?: string | null
           source_payload?: Json
+          prospect_source_id?: string | null
           assigned_to?: string | null
           score?: number
           recommended_channel?: CrmRecommendedChannel | null
@@ -3343,6 +3354,7 @@ export interface Database {
           source_type?: string | null
           source_id?: string | null
           source_payload?: Json
+          prospect_source_id?: string | null
           assigned_to?: string | null
           score?: number
           recommended_channel?: CrmRecommendedChannel | null

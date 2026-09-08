@@ -146,4 +146,52 @@ describe('buildExternalRunRegistration', () => {
     const result = buildExternalRunRegistration({ metadata: { cost_usd: 1 } }, 'xcraper', null, 10, 10)
     expect(result).toBeNull()
   })
+
+  // Fase 34 / B4 — requestedLimit forwarding. Xcraper does not send a
+  // requested-batch-size key yet, so today this is always undefined (leaving
+  // Xmail's own `requested_limit` column default of 25 in place) rather than
+  // being wrongly derived from result_count.
+  it('leaves requestedLimit undefined when Xcraper sends neither max_results nor requested_limit', async () => {
+    const { buildExternalRunRegistration } = await import('@/lib/xmail/external-run-mapping')
+    const result = buildExternalRunRegistration(
+      { metadata: { result_count: 330 } },
+      'xcraper',
+      'run-boston',
+      330,
+      330,
+    )
+    expect(result?.resultCount).toBe(330)
+    expect(result?.requestedLimit).toBeUndefined()
+  })
+
+  it('forwards requestedLimit from metadata.max_results once Xcraper sends it', async () => {
+    const { buildExternalRunRegistration } = await import('@/lib/xmail/external-run-mapping')
+    const result = buildExternalRunRegistration(
+      { metadata: { max_results: 500, result_count: 330 } },
+      'xcraper',
+      'run-boston-2',
+      330,
+      330,
+    )
+    expect(result?.requestedLimit).toBe(500)
+  })
+
+  it('forwards requestedLimit from metadata.requested_limit as a fallback key', async () => {
+    const { buildExternalRunRegistration } = await import('@/lib/xmail/external-run-mapping')
+    const result = buildExternalRunRegistration(
+      { metadata: { requested_limit: 200 } },
+      'xcraper',
+      'run-6',
+      10,
+      10,
+    )
+    expect(result?.requestedLimit).toBe(200)
+  })
+
+  it('never derives requestedLimit from result_count/prospectCount', async () => {
+    const { buildExternalRunRegistration } = await import('@/lib/xmail/external-run-mapping')
+    const result = buildExternalRunRegistration({ metadata: {} }, 'xcraper', 'run-7', 63, 60)
+    expect(result?.resultCount).toBe(63)
+    expect(result?.requestedLimit).toBeUndefined()
+  })
 })

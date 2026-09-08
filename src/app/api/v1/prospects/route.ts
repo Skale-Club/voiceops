@@ -475,6 +475,10 @@ async function ingestPerson(
       })
       if (derived) patch.recommended_channel = derived
     }
+    // Direct run linkage for prospects_verify (Fase 34, migration 1298) — see
+    // that migration's comment for why source_id alone isn't enough. A
+    // re-import always attributes to the run that touched it most recently.
+    if (runId) patch.prospect_source_id = runId
     const { error } = await supabase
       .from('contacts')
       .update(patch)
@@ -506,6 +510,9 @@ async function ingestPerson(
       score: p.score ?? 0,
       source_type: sourceType,
       source_id: sourceId,
+      // Direct run linkage for prospects_verify (Fase 34, migration 1298) —
+      // see that migration's comment for why source_id alone isn't enough.
+      prospect_source_id: runId,
       source_payload: (p.source_payload ?? {}) as Json,
       custom_fields: (p.custom_fields ?? {}) as Record<string, unknown>,
     })
@@ -611,6 +618,10 @@ async function ingestCompany(
       const website = typeof p.custom_fields.website === 'string' ? p.custom_fields.website.trim() : ''
       patch.website = website || null
     }
+    // Direct run linkage for prospects_verify (Fase 34, migration 1298) — see
+    // that migration's comment for why source_id alone isn't enough. A
+    // re-import always attributes to the run that touched it most recently.
+    if (runId) patch.prospect_source_id = runId
 
     const { error } = await supabase
       .from('accounts')
@@ -646,6 +657,9 @@ async function ingestCompany(
       score: p.score ?? 0,
       source_type: sourceType,
       source_id: sourceId,
+      // Direct run linkage for prospects_verify (Fase 34, migration 1298) —
+      // see that migration's comment for why source_id alone isn't enough.
+      prospect_source_id: runId,
       source_payload: (p.source_payload ?? {}) as Json,
       custom_fields: (p.custom_fields ?? {}) as Record<string, unknown>,
     })

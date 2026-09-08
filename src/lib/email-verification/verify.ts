@@ -160,8 +160,14 @@ export interface VerifyBatchResult {
 /**
  * Verify a batch of prospects with a small concurrency cap (each entry is
  * cache-first, so an already-verified batch costs zero provider calls).
+ * `force` (default false) bypasses the 90-day cache and re-verifies every
+ * email against the provider chain — see `verifyProspectEmail`'s `force`.
  */
-export async function verifyProspectsBatch(orgId: string, prospects: BatchProspectInput[]): Promise<VerifyBatchResult> {
+export async function verifyProspectsBatch(
+  orgId: string,
+  prospects: BatchProspectInput[],
+  opts: { force?: boolean } = {},
+): Promise<VerifyBatchResult> {
   const results: BatchProspectResult[] = new Array(prospects.length)
   let cursor = 0
 
@@ -170,7 +176,7 @@ export async function verifyProspectsBatch(orgId: string, prospects: BatchProspe
       const i = cursor++
       if (i >= prospects.length) return
       const p = prospects[i]
-      const result = await verifyProspectEmail(orgId, p.kind, p.id, p.email)
+      const result = await verifyProspectEmail(orgId, p.kind, p.id, p.email, { force: opts.force })
       const sendable = !isBlocked(result) && isSendable(result.status)
       results[i] = { ...p, result, sendable }
     }

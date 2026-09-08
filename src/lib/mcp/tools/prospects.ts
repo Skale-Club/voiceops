@@ -18,13 +18,15 @@ import {
   xmailListEmailAccounts,
   xmailAddLeadsToCampaign,
   xmailActivateCampaign,
+  xmailNotifyVerificationComplete,
   type XmailLead,
 } from '@/lib/xmail/client'
 import { loadWebsiteInsightsForAccounts } from '@/lib/xmail/website-insights'
 import { loadSourceRunIdsForEntities } from '@/lib/xmail/source-runs'
 import { isDndBlocked, loadEmailSuppressions, normalizeOutreachEmail } from '@/lib/prospects/outreach-eligibility'
 import type { WebsiteInsights } from '@/services/website-analyzer/outreach-insights'
-import { verifyProspectsBatch, type BatchAggregate, type EmailVerified, type ProspectKind } from '@/lib/email-verification/verify'
+import { verifyProspectsBatch, type BatchAggregate, type EmailVerified, type ProspectKind, type VerifyEmailResult } from '@/lib/email-verification/verify'
+import { getMillionVerifierCredits } from '@/lib/email-verification/credits'
 import type { McpToolDef } from '../tool-types'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -34,6 +36,11 @@ function db(): any {
 
 const DEFAULT_MAX = 100
 const HARD_MAX = 300
+
+// prospects_verify (Fase 34) has its own, larger cap: it's read/verify-only
+// (no lead import, no Xmail campaign write), so a bigger batch is cheap.
+const VERIFY_DEFAULT_MAX = 100
+const VERIFY_HARD_MAX = 500
 
 const filterShape = {
   score_min: z.number().int().min(0).max(100).optional().describe('Only prospects with score >= this (lead score: higher = more site problems = hotter lead).'),
@@ -340,6 +347,123 @@ async function markEnrolled(orgId: string, recipients: ResolvedProspect[], campa
     )
 }
 
+// ── prospects_verify (Fase 34) ──────────────────────────────────────────────
+//
+// Verification-only: filters by external_run_id and/or source_type (never
+// campaign_id), reuses verifyProspectsBatch, and never enrolls or sends.
+// Before this, the only thing that verified anything was
+// prospects_enroll_in_campaign's dry run (confirmed omitted) — it has no
+// per-run filter, so a 98-prospect verification across three runs had to be
+// split back apart by created_at window in the database.
+
+type VerifiableProspect = { kind: 'person' | 'company'; id: string; email: string }
+
+/**
+ * Resolves `external_run_id` (+ optional `source_type`) to the matching
+ * `prospect_sources.id` row(s) for this org. Returns `null` when
+ * `external_run_id` was given but nothing matches -- the caller distinguishes
+ * "no such run" from "run exists, nothing eligible in it".
+ */
+async function resolveProspectSourceIds(
+  orgId: string,
+  externalRunId: string,
+  sourceType?: string,
+): Promise<string[] | null> {
+  let q = db().from('prospect_sources').select('id').eq('org_id', orgId).eq('external_run_id', externalRunId)
+  if (sourceType) q = q.eq('source_type', sourceType)
+  const { data } = await q
+  const ids = ((data ?? []) as Array<{ id: string }>).map((row) => row.id)
+  return ids.length > 0 ? ids : null
+}
+
+/**
+ * Loads up to `cap` prospects (contacts + accounts) with a usable email,
+ * filtered by run and/or source type.
+ *
+ * Filtering by run uses `contacts.prospect_source_id` / `accounts.
+ * prospect_source_id` (migration 1298) directly -- a straight `IN` filter,
+ * not the entity -> event -> source indirection `loadSourceRunIdsForEntities`
+ * (src/lib/xmail/source-runs.ts) needs for the reverse direction (one
+ * prospect -> its run). Rows ingested before migration 1298 have a NULL
+ * `prospect_source_id` and are only reachable via `source_type`.
+ */
+async function loadVerifiableProspects(
+  orgId: string,
+  filters: { externalRunId?: string; sourceType?: string },
+  cap: number,
+): Promise<{ prospects: VerifiableProspect[] } | { notFound: true }> {
+  let sourceIds: string[] | null = null
+  if (filters.externalRunId) {
+    sourceIds = await resolveProspectSourceIds(orgId, filters.externalRunId, filters.sourceType)
+    if (!sourceIds) return { notFound: true }
+  }
+
+  let contactsQuery = db()
+    .from('contacts')
+    .select('id, email, created_at')
+    .eq('org_id', orgId)
+    .eq('lifecycle_stage', 'prospect')
+    .not('email', 'is', null)
+  let accountsQuery = db()
+    .from('accounts')
+    .select('id, custom_fields, created_at')
+    .eq('org_id', orgId)
+    .eq('lifecycle_stage', 'prospect')
+
+  if (sourceIds) {
+    contactsQuery = contactsQuery.in('prospect_source_id', sourceIds)
+    accountsQuery = accountsQuery.in('prospect_source_id', sourceIds)
+  } else if (filters.sourceType) {
+    contactsQuery = contactsQuery.eq('source_type', filters.sourceType)
+    accountsQuery = accountsQuery.eq('source_type', filters.sourceType)
+  }
+
+  const [{ data: contactRows }, { data: accountRows }] = await Promise.all([
+    contactsQuery.order('created_at', { ascending: true }).limit(cap),
+    accountsQuery.order('created_at', { ascending: true }).limit(cap),
+  ])
+
+  const withCreatedAt: Array<VerifiableProspect & { createdAt: string }> = []
+  for (const row of (contactRows ?? []) as Array<{ id: string; email: string | null; created_at: string }>) {
+    if (row.email) withCreatedAt.push({ kind: 'person', id: row.id, email: row.email, createdAt: row.created_at })
+  }
+  for (const row of (accountRows ?? []) as Array<{ id: string; custom_fields: unknown; created_at: string }>) {
+    const email = emailFromCustomFields(row.custom_fields)
+    if (email) withCreatedAt.push({ kind: 'company', id: row.id, email, createdAt: row.created_at })
+  }
+
+  withCreatedAt.sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+  return {
+    prospects: withCreatedAt.slice(0, cap).map(({ kind, id, email }) => ({ kind, id, email })),
+  }
+}
+
+/** batch.aggregate breakdown -> the exact field names prospects_verify returns. */
+export function verifyOutputCounts(aggregate: BatchAggregate) {
+  return {
+    ok: aggregate.ok,
+    catch_all: aggregate.catch_all,
+    unknown: aggregate.unknown,
+    invalid: aggregate.invalid,
+    disposable: aggregate.disposable,
+    bounced: aggregate.bounced,
+    blocked_no_credits: aggregate.blocked,
+  }
+}
+
+/** Every non-blocked result's provider -> 'millionverifier' | 'neverbounce' | 'mixed'.
+ *  Defaults to 'millionverifier' (the primary provider) when nothing verified at all —
+ *  the field is required downstream (Xmail's contract) and there is no "none" value. */
+export function resolveVerificationProvider(results: Array<{ result: VerifyEmailResult }>): 'millionverifier' | 'neverbounce' | 'mixed' {
+  const providers = new Set<string>()
+  for (const r of results) {
+    if (!('blocked' in r.result)) providers.add(r.result.provider)
+  }
+  if (providers.size === 0) return 'millionverifier'
+  if (providers.size === 1) return [...providers][0] as 'millionverifier' | 'neverbounce'
+  return 'mixed'
+}
+
 export const prospectsTools: McpToolDef[] = [
   {
     name: 'prospects_list',
@@ -406,7 +530,7 @@ export const prospectsTools: McpToolDef[] = [
     name: 'prospects_enroll_in_campaign',
     title: 'Enrol matching prospects into an Xmail campaign',
     description:
-      "Enrol every prospect matching the filters (that has an email) into an existing Xmail outreach campaign, and activate it so Xmail starts sending. SAFETY: only runs when confirmed:true — first call prospects_list to preview the count and xmail_outreach_status to pick the campaign, tell the human, and only set confirmed:true after they approve. Xmail handles the actual sending, sequences, suppression and tracking. Caps at " + HARD_MAX + ' prospects per call.',
+      "Enrol every prospect matching the filters (that has an email) into an existing Xmail outreach campaign, and activate it so Xmail starts sending. SAFETY: only runs when confirmed:true — first call prospects_list to preview the count and xmail_outreach_status to pick the campaign, tell the human, and only set confirmed:true after they approve. Xmail handles the actual sending, sequences, suppression and tracking. Caps at " + HARD_MAX + " prospects per call. NOTE: the dry run (confirmed omitted) DOES verify emails as a side effect, but it has no per-run filter and never persists a verification summary against a run — for verification-only work (nothing to enrol yet, or you just want the numbers for one scrape run), use prospects_verify instead.",
     area: 'general_xphere',
     annotations: { destructiveHint: true, idempotentHint: false },
     inputSchema: z
@@ -443,7 +567,7 @@ export const prospectsTools: McpToolDef[] = [
           message:
             verification.blocked_no_credits > 0
               ? `WARNING: email verification is unavailable (no verification credits) for ${verification.blocked_no_credits} of ${capped.length} matching prospect(s) — they will be skipped, not sent unverified. Nothing was enrolled (confirmed was not true).`
-              : 'Nothing was enrolled (confirmed was not true). Show the human the count and which campaign, then call again with confirmed:true.',
+              : 'Nothing was enrolled (confirmed was not true). Show the human the count and which campaign, then call again with confirmed:true. (Only verifying, with no intent to enrol yet? Use prospects_verify instead — it filters by run and records the result against it.)',
           sample: preview.slice(0, 5).map((p) => ({ name: p.name, email: p.email, score: p.score })),
         }
       }
@@ -531,6 +655,131 @@ export const prospectsTools: McpToolDef[] = [
           (verification.blocked_no_credits > 0
             ? ` WARNING: ${verification.blocked_no_credits} matching prospect(s) were skipped — email verification is unavailable (no verification credits).`
             : ''),
+      }
+    },
+  },
+  {
+    name: 'prospects_verify',
+    title: 'Verify prospect emails for one run (no enrolment)',
+    description:
+      "Verify (or reuse fresh cached verification for) prospect emails, filtered by external_run_id and/or source_type. Never accepts a campaign_id and never enrols or sends anything — use this instead of prospects_enroll_in_campaign's unconfirmed dry run for verification-only work, since that tool has no per-run filter and doesn't persist a verification summary against the run. Reads the MillionVerifier balance before/after to report the real credits spent, and — when external_run_id is given — pushes the summary to Xmail's Journey for that run. Requires at least one of external_run_id or source_type. Caps at " + VERIFY_HARD_MAX + ' prospects per call.',
+    area: 'general_xphere',
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true },
+    inputSchema: z
+      .object({
+        external_run_id: z.string().trim().min(1).max(200).optional()
+          .describe('The xcraper/Apify run id to verify (resolved via prospect_sources.external_run_id). When set, the summary is also pushed to Xmail for this run.'),
+        source_type: z.string().max(60).optional().describe("Filter by ingestion source, e.g. 'xcraper'. Can be combined with external_run_id to disambiguate, or used alone to verify across a whole source with no specific run."),
+        max: z.number().int().positive().max(VERIFY_HARD_MAX).optional().describe(`Max prospects to verify (default ${VERIFY_DEFAULT_MAX}, hard cap ${VERIFY_HARD_MAX}).`),
+        force: z.boolean().optional().describe('Bypass the 90-day verification cache and re-check every email against the provider. Default false (reuse fresh cached results).'),
+      })
+      .strict()
+      .refine((value) => Boolean(value.external_run_id || value.source_type), {
+        message: 'At least one of external_run_id or source_type is required.',
+        path: ['external_run_id'],
+      }),
+    handler: async (input, { auth }) => {
+      const externalRunId = input.external_run_id
+      const sourceType = input.source_type
+      const cap = Math.min(input.max ?? VERIFY_DEFAULT_MAX, VERIFY_HARD_MAX)
+
+      const resolved = await loadVerifiableProspects(auth.orgId, { externalRunId, sourceType }, cap)
+      if ('notFound' in resolved) {
+        return {
+          error: 'external_run_not_found',
+          detail:
+            `No prospect_sources row matches external_run_id "${externalRunId}"` +
+            (sourceType ? ` with source_type "${sourceType}"` : '') +
+            ' in this org.',
+        }
+      }
+
+      const { prospects } = resolved
+      const verifiedAt = new Date().toISOString()
+      if (prospects.length === 0) {
+        return {
+          external_run_id: externalRunId ?? null,
+          checked: 0,
+          ok: 0,
+          catch_all: 0,
+          unknown: 0,
+          invalid: 0,
+          disposable: 0,
+          bounced: 0,
+          blocked_no_credits: 0,
+          credits_used: null,
+          verification_provider: 'millionverifier' as const,
+          results: [],
+          verified_at: verifiedAt,
+          message: 'No prospects with a usable email matched these filters.',
+        }
+      }
+
+      // Measured, not counted (Fase 34 evidence: 24 persisted verifications only
+      // debited 6 credits, unexplained by a per-call count). A cache-hit-heavy
+      // batch costs ~0 real credits; the before/after delta reports that honestly.
+      const creditsBefore = await getMillionVerifierCredits()
+      const batch = await verifyProspectsBatch(
+        auth.orgId,
+        prospects.map((p) => ({ kind: verificationKind(p.kind), id: p.id, email: p.email })),
+        { force: input.force },
+      )
+      const creditsAfter = await getMillionVerifierCredits()
+      const creditsUsed =
+        creditsBefore.credits != null && creditsAfter.credits != null
+          ? creditsBefore.credits - creditsAfter.credits
+          : null
+
+      const verificationProvider = resolveVerificationProvider(batch.results)
+      const results = prospects.map((p, i) => {
+        const r = batch.results[i]
+        const status = 'blocked' in r.result ? 'blocked_no_credits' : r.result.status
+        return { prospect_id: p.id, kind: p.kind, email: p.email, status }
+      })
+
+      const output = {
+        external_run_id: externalRunId ?? null,
+        checked: prospects.length,
+        ...verifyOutputCounts(batch.aggregate),
+        credits_used: creditsUsed,
+        verification_provider: verificationProvider,
+        results,
+        verified_at: verifiedAt,
+      }
+
+      // Push to Xmail's Journey for this run — best-effort, never fails the
+      // verification itself (it already happened and was persisted onto the
+      // contacts/accounts rows above).
+      if (!externalRunId) return output
+      if (!isXmailConfigured()) {
+        return { ...output, xmail_notified: false, xmail_error: 'Xmail outreach is not wired up (XMAIL_API_URL / XMAIL_USER_ID / XMAIL_ORG_ID / XMAIL_SERVICE_KEY not set).' }
+      }
+      try {
+        const notify = await xmailNotifyVerificationComplete(externalRunId, {
+          provider: 'xcraper',
+          checked: output.checked,
+          ok: output.ok,
+          catchAll: output.catch_all,
+          unknown: output.unknown,
+          invalid: output.invalid,
+          creditsUsed: output.credits_used,
+          verificationProvider: output.verification_provider,
+          verifiedAt: output.verified_at,
+        })
+        if (!notify.ok) {
+          console.error('[prospects_verify] xmailNotifyVerificationComplete failed:', notify.error)
+          return { ...output, xmail_notified: false, xmail_error: notify.error }
+        }
+        return {
+          ...output,
+          xmail_notified: true,
+          xmail_run_id: notify.runId,
+          xmail_idempotent_replay: notify.idempotentReplay,
+        }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err)
+        console.error('[prospects_verify] xmailNotifyVerificationComplete threw:', err)
+        return { ...output, xmail_notified: false, xmail_error: message }
       }
     },
   },

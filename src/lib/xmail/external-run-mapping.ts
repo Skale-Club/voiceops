@@ -94,6 +94,16 @@ export function buildExternalRunRegistration(
     template: metaString('template'),
     hypothesis: metaHypothesis(),
     coverage: coverage(),
+    // TODO(xcraper): buildSourceMetadata (backend/src/services/xphere.ts) does not
+    // send a requested-batch-size key today -- only `result_count` (the ACTUAL
+    // count returned). Add `max_results` (or `requested_limit`) to that function's
+    // metadata block once Xcraper has the value in hand, so Xmail's
+    // prospecting_runs.requested_limit stops silently defaulting to 25 for every
+    // run (observed: a 330-result Boston run still shows requested_limit=25).
+    // Deliberately NOT falling back to result_count/resultCount here -- that
+    // would just be a different wrong number (the requested size can be much
+    // larger than what actually came back, e.g. a sparse territory).
+    requestedLimit: nonNegativeInt(meta.max_results) ?? nonNegativeInt(meta.requested_limit),
   }
 }
 
