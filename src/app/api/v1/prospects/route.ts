@@ -513,6 +513,10 @@ async function ingestPerson(
       // Direct run linkage for prospects_verify (Fase 34, migration 1298) —
       // see that migration's comment for why source_id alone isn't enough.
       prospect_source_id: runId,
+      // Also record the identity the CRM mirror (/api/v1/sync) keys on, so an
+      // app that pushes a prospect here and later mirrors a deal for the same
+      // record lands on this row instead of creating a second one.
+      ...(sourceId ? { external_source: sourceType, external_id: sourceId } : {}),
       source_payload: (p.source_payload ?? {}) as Json,
       custom_fields: (p.custom_fields ?? {}) as Record<string, unknown>,
     })
@@ -660,6 +664,10 @@ async function ingestCompany(
       // Direct run linkage for prospects_verify (Fase 34, migration 1298) —
       // see that migration's comment for why source_id alone isn't enough.
       prospect_source_id: runId,
+      // Also record the identity the CRM mirror (/api/v1/sync) keys on, so an
+      // app that pushes a prospect here and later mirrors a deal for the same
+      // record lands on this row instead of creating a second one.
+      ...(sourceId ? { external_source: sourceType, external_id: sourceId } : {}),
       source_payload: (p.source_payload ?? {}) as Json,
       custom_fields: (p.custom_fields ?? {}) as Record<string, unknown>,
     })
