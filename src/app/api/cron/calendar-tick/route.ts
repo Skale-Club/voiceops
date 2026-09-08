@@ -356,10 +356,23 @@ const OPPORTUNITY_TIME_BASED_EVENTS: readonly OpportunityEventType[] = [
   'opportunity.stale',
 ]
 
-// Re-fire guard: a unique (workflow, opportunity, event, UTC-day) index on
-// scheduled_opportunity_ticks (migration 1245) enforces at-most-once per day.
-// The cron runs every 5 minutes so without this a daily condition would fire
-// ~288 times.
+// Re-fire guards, two layers:
+//
+//  1. Same day: a unique (workflow, opportunity, event, UTC-day) index on
+//     scheduled_opportunity_ticks (migration 1245) enforces at-most-once per
+//     day. The cron runs every 5 minutes so without this a daily condition
+//     would fire ~288 times.
+//
+//  2. Same episode: "no activity for 7 days" stays true on day 8, 9, 10, ...
+//     so the per-day guard alone re-fired every workflow nightly for as long
+//     as the opportunity sat still | one lead was texted "it's been a while"
+//     61 nights in a row (and, since Twilio rejected the number, 61 failed
+//     runs). An episode starts at the moment the condition's clock was last
+//     reset (the last stage change, the last activity, updated_at, the close
+//     date). If a tick already FIRED after that moment, this is the same
+//     episode and we do not fire again; the trigger fires once per crossing
+//     and again only after the clock resets. Implemented as a lookup against
+//     the existing fired_at column | no schema change.
 
 interface OpportunityWorkflowRow {
   id: string
@@ -409,14 +422,22 @@ async function processOpportunityTimeBasedEvents(
       if (oppErr || !opps || opps.length === 0) continue
 
       for (const opp of opps as OpportunityRow[]) {
-        const matched = await evaluateOpportunityCondition(
+        const condition = await evaluateOpportunityCondition(
           supabase,
           eventType,
           cfg,
           opp,
           now,
         )
-        if (!matched) continue
+        if (!condition.matched) continue
+
+        if (
+          condition.episodeStartedAt &&
+          (await firedSinceEpisodeStart(supabase, wf.id, opp.id, eventType, condition.episodeStartedAt))
+        ) {
+          skipped++
+          continue
+        }
 
         // Idempotency: the DB enforces at-most-once per (workflow, opportunity,
         // event) per UTC day via a unique index (migration 1245). We claim the
@@ -471,19 +492,58 @@ function daysBetween(later: Date, earlier: Date): number {
   return Math.floor((later.getTime() - earlier.getTime()) / 86_400_000)
 }
 
+/**
+ * Has this (workflow, opportunity, event) already fired since the condition's
+ * clock was last reset? See "Same episode" above. Fail-open on a read error:
+ * the per-day guard still bounds the damage to one dispatch per day, which is
+ * the pre-existing behaviour.
+ */
+async function firedSinceEpisodeStart(
+  supabase: ReturnType<typeof createClient<Database>>,
+  workflowId: string,
+  opportunityId: string,
+  eventType: OpportunityEventType,
+  episodeStartedAt: Date,
+): Promise<boolean> {
+  const { data, error } = await supabase
+    .from('scheduled_opportunity_ticks')
+    .select('id')
+    .eq('workflow_id', workflowId)
+    .eq('opportunity_id', opportunityId)
+    .eq('event_type', eventType)
+    .eq('fired', true)
+    .gte('fired_at', episodeStartedAt.toISOString())
+    .limit(1)
+    .maybeSingle()
+  if (error) return false
+  return data != null
+}
+
+interface OpportunityConditionResult {
+  matched: boolean
+  /**
+   * When the condition's clock was last reset (last stage change, last
+   * activity, updated_at, close date). null = the condition has no episode
+   * notion and the per-day guard is the only re-fire protection.
+   */
+  episodeStartedAt: Date | null
+}
+
+const NO_MATCH: OpportunityConditionResult = { matched: false, episodeStartedAt: null }
+
 async function evaluateOpportunityCondition(
   supabase: ReturnType<typeof createClient<Database>>,
   eventType: OpportunityEventType,
   cfg: Record<string, unknown>,
   opp: OpportunityRow,
   now: Date,
-): Promise<boolean> {
+): Promise<OpportunityConditionResult> {
   switch (eventType) {
     case 'opportunity.aged_in_stage': {
       const days = Number(cfg.days)
-      if (!Number.isFinite(days) || days <= 0) return false
+      if (!Number.isFinite(days) || days <= 0) return NO_MATCH
       const stageFilter = cfg.stage_id as string | undefined
-      if (stageFilter && stageFilter !== opp.stage_id) return false
+      if (stageFilter && stageFilter !== opp.stage_id) return NO_MATCH
 
       // Days since the most recent stage_change activity for this opportunity,
       // or since opportunity created_at if it has never changed stages.
@@ -499,12 +559,12 @@ async function evaluateOpportunityCondition(
       const reference = lastStageChange?.created_at
         ? new Date(lastStageChange.created_at as string)
         : new Date(opp.created_at)
-      return daysBetween(now, reference) >= days
+      return { matched: daysBetween(now, reference) >= days, episodeStartedAt: reference }
     }
 
     case 'opportunity.no_activity': {
       const days = Number(cfg.days)
-      if (!Number.isFinite(days) || days <= 0) return false
+      if (!Number.isFinite(days) || days <= 0) return NO_MATCH
 
       const { data: lastActivity } = await supabase
         .from('opportunity_activities')
@@ -517,36 +577,39 @@ async function evaluateOpportunityCondition(
       const reference = lastActivity?.created_at
         ? new Date(lastActivity.created_at as string)
         : new Date(opp.created_at)
-      return daysBetween(now, reference) >= days
+      return { matched: daysBetween(now, reference) >= days, episodeStartedAt: reference }
     }
 
     case 'opportunity.close_date_approaching': {
       const daysBefore = Number(cfg.days_before)
-      if (!Number.isFinite(daysBefore) || daysBefore < 0) return false
-      if (!opp.expected_close_date) return false
+      if (!Number.isFinite(daysBefore) || daysBefore < 0) return NO_MATCH
+      if (!opp.expected_close_date) return NO_MATCH
       const closeDate = new Date(opp.expected_close_date)
       const delta = daysBetween(closeDate, now)
       // Fire on the exact day the opportunity is `days_before` away.
       // delta == daysBefore means the close date is daysBefore full days
-      // ahead at the current moment.
-      return delta === daysBefore
+      // ahead at the current moment. Exact-day matching already limits this
+      // to one day per close date, so no episode guard is needed.
+      return { matched: delta === daysBefore, episodeStartedAt: null }
     }
 
     case 'opportunity.close_date_passed': {
-      if (!opp.expected_close_date) return false
+      if (!opp.expected_close_date) return NO_MATCH
       const closeDate = new Date(opp.expected_close_date)
-      return closeDate.getTime() < now.getTime()
+      // Episode = this close date. Fires once after it passes; moving the
+      // close date forward starts a new episode.
+      return { matched: closeDate.getTime() < now.getTime(), episodeStartedAt: closeDate }
     }
 
     case 'opportunity.stale': {
       const days = Number(cfg.days)
-      if (!Number.isFinite(days) || days <= 0) return false
+      if (!Number.isFinite(days) || days <= 0) return NO_MATCH
       const reference = new Date(opp.updated_at)
-      return daysBetween(now, reference) >= days
+      return { matched: daysBetween(now, reference) >= days, episodeStartedAt: reference }
     }
 
     default:
-      return false
+      return NO_MATCH
   }
 }
 

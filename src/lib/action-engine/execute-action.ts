@@ -16,7 +16,7 @@ import { updateGoogleContact } from '@/lib/google-contacts/update-contact'
 import { findGoogleContact } from '@/lib/google-contacts/find-contact'
 import { deleteGoogleContact } from '@/lib/google-contacts/delete-contact'
 import { executeWebhook } from '@/lib/custom-webhook/execute-webhook'
-import { sendSms } from '@/lib/twilio/send-sms'
+import { sendSms, SmsUndeliverableError, noteTwilioAccountProblem } from '@/lib/twilio/send-sms'
 import { sendSmsViaGhl } from '@/lib/ghl/send-sms'
 import { sendWhatsappMessageAction } from '@/lib/action-engine/executors/send-whatsapp-message'
 import { sendWhatsappTemplateAction } from '@/lib/action-engine/executors/send-whatsapp-template'
@@ -124,6 +124,35 @@ async function insertDndTimelineEvent(
       role: 'system',
       content: dndBlockedMessage(channel),
       metadata: { type: 'dnd_blocked', channel, contact_id: ctx.contactId },
+    })
+  } catch {
+    // best-effort
+  }
+}
+
+/**
+ * Mirror of insertDndTimelineEvent for a permanently undeliverable SMS, so the
+ * conversation shows "SMS not sent: ... is not a valid phone number" where the
+ * team would otherwise see nothing at all.
+ */
+async function insertSmsUndeliverableTimelineEvent(
+  ctx: ActionContext,
+  err: SmsUndeliverableError,
+): Promise<void> {
+  try {
+    if (!ctx.conversationId || !ctx.organizationId || !ctx.supabase) return
+    await ctx.supabase.from('conversation_messages').insert({
+      conversation_id: ctx.conversationId,
+      org_id: ctx.organizationId,
+      role: 'system',
+      content: `${err.message} ${err.hint}`,
+      metadata: {
+        type: 'sms_undeliverable',
+        kind: err.kind,
+        channel: 'sms',
+        twilio_code: err.twilioCode,
+        contact_id: ctx.contactId,
+      },
     })
   } catch {
     // best-effort
@@ -360,7 +389,28 @@ async function _executeActionInner(
       if (ctx.integrationProvider === 'gohighlevel') {
         return sendSmsViaGhl(params, credentials)
       }
-      return sendSms(params, ctx)
+      try {
+        return await sendSms(params, ctx)
+      } catch (err) {
+        // A destination Twilio can never deliver to (invalid number, geo
+        // permissions off, STOP, landline) is not a run failure: retrying it
+        // nightly cannot succeed, and it drowned the "workflow runs failing"
+        // alert for two months. Return a structured skip, the same shape the
+        // DND gate uses, so the step output says exactly why nothing was sent.
+        if (!(err instanceof SmsUndeliverableError)) throw err
+        void insertSmsUndeliverableTimelineEvent(ctx, err)
+        if (err.accountConfig) void noteTwilioAccountProblem(ctx, err)
+        return JSON.stringify({
+          ok: false,
+          reason: 'sms_undeliverable',
+          kind: err.kind,
+          channel: 'sms',
+          to: err.to,
+          twilio_code: err.twilioCode,
+          message: err.message,
+          hint: err.hint,
+        })
+      }
     }
     case 'custom_webhook': {
       if (!ctx?.toolConfig) {

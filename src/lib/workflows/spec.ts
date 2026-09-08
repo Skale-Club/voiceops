@@ -192,13 +192,13 @@ export const TRIGGERS: TriggerSpec[] = [
   {
     type: 'event:opportunity.aged_in_stage',
     description:
-      'Time-based: an open opportunity has spent N days in its current stage. Configure via trigger_config.days (and optional stage_id).',
+      'Time-based: an open opportunity has spent N days in its current stage. Fires once when the threshold is crossed and again only after the opportunity changes stage. Configure via trigger_config.days (and optional stage_id).',
     variables: ['opportunity.*', 'contact.*', 'stage.*', 'pipeline.*', 'trigger.fired_at'],
   },
   {
     type: 'event:opportunity.no_activity',
     description:
-      'Time-based: no activities (notes, calls, messages, etc.) have been recorded on the opportunity for N days. Configure via trigger_config.days.',
+      'Time-based: no activities (notes, calls, messages, etc.) have been recorded on the opportunity for N days. Fires once when the threshold is crossed and again only after a new activity resets the clock. Configure via trigger_config.days.',
     variables: ['opportunity.*', 'contact.*', 'stage.*', 'pipeline.*', 'trigger.fired_at'],
   },
   {
@@ -210,13 +210,13 @@ export const TRIGGERS: TriggerSpec[] = [
   {
     type: 'event:opportunity.close_date_passed',
     description:
-      'Time-based: expected_close_date has passed and the opportunity is still open.',
+      'Time-based: expected_close_date has passed and the opportunity is still open. Fires once per close date.',
     variables: ['opportunity.*', 'contact.*', 'stage.*', 'pipeline.*', 'trigger.fired_at'],
   },
   {
     type: 'event:opportunity.stale',
     description:
-      'Time-based: opportunity updated_at has not changed for N days. Configure via trigger_config.days.',
+      'Time-based: opportunity updated_at has not changed for N days. Fires once when the threshold is crossed and again only after the opportunity is updated. Configure via trigger_config.days.',
     variables: ['opportunity.*', 'contact.*', 'stage.*', 'pipeline.*', 'trigger.fired_at'],
   },
 
