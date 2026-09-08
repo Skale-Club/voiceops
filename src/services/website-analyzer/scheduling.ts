@@ -8,6 +8,15 @@ export interface AnalyzerCandidate {
   name: string | null
   lastAnalyzedAt: string | null // ISO, null = never analyzed
   accountCreatedAt: string // ISO
+  /** Attempt count carried forward from the account's most recent analysis
+   *  row (0 if none, or if the most recent row succeeded). Not used for
+   *  ordering here -- `website_analyzer_candidates` (migration 1298) already
+   *  excludes accounts whose latest row is `dead` or `failed` with a future
+   *  `next_attempt_at`, so every candidate reaching this function is eligible
+   *  to run now. The cron carries this value into the new row's `attempts`
+   *  column so the retry count is cumulative across rows, not reset to zero
+   *  on every new attempt. */
+  lastAttempts?: number
 }
 
 export interface SelectBatchOptions {

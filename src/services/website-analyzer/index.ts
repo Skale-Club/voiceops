@@ -7,6 +7,7 @@ import { createServiceRoleClient } from '@/lib/supabase/admin'
 import { analyzeWebsite, calculateLeadScore, normaliseUrl } from './extractor'
 import { AnalyzerBusyError } from './concurrency'
 import { buildWebsiteInsights } from './outreach-insights'
+import { computeRetryOutcome } from './retry-classification'
 import type { AnalysisResult } from './types'
 import type { Json } from '@/types/database'
 
@@ -118,8 +119,11 @@ export async function runAnalysis(opts: {
   orgId: string
   accountId: string
   domain: string
+  /** Attempt count carried forward from the account's prior analysis row (see
+   *  AnalyzerCandidate.lastAttempts). Defaults to 0 for a brand-new account. */
+  attempts?: number
 }): Promise<void> {
-  const { analysisId, orgId, accountId, domain } = opts
+  const { analysisId, orgId, accountId, domain, attempts: previousAttempts = 0 } = opts
   const supabase = createServiceRoleClient()
   const url = normaliseUrl(domain)
 
@@ -301,12 +305,29 @@ export async function runAnalysis(opts: {
       return
     }
 
-    console.error(`[website-analyzer] ✗ account=${accountId}:`, message)
+    // ── Permanent vs transient failure (Fase 33 backoff) ────────────────────
+    // A domain that will never resolve (or whose cert is broken) used to get
+    // retried every 10 minutes forever, each attempt burning a fresh row and
+    // one of the ~10 analyzer slots per tick -- see retry-classification.ts.
+    // `previousAttempts` was carried forward from the account's last analysis
+    // row by the cron (website_analyzer_candidates.last_attempts), so the
+    // count below is cumulative across rows, not reset to zero here.
+    const outcome = computeRetryOutcome({
+      errorMessage: message,
+      previousAttempts,
+      now: new Date(),
+    })
+    console.error(
+      `[website-analyzer] ✗ account=${accountId} (${outcome.failureClass}, attempt ${outcome.attempts}) -> ${outcome.status}:`,
+      message
+    )
     await wa
       .update({
-        status:        'failed',
-        error_message: message,
-        updated_at:    new Date().toISOString(),
+        status:          outcome.status,
+        error_message:   message,
+        attempts:        outcome.attempts,
+        next_attempt_at: outcome.nextAttemptAt ? outcome.nextAttemptAt.toISOString() : null,
+        updated_at:      new Date().toISOString(),
       })
       .eq('id', analysisId)
   }

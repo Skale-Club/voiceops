@@ -1,4 +1,4 @@
-export type AnalysisRowStatus = 'pending' | 'running' | 'completed' | 'failed'
+export type AnalysisRowStatus = 'pending' | 'running' | 'completed' | 'failed' | 'dead'
 
 /**
  * Picks which website_analyses row a UI should render, given rows for one

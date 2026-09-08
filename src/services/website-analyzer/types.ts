@@ -46,7 +46,7 @@ export interface AnalysisResult {
 export interface AnalysisStatus {
   id: string
   accountId: string
-  status: 'pending' | 'running' | 'completed' | 'failed'
+  status: 'pending' | 'running' | 'completed' | 'failed' | 'dead'
   leadScore: number | null
   brandColors: BrandColor[]
   logoUrl: string | null

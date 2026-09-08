@@ -5834,7 +5834,7 @@ export interface Database {
           id: string
           org_id: string
           account_id: string
-          status: 'pending' | 'running' | 'completed' | 'failed'
+          status: 'pending' | 'running' | 'completed' | 'failed' | 'dead'
           url: string | null
           lead_score: number | null
           brand_colors: Json
@@ -5848,6 +5848,8 @@ export interface Database {
           preview_token: string | null
           raw_evidence: Json
           error_message: string | null
+          attempts: number
+          next_attempt_at: string | null
           analyzed_at: string | null
           created_at: string
           updated_at: string
@@ -5856,7 +5858,7 @@ export interface Database {
           id?: string
           org_id: string
           account_id: string
-          status?: 'pending' | 'running' | 'completed' | 'failed'
+          status?: 'pending' | 'running' | 'completed' | 'failed' | 'dead'
           url?: string | null
           lead_score?: number | null
           brand_colors?: Json
@@ -5870,12 +5872,14 @@ export interface Database {
           preview_token?: string | null
           raw_evidence?: Json
           error_message?: string | null
+          attempts?: number
+          next_attempt_at?: string | null
           analyzed_at?: string | null
           created_at?: string
           updated_at?: string
         }
         Update: {
-          status?: 'pending' | 'running' | 'completed' | 'failed'
+          status?: 'pending' | 'running' | 'completed' | 'failed' | 'dead'
           url?: string | null
           lead_score?: number | null
           brand_colors?: Json
@@ -5889,6 +5893,8 @@ export interface Database {
           preview_token?: string | null
           raw_evidence?: Json
           error_message?: string | null
+          attempts?: number
+          next_attempt_at?: string | null
           analyzed_at?: string | null
           updated_at?: string
         }

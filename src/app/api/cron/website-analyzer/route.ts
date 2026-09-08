@@ -50,9 +50,14 @@ export async function GET(request: Request): Promise<Response> {
   // The ordering is load-bearing: the previous version fetched an UNORDERED
   // page and starved every account past the first 50. Never drop these
   // .order() calls while keeping the .limit().
+  // `website_analyzer_candidates` (migration 1298) already excludes accounts
+  // whose latest analysis row is `dead` (permanent failure -- never retry) or
+  // `failed` with a `next_attempt_at` still in the future (transient failure
+  // waiting out its backoff), and excludes prospects whose web_presence_type
+  // is not `owned_website`. Every row returned here is eligible to run now.
   const { data: candidateRows, error: candidatesError } = await supabase
     .from('website_analyzer_candidates')
-    .select('account_id, org_id, domain, name, last_analyzed_at, account_created_at')
+    .select('account_id, org_id, domain, name, last_analyzed_at, account_created_at, last_attempts')
     .order('last_analyzed_at', { ascending: true, nullsFirst: true })
     .order('account_created_at', { ascending: true })
     .limit(200)
@@ -74,6 +79,7 @@ export async function GET(request: Request): Promise<Response> {
       name: string | null
       last_analyzed_at: string | null
       account_created_at: string
+      last_attempts: number | null
     }>
   ).map((row) => ({
     accountId: row.account_id,
@@ -82,6 +88,7 @@ export async function GET(request: Request): Promise<Response> {
     name: row.name,
     lastAnalyzedAt: row.last_analyzed_at,
     accountCreatedAt: row.account_created_at,
+    lastAttempts: row.last_attempts ?? 0,
   }))
 
   // ── Backpressure ───────────────────────────────────────────────────────────
@@ -120,10 +127,18 @@ export async function GET(request: Request): Promise<Response> {
 
   for (const account of eligible) {
     try {
-      // Create pending analysis row
+      // Create pending analysis row. `attempts` is carried forward from the
+      // account's prior analysis row (0 for never-attempted or last-succeeded)
+      // so the retry count in retry-classification.ts is cumulative across
+      // rows, not reset to zero by this fresh insert.
       const { data: analysis, error: insertError } = await supabase
         .from('website_analyses')
-        .insert({ org_id: account.orgId, account_id: account.accountId, status: 'pending' })
+        .insert({
+          org_id: account.orgId,
+          account_id: account.accountId,
+          status: 'pending',
+          attempts: account.lastAttempts ?? 0,
+        })
         .select('id')
         .single()
 
@@ -143,6 +158,7 @@ export async function GET(request: Request): Promise<Response> {
         orgId: account.orgId,
         accountId: account.accountId,
         domain: account.domain,
+        attempts: account.lastAttempts ?? 0,
       }).catch((err) => {
         console.error(`[cron/website-analyzer] runAnalysis error for account=${account.accountId}:`, err)
         captureApiError(err)
