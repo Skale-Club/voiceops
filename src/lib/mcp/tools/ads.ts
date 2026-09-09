@@ -9,6 +9,7 @@ import {
 } from '@/lib/knowledge/global-knowledge'
 import { getInsights, listCampaigns, getAdAccountInfo } from '@/lib/ads/meta-api'
 import type { DatePreset } from '@/lib/ads/meta-api'
+import { withMetaConnection } from '@/lib/ads/connection-health'
 import { resolveAdAccount } from '@/lib/ads/ai-accounts'
 import { getAdsAttributionForOrg } from '@/lib/ads/attribution'
 import { formatCurrency } from '@/lib/ads/currency'
@@ -79,10 +80,12 @@ export const adsTools: McpToolDef[] = [
       if (!conn.ok) return { error: conn.error, detail: conn.detail, available_accounts: conn.available }
 
       try {
-        const [accountInfo, insights] = await Promise.all([
-          getAdAccountInfo(conn.accountId, conn.token),
-          getInsights(conn.accountId, conn.token, { level: 'account', datePreset: date_preset as DatePreset }),
-        ])
+        const [accountInfo, insights] = await withMetaConnection(auth.orgId, conn.accountId, () =>
+          Promise.all([
+            getAdAccountInfo(conn.accountId, conn.token),
+            getInsights(conn.accountId, conn.token, { level: 'account', datePreset: date_preset as DatePreset }),
+          ]),
+        )
         const raw = insights.data[0] ?? null
         const leads = raw ? parseLeads(raw.actions) : 0
         const spend = raw ? parseFloat(raw.spend ?? '0') : 0
@@ -131,15 +134,17 @@ export const adsTools: McpToolDef[] = [
       if (!conn.ok) return { error: conn.error, detail: conn.detail, available_accounts: conn.available }
 
       try {
-        const [accountInfo, campaigns, insights] = await Promise.all([
-          getAdAccountInfo(conn.accountId, conn.token).catch(() => null),
-          listCampaigns(conn.accountId, conn.token),
-          getInsights(conn.accountId, conn.token, {
-            level: 'campaign',
-            datePreset: date_preset as DatePreset,
-            fields: ['impressions', 'clicks', 'spend', 'reach', 'cpc', 'cpm', 'ctr', 'actions', 'campaign_id', 'campaign_name'],
-          }),
-        ])
+        const [accountInfo, campaigns, insights] = await withMetaConnection(auth.orgId, conn.accountId, () =>
+          Promise.all([
+            getAdAccountInfo(conn.accountId, conn.token).catch(() => null),
+            listCampaigns(conn.accountId, conn.token),
+            getInsights(conn.accountId, conn.token, {
+              level: 'campaign',
+              datePreset: date_preset as DatePreset,
+              fields: ['impressions', 'clicks', 'spend', 'reach', 'cpc', 'cpm', 'ctr', 'actions', 'campaign_id', 'campaign_name'],
+            }),
+          ]),
+        )
         const currency = accountInfo?.currency ?? 'USD'
 
         const insightMap = new Map(

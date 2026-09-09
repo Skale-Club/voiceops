@@ -2,22 +2,27 @@ import { describe, expect, it, vi, beforeEach } from 'vitest'
 
 type Row = Record<string, unknown>
 
-// Rows the stubbed client returns, keyed by the status filter the query applies.
+// Rows the stubbed client returns, keyed by the usable/health filter the
+// query applies (ai-accounts.ts moved off `.eq('status', ...)` in Phase 3 of
+// docs/integrations/ads-connection-health-plan.md — see connection-health-plan
+// for why `usable` and `health` are separate columns now).
 let activeRows: Row[] = []
 let errorRows: Row[] = []
 
 const serviceClient = {
   from: () => {
-    let wantedStatus: string | null = null
+    let wantedUsable: boolean | null = null
+    let wantedHealth: string | null = null
     const builder: Record<string, unknown> = {}
     builder.select = vi.fn(() => builder)
     builder.order = vi.fn(() => builder)
-    builder.eq = vi.fn((column: string, value: string) => {
-      if (column === 'status') wantedStatus = value
+    builder.eq = vi.fn((column: string, value: unknown) => {
+      if (column === 'usable') wantedUsable = value as boolean
+      if (column === 'health') wantedHealth = value as string
       return builder
     })
     builder.then = (resolve: (v: { data: Row[]; error: null }) => unknown) =>
-      resolve({ data: wantedStatus === 'error' ? errorRows : activeRows, error: null })
+      resolve({ data: wantedHealth === 'error' ? errorRows : wantedUsable === true ? activeRows : [], error: null })
     return builder
   },
 }

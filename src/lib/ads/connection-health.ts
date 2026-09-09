@@ -17,6 +17,21 @@ import { GoogleAdsError } from './google-api'
 
 export type AdsPlatform = 'meta' | 'google'
 
+export type ConnectionStatus = 'active' | 'available'
+export type ConnectionHealthState = 'ok' | 'error'
+
+/**
+ * TypeScript mirror of the `usable` generated column added by migration 1300
+ * (`status = 'active' AND health = 'ok'`). The generated column itself can
+ * only be exercised against a live database, so this pure function is what
+ * every non-DB test (and any code that needs the rule before a row round
+ * -trips through Postgres) checks against instead. Keep this in sync with
+ * the migration if the rule ever changes.
+ */
+export function computeUsable(status: string, health: string): boolean {
+  return status === 'active' && health === 'ok'
+}
+
 /** Meta error codes that mean "the token is no longer usable". */
 const META_AUTH_CODES = new Set([102, 190, 463, 467])
 
@@ -135,6 +150,27 @@ export async function withConnectionHealth<T>(
     }
     throw error
   }
+}
+
+/**
+ * Convenience wrapper around `withConnectionHealth` for Meta call sites.
+ * `meta-api.ts` functions take `(adAccountId, accessToken)` and don't know
+ * the org, so every caller has to hand-assemble `{ orgId, platform: 'meta',
+ * adAccountId }` itself. Phase 4 needed this at four call sites (two each in
+ * `lib/copilot/tools/ads.ts` and `lib/mcp/tools/ads.ts`, which mirror each
+ * other function-for-function) — hand-rolling the object literal four times
+ * is exactly the kind of repetition that drifts (e.g. a copy-paste that
+ * keeps the wrong platform), so it is factored here once instead. Route
+ * handlers that already have their own `{ orgId, platform, adAccountId }`
+ * value in scope (api/ads/meta/campaigns, api/ads/meta/reports) keep calling
+ * `withConnectionHealth` directly — there is nothing to save there.
+ */
+export function withMetaConnection<T>(
+  orgId: string,
+  adAccountId: string,
+  operation: () => Promise<T>,
+): Promise<T> {
+  return withConnectionHealth({ orgId, platform: 'meta', adAccountId }, operation)
 }
 
 /** Days until a stored token expires, or null when there is no expiry on file. */

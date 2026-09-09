@@ -192,7 +192,7 @@ export async function captureDailyInsights(options: {
   let query = supabase
     .from('ads_connections')
     .select('org_id, platform, ad_account_id, encrypted_access_token')
-    .eq('status', 'active')
+    .eq('usable', true)
   if (options.orgId) query = query.eq('org_id', options.orgId)
 
   const { data: connections, error } = await query

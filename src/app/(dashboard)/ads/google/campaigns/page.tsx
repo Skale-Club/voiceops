@@ -11,7 +11,7 @@ export default async function GoogleAdsCampaignsPage() {
     .from('ads_connections')
     .select('ad_account_id, ad_account_name')
     .eq('platform', 'google')
-    .eq('status', 'active')
+    .eq('usable', true)
     .order('created_at', { ascending: true })
 
   if (!connections?.length) redirect('/ads/google')

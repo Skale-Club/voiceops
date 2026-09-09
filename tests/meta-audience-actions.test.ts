@@ -190,7 +190,7 @@ describe('Meta audience operator actions', () => {
     const config = builder({ maybeSingle: { data: { ...CONFIG, terms_accepted_at: '2026-08-01', terms_accepted_by: 'user-1' }, error: null } })
     const expired = builder({
       maybeSingle: {
-        data: { id: CONFIG.ads_connection_id, status: 'active', ad_account_id: 'act_123', token_expires_at: '2026-08-09T00:00:00Z' },
+        data: { id: CONFIG.ads_connection_id, status: 'active', usable: true, ad_account_id: 'act_123', token_expires_at: '2026-08-09T00:00:00Z' },
         error: null,
       },
     })

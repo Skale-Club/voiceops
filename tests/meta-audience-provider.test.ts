@@ -15,6 +15,7 @@ type Row = {
   platform: string
   ad_account_id: string
   status: string
+  usable: boolean
   encrypted_access_token: string | null
   token_expires_at: string | null
 }
@@ -25,6 +26,7 @@ const activeRow: Row = {
   platform: 'meta',
   ad_account_id: 'act_123',
   status: 'active',
+  usable: true,
   encrypted_access_token: 'encrypted-fixture',
   token_expires_at: '2026-12-01T00:00:00.000Z',
 }
@@ -100,7 +102,7 @@ describe('OrgOAuthProvider', () => {
     ['CONNECTION_ID_REQUIRED', undefined, ORG_ID, 'act_123', activeRow],
     ['CONNECTION_NOT_FOUND', CONNECTION_ID, ORG_ID, 'act_123', null],
     ['CONNECTION_NOT_FOUND', CONNECTION_ID, 'wrong-org', 'act_123', activeRow],
-    ['CONNECTION_INACTIVE', CONNECTION_ID, ORG_ID, 'act_123', { ...activeRow, status: 'revoked' }],
+    ['CONNECTION_INACTIVE', CONNECTION_ID, ORG_ID, 'act_123', { ...activeRow, usable: false }],
     ['CONNECTION_ACCOUNT_MISMATCH', CONNECTION_ID, ORG_ID, 'act_other', activeRow],
     ['CONNECTION_EXPIRY_UNKNOWN', CONNECTION_ID, ORG_ID, 'act_123', { ...activeRow, token_expires_at: null }],
     ['CONNECTION_EXPIRED', CONNECTION_ID, ORG_ID, 'act_123', { ...activeRow, token_expires_at: '2026-08-01T00:00:00Z' }],

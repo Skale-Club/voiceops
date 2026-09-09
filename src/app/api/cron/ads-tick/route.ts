@@ -27,7 +27,7 @@ import type { Database } from '@/types/database'
 import { captureApiError } from '@/lib/api-error'
 import { createLogger } from '@/lib/obs/logger'
 import { captureDailyInsights } from '@/lib/ads/snapshot-daily'
-import { daysUntilExpiry, EXPIRY_WARNING_DAYS } from '@/lib/ads/connection-health'
+import { daysUntilExpiry, EXPIRY_WARNING_DAYS, markConnectionError, type AdsPlatform } from '@/lib/ads/connection-health'
 
 const CRON_SECRET = process.env.CRON_SECRET
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL
@@ -86,15 +86,20 @@ export async function GET(request: Request): Promise<Response> {
       if (days <= 0) {
         expired++
         // Already lapsed: mark it so the dashboard renders a Reconnect prompt
-        // instead of letting the next API call fail with a bare 502.
-        await supabase
-          .from('ads_connections')
-          .update({
-            status: 'error',
-            connection_error: 'The access token expired. Reconnect this account to resume reporting.',
-            last_error_at: new Date().toISOString(),
-          })
-          .eq('id', conn.id)
+        // instead of letting the next API call fail with a bare 502. Goes
+        // through markConnectionError (not a hand-rolled update) so there is
+        // exactly one way to say "this credential is bad" — it writes
+        // `health` only and never touches `status` (the admin's active/
+        // available selection), matching every other health writer. See
+        // docs/integrations/ads-connection-health-plan.md.
+        await markConnectionError({
+          orgId: conn.org_id,
+          platform: conn.platform as AdsPlatform,
+          adAccountId: conn.ad_account_id,
+          error: new Error(
+            'The access token expired. Reconnect this account to resume reporting.',
+          ),
+        })
 
         log.warn('ads_connection_expired', {
           orgId: conn.org_id,

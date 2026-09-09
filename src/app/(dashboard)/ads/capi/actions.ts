@@ -95,7 +95,7 @@ export async function sendTestEvent(): Promise<{ ok: boolean; fbtrace_id?: strin
       .from('ads_connections')
       .select('encrypted_access_token')
       .eq('platform', 'meta')
-      .eq('status', 'active')
+      .eq('usable', true)
       .maybeSingle()
     if (conn?.encrypted_access_token) {
       try { token = await decrypt(conn.encrypted_access_token) } catch { /* ignore */ }

@@ -79,7 +79,7 @@ export const metaAudienceTools: McpToolDef[] = [
       const service = db()
       const [configsResult, connectionsResult, runsResult] = await Promise.all([
         service.from('meta_audience_config').select(configColumns).eq('org_id', auth.orgId).order('created_at', { ascending: true }),
-        service.from('ads_connections').select('id, status, ad_account_id, token_expires_at').eq('org_id', auth.orgId).eq('platform', 'meta'),
+        service.from('ads_connections').select('id, status, health, usable, ad_account_id, token_expires_at').eq('org_id', auth.orgId).eq('platform', 'meta'),
         service.from('meta_audience_sync_runs').select('audience_config_id, status, dry_run, target_count, add_count, remove_count, invalid_count, suppressed_count, error_code, created_at, completed_at').eq('org_id', auth.orgId).order('created_at', { ascending: false }).limit(20),
       ])
       if (configsResult.error || connectionsResult.error || runsResult.error) {
@@ -97,7 +97,15 @@ export const metaAudienceTools: McpToolDef[] = [
             terms_accepted: Boolean(config.terms_accepted_at && config.terms_accepted_by),
             operational_status: config.operational_status,
             remote_audience_created: Boolean(config.custom_audience_id),
+            // `connection_status` is selection only (active/available) as of
+            // migration 1300; `connection_usable` is the real "can we sync"
+            // signal (status='active' AND health='ok') — surfaced separately
+            // so an operator/AI reading this doesn't mistake a hidden-but-
+            // healthy account for a broken one, or vice versa. See
+            // docs/integrations/ads-connection-health-plan.md.
             connection_status: connection?.status ?? 'missing',
+            connection_health: connection?.health ?? null,
+            connection_usable: connection?.usable ?? false,
             connection_expires_at: connection?.token_expires_at ?? null,
             last_synced_at: config.last_synced_at,
             last_sync_stats: config.last_sync_stats,

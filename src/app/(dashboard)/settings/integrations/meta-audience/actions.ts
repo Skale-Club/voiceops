@@ -64,6 +64,7 @@ export interface MetaAudienceConnectionOption {
   adAccountId: string
   adAccountName: string
   status: string
+  usable: boolean
   expiresAt: string | null
 }
 
@@ -149,7 +150,7 @@ async function safePreflight(
   }
   const { data: connection, error } = await context.supabase
     .from('ads_connections')
-    .select('id, status, ad_account_id, token_expires_at')
+    .select('id, status, usable, ad_account_id, token_expires_at')
     .eq('id', config.ads_connection_id)
     .eq('org_id', context.orgId)
     .eq('platform', 'meta')
@@ -157,7 +158,10 @@ async function safePreflight(
   if (error || !connection || connection.ad_account_id !== config.meta_ad_account_id) {
     return { ok: false, code: 'CONNECTION_NOT_FOUND', error: 'The selected Meta connection is not available in this workspace.' }
   }
-  if (connection.status !== 'active') {
+  // `usable` = status='active' (admin selected it) AND health='ok' (credential
+  // still works) — either being false means "not ready to sync". See
+  // docs/integrations/ads-connection-health-plan.md.
+  if (!connection.usable) {
     return { ok: false, code: 'CONNECTION_INACTIVE', error: 'Reconnect the selected Meta account.' }
   }
   const expires = connection.token_expires_at ? Date.parse(connection.token_expires_at) : Number.NaN
@@ -175,7 +179,7 @@ export async function getMetaAudienceDashboard(): Promise<
   const { orgId, supabase } = auth.context
   const [configsResult, connectionsResult, segmentsResult, runsResult, orgResult] = await Promise.all([
     supabase.from('meta_audience_config').select('*').eq('org_id', orgId).order('created_at', { ascending: true }),
-    supabase.from('ads_connections').select('id, ad_account_id, ad_account_name, status, token_expires_at').eq('org_id', orgId).eq('platform', 'meta').order('created_at', { ascending: true }),
+    supabase.from('ads_connections').select('id, ad_account_id, ad_account_name, status, usable, token_expires_at').eq('org_id', orgId).eq('platform', 'meta').order('created_at', { ascending: true }),
     supabase.from('prospect_audiences').select('id, name, definition').eq('org_id', orgId).order('name', { ascending: true }),
     supabase.from('meta_audience_sync_runs').select('id, audience_config_id, status, dry_run, trigger_source, target_count, add_count, remove_count, unchanged_count, invalid_count, suppressed_count, error_code, error_message, created_at, completed_at').eq('org_id', orgId).order('created_at', { ascending: false }).limit(30),
     supabase.from('organizations').select('name').eq('id', orgId).maybeSingle(),
@@ -194,6 +198,7 @@ export async function getMetaAudienceDashboard(): Promise<
         adAccountId: row.ad_account_id,
         adAccountName: row.ad_account_name ?? row.ad_account_id,
         status: row.status,
+        usable: row.usable,
         expiresAt: row.token_expires_at,
       })),
       savedSegments: (segmentsResult.data ?? []).map((row) => ({

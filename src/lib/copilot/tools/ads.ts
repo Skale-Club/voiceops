@@ -13,6 +13,7 @@ import type { AdsMemoryType } from '@/lib/ads/journey-db'
 import { searchGlobalKnowledge } from '@/lib/knowledge/global-knowledge'
 import { getInsights, listCampaigns, getAdAccountInfo } from '@/lib/ads/meta-api'
 import type { DatePreset } from '@/lib/ads/meta-api'
+import { withMetaConnection } from '@/lib/ads/connection-health'
 import { resolveAdAccount } from '@/lib/ads/ai-accounts'
 import { formatCurrency } from '@/lib/ads/currency'
 import {
@@ -90,10 +91,12 @@ async function getAdsOverview(input: Record<string, unknown>, ctx: ToolContext):
 
   const datePreset = (input.date_preset as DatePreset) ?? 'last_30d'
   try {
-    const [info, insights] = await Promise.all([
-      getAdAccountInfo(conn.accountId, conn.token),
-      getInsights(conn.accountId, conn.token, { level: 'account', datePreset }),
-    ])
+    const [info, insights] = await withMetaConnection(ctx.orgId, conn.accountId, () =>
+      Promise.all([
+        getAdAccountInfo(conn.accountId, conn.token),
+        getInsights(conn.accountId, conn.token, { level: 'account', datePreset }),
+      ]),
+    )
     const raw = insights.data[0] ?? null
     const leads = raw ? parseLeads(raw.actions) : 0
     const spend = raw ? parseFloat(raw.spend ?? '0') : 0
@@ -129,14 +132,16 @@ async function listAdsCampaigns(input: Record<string, unknown>, ctx: ToolContext
 
   const datePreset = (input.date_preset as DatePreset) ?? 'last_30d'
   try {
-    const [info, campaigns, insights] = await Promise.all([
-      getAdAccountInfo(conn.accountId, conn.token).catch(() => null),
-      listCampaigns(conn.accountId, conn.token),
-      getInsights(conn.accountId, conn.token, {
-        level: 'campaign', datePreset,
-        fields: ['impressions', 'clicks', 'spend', 'cpc', 'cpm', 'ctr', 'actions', 'campaign_id', 'campaign_name'],
-      }),
-    ])
+    const [info, campaigns, insights] = await withMetaConnection(ctx.orgId, conn.accountId, () =>
+      Promise.all([
+        getAdAccountInfo(conn.accountId, conn.token).catch(() => null),
+        listCampaigns(conn.accountId, conn.token),
+        getInsights(conn.accountId, conn.token, {
+          level: 'campaign', datePreset,
+          fields: ['impressions', 'clicks', 'spend', 'cpc', 'cpm', 'ctr', 'actions', 'campaign_id', 'campaign_name'],
+        }),
+      ]),
+    )
     const currency = info?.currency ?? 'USD'
     const map = new Map(insights.data.map((i) => [(i as unknown as Record<string, string>).campaign_id, i]))
     const enriched = campaigns.map((c) => {

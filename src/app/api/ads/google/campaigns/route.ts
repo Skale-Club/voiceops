@@ -83,7 +83,7 @@ export async function POST(request: NextRequest): Promise<Response> {
     .eq('org_id', orgId as string)
     .eq('ad_account_id', data.customer_id)
     .eq('platform', 'google')
-    .eq('status', 'active')
+    .eq('usable', true)
     .maybeSingle()
 
   if (!conn) return err('No active Google Ads connection', 404)

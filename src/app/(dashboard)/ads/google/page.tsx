@@ -12,7 +12,9 @@ export default async function GoogleAdsPage() {
   const supabase = await createClient()
   const { data: rows } = await supabase
     .from('ads_connections')
-    .select('id, ad_account_id, ad_account_name, status, connection_error, token_expires_at, created_at')
+    .select(
+      'id, ad_account_id, ad_account_name, status, health, usable, connection_error, token_expires_at, created_at',
+    )
     .eq('platform', 'google')
     .order('created_at', { ascending: true })
 
@@ -29,7 +31,7 @@ export default async function GoogleAdsPage() {
     />
   )
 
-  const connections = all.filter((c) => c.status === 'active')
+  const connections = all.filter((c) => c.usable)
   if (connections.length === 0) {
     return (
       <div className="space-y-4">

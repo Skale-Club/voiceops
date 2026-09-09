@@ -198,3 +198,35 @@ Um commit por fase, todos na `dev`. A migração é aditiva até o passo 3, onde
 O maior risco está na fase 3: um leitor esquecido em `status === 'active'` passa a usar
 uma credencial rejeitada, porque `error` não sobrescreve mais `active`. Por isso a lista
 é nominal, e a coluna gerada existe: um único lugar define "usável".
+
+## Este é o segundo conserto desta área
+
+O commit `b36d2aaa` (2026-08-21), intitulado **"fix(ads): fix connection health"**, é onde a
+conflação nasceu. Ele acrescentou `'error'` à mesma coluna que já guardava a seleção de
+contas do admin. Foi entregue com 71 testes em 7 suítes, build e lint limpos, e a mensagem
+dizia, corretamente, que passava a detectar credencial morta em vez de deixar o status em
+`active`.
+
+Ele acertou a metade que dá para testar de fora: **detectar** a rejeição e mostrar o
+banner. Não fechou o ciclo, que é **sair** do estado de erro. A função de recuperação
+(`markConnectionHealthy`) nasceu naquele mesmo commit e, no caminho do Meta, nunca foi
+chamada por ninguém.
+
+Dois dias depois, em 2026-08-23, todas as 62 linhas entraram em `error`. Essa data ainda
+estava gravada em `last_error_at` quando este plano foi escrito, duas semanas e várias
+reconexões depois.
+
+O efeito para quem usa: cada reconexão **funcionava** — o token era renovado — e o alarme
+continuava na tela, porque nada no sistema tinha permissão de dizer "melhorou". O usuário
+pediu o conserto várias vezes e recebeu, a cada vez, a resposta de que estava consertado.
+O defeito é bom em se esconder: ele se parece exatamente com o problema que ele não é.
+
+**A armadilha desta área, escrita para a próxima pessoa: declarar vitória na detecção.**
+Um teste que prova que um erro pode ser marcado não prova nada sobre a recuperação. O
+guarda contra uma terceira rodada é o teste de ida e volta em
+`tests/ads-connection-health.test.ts`, no `describe` "Round trip: a reconnect must fix
+health AND preserve the prior selection": ele parte de uma conexão presa em erro, aplica um
+callback bem-sucedido, e exige as duas coisas — que a saúde volte a `ok` **e** que a
+seleção anterior continue intacta, tanto para uma conta visível quanto para uma escondida.
+Se algum dia esse `describe` for removido ou afrouxado, é sinal de que a terceira rodada
+começou.

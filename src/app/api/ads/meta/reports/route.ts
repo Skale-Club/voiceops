@@ -39,7 +39,7 @@ async function getAccessToken(
     .eq('org_id', orgId)
     .eq('ad_account_id', adAccountId)
     .eq('platform', 'meta')
-    .eq('status', 'active')
+    .eq('usable', true)
     .maybeSingle()
 
   if (!data) return null

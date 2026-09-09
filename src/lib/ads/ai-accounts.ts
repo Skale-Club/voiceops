@@ -58,11 +58,13 @@ export async function resolveAdAccount(
     .select('ad_account_id, ad_account_name, encrypted_access_token, status, connection_error')
     .eq('org_id', orgId)
     .eq('platform', platform)
-    // Only accounts the admin opted into. 'available' means connected but
-    // deliberately hidden, and 'error' means the credential is dead — reading
-    // from either would answer with data the operator isn't looking at, or
-    // fail confusingly.
-    .eq('status', 'active')
+    // Only accounts the admin opted into AND whose credential is currently
+    // healthy. 'available' means connected but deliberately hidden, and a
+    // dead credential (health='error') would answer with data the operator
+    // isn't looking at, or fail confusingly. `usable` is the generated
+    // column that answers exactly this (status='active' AND health='ok') —
+    // see docs/integrations/ads-connection-health-plan.md.
+    .eq('usable', true)
 
   if (error) {
     return { ok: false, error: 'no_connection', detail: `Could not read ads connections: ${error.message}` }
@@ -78,7 +80,7 @@ export async function resolveAdAccount(
       .select('ad_account_id, ad_account_name, connection_error')
       .eq('org_id', orgId)
       .eq('platform', platform)
-      .eq('status', 'error')
+      .eq('health', 'error')
 
     const broken = (brokenRows ?? []) as Array<{ ad_account_id: string; ad_account_name: string | null; connection_error: string | null }>
     if (broken.length > 0) {
@@ -139,7 +141,7 @@ export async function listActiveAdAccounts(
     .select('ad_account_id, ad_account_name')
     .eq('org_id', orgId)
     .eq('platform', platform)
-    .eq('status', 'active')
+    .eq('usable', true)
     .order('ad_account_name')
   return (data ?? []) as Array<{ ad_account_id: string; ad_account_name: string | null }>
 }

@@ -14,6 +14,7 @@ interface Connection {
   id: string
   name: string
   status: string
+  health: string
 }
 
 interface InitialConfig {
@@ -121,7 +122,12 @@ export function CapiConfigForm({
               <option value="">— select —</option>
               {connections.map((c) => (
                 <option key={c.id} value={c.id}>
-                  {c.name} {c.status === 'active' ? '' : `(${c.status})`}
+                  {c.name}{' '}
+                  {c.health !== 'ok'
+                    ? `(${c.health})`
+                    : c.status === 'active'
+                      ? ''
+                      : `(${c.status})`}
                 </option>
               ))}
             </select>

@@ -56,6 +56,7 @@ interface AdsConnectionRecord {
   platform: string
   ad_account_id: string
   status: string
+  usable: boolean
   encrypted_access_token: string | null
   token_expires_at: string | null
 }
@@ -101,7 +102,7 @@ export class OrgOAuthProvider implements MetaConnectionProvider {
     const { data, error } = await this.client
       .from('ads_connections')
       .select(
-        'id, org_id, platform, ad_account_id, status, encrypted_access_token, token_expires_at',
+        'id, org_id, platform, ad_account_id, status, usable, encrypted_access_token, token_expires_at',
       )
       .eq('id', connectionId)
       .eq('org_id', orgId)
@@ -110,7 +111,9 @@ export class OrgOAuthProvider implements MetaConnectionProvider {
 
     if (error) throw new MetaAudienceConnectionError('CONNECTION_INACCESSIBLE')
     if (!data) throw new MetaAudienceConnectionError('CONNECTION_NOT_FOUND')
-    if (data.status !== 'active') throw new MetaAudienceConnectionError('CONNECTION_INACTIVE')
+    // `usable` = status='active' AND health='ok' — the single "can we call the
+    // platform API" answer. See docs/integrations/ads-connection-health-plan.md.
+    if (!data.usable) throw new MetaAudienceConnectionError('CONNECTION_INACTIVE')
     if (data.ad_account_id !== adAccountId) {
       throw new MetaAudienceConnectionError('CONNECTION_ACCOUNT_MISMATCH')
     }

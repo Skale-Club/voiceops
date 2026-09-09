@@ -11,11 +11,15 @@ export default async function AdsPage() {
 
   const supabase = await createClient()
 
-  // All connected accounts (active = shown, available = connected-but-hidden,
-  // error = connected but the credential was rejected).
+  // All connected accounts. `status` is selection only (active = shown,
+  // available = connected-but-hidden); `health` is whether the credential
+  // still works (ok/error), independent of selection — see
+  // docs/integrations/ads-connection-health-plan.md.
   const { data: rows } = await supabase
     .from('ads_connections')
-    .select('id, ad_account_id, ad_account_name, status, ad_objective, connection_error, token_expires_at, created_at')
+    .select(
+      'id, ad_account_id, ad_account_name, status, health, usable, ad_objective, connection_error, token_expires_at, created_at',
+    )
     .eq('platform', 'meta')
     .order('created_at', { ascending: true })
 
@@ -24,9 +28,10 @@ export default async function AdsPage() {
     return <MetaAdsConnect />
   }
 
-  // Rendered above whatever comes next: an expired token leaves the account
-  // out of the `active` set below, so without this the page would silently
-  // fall back to the empty state and give no hint that a reconnect is needed.
+  // Rendered above whatever comes next: an unhealthy or unselected credential
+  // leaves the account out of the `usable` set below, so without this the
+  // page would silently fall back to the empty state and give no hint that a
+  // reconnect is needed.
   const healthBanner = (
     <ConnectionHealthBanner
       platform="meta"
@@ -35,7 +40,7 @@ export default async function AdsPage() {
     />
   )
 
-  const connections = all.filter((c) => c.status === 'active')
+  const connections = all.filter((c) => c.usable)
 
   // Connected, but the admin hasn't picked which accounts to show yet.
   if (connections.length === 0) {

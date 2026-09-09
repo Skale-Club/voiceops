@@ -13,7 +13,7 @@ export default async function CapiPage() {
   const [{ data: connections }, { data: config }, { data: events }] = await Promise.all([
     supabase
       .from('ads_connections')
-      .select('ad_account_id, ad_account_name, status')
+      .select('ad_account_id, ad_account_name, status, health')
       .eq('platform', 'meta')
       .order('ad_account_name', { ascending: true }),
     supabase
@@ -66,6 +66,7 @@ export default async function CapiPage() {
             id: c.ad_account_id,
             name: c.ad_account_name ?? c.ad_account_id,
             status: c.status,
+            health: c.health,
           }))}
         />
       </WorkspaceSaveProvider>

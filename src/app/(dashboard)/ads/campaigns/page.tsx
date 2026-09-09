@@ -11,7 +11,7 @@ export default async function AdsAdCampaignsPage() {
     .from('ads_connections')
     .select('ad_account_id, ad_account_name')
     .eq('platform', 'meta')
-    .eq('status', 'active')
+    .eq('usable', true)
     .order('created_at', { ascending: true })
 
   if (!connections?.length) redirect('/ads')

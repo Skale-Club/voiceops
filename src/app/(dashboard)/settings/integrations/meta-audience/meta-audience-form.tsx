@@ -27,6 +27,7 @@ import {
   saveMetaAudienceConfig,
   toggleMetaAudienceSync,
   type MetaAudienceConfigRow,
+  type MetaAudienceConnectionOption,
   type MetaAudienceDashboardData,
 } from './actions'
 
@@ -39,6 +40,20 @@ function formatDate(value: string | null) {
 
 function sourceLabel(config: MetaAudienceConfigRow) {
   return config.audience_kind === 'xcraper_master' ? 'All Xcraper prospects' : 'Saved prospect segment'
+}
+
+/**
+ * A connection is ready to sync when it is `usable` (status='active' AND
+ * health='ok' — see docs/integrations/ads-connection-health-plan.md) AND its
+ * token has not expired. Pulled out of the component so it is testable
+ * without a React renderer: `configReady` and `enableReason` both key off
+ * this, not off `status` alone.
+ */
+export function isConnectionReady(
+  connection: Pick<MetaAudienceConnectionOption, 'usable'> | undefined,
+  connectionExpired: boolean,
+): boolean {
+  return Boolean(connection && connection.usable && !connectionExpired)
 }
 
 export function MetaAudienceForm({ data }: { data: MetaAudienceDashboardData }) {
@@ -62,12 +77,12 @@ export function MetaAudienceForm({ data }: { data: MetaAudienceDashboardData }) 
   const connection = data.connections.find((item) => item.id === connectionId)
   const connectionExpired = !connection?.expiresAt || Date.parse(connection.expiresAt) <= Date.now()
   const segment = data.savedSegments.find((item) => item.id === segmentId)
-  const configReady = Boolean(selected && connection && connection.status === 'active' && !connectionExpired)
+  const configReady = Boolean(selected && isConnectionReady(connection, connectionExpired))
   const enableReason = !selected
     ? 'Save the configuration first.'
     : !connection
       ? 'Select a tenant Meta connection.'
-      : connection.status !== 'active' || connectionExpired
+      : !isConnectionReady(connection, connectionExpired)
         ? 'Reconnect the selected Meta account.'
         : kind === 'prospect_segment' && (!segment || segment.entityCount === 0)
           ? 'Choose a saved segment with explicit members.'
@@ -185,8 +200,8 @@ export function MetaAudienceForm({ data }: { data: MetaAudienceDashboardData }) 
                 </SelectContent>
               </Select>
               {connection && (
-                <p className={`text-xs ${connection.status === 'active' && !connectionExpired ? 'text-emerald-600' : 'text-destructive'}`}>
-                  {connection.status === 'active' && !connectionExpired
+                <p className={`text-xs ${isConnectionReady(connection, connectionExpired) ? 'text-emerald-600' : 'text-destructive'}`}>
+                  {isConnectionReady(connection, connectionExpired)
                     ? `Connected · token expires ${formatDate(connection.expiresAt)}`
                     : 'Reconnect required before a real sync.'}
                 </p>
