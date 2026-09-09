@@ -7,7 +7,7 @@ import { createServiceRoleClient } from '@/lib/supabase/admin'
 import { createClient, getUser } from '@/lib/supabase/server'
 import { getRbacContext } from '@/lib/rbac/server'
 import { OrgOAuthProvider, type AdsConnectionQueryClient } from '@/lib/meta/audience-provider'
-import { DEFAULT_SCRAPE_SOURCE_TYPES } from '@/lib/meta/audience-source'
+import { audienceSourceTypes, DEFAULT_SCRAPE_SOURCE_TYPES, normalizeAudienceSourceDefinition } from '@/lib/meta/audience-source'
 import {
   reconcileMetaAudience,
   SupabaseAudienceReconcileStore,
@@ -126,10 +126,25 @@ function entityKeysFromDefinition(definition: Json): string[] {
   )
 }
 
+/**
+ * Whether a config selects anything at all.
+ *
+ * This used to hand-check `source_definition.sourceType === 'xcraper'` — the
+ * SINGULAR key — while createAudience writes the PLURAL `sourceTypes` array
+ * (e.g. `{kind:'xcraper_master', sourceTypes:['xcraper','google-maps']}`). Two
+ * names for one thing, so every newly created xcraper_master audience failed
+ * here and the operator was told "the selected source scope is empty or
+ * invalid" about a scope that was neither: on 2026-09-09 the scope resolved to
+ * 582 accounts. It also silently rejected any scope pinned to a non-xcraper
+ * scrape source, which readSourceTypes explicitly supports.
+ *
+ * Ask the same resolver every other reader asks (normalizeAudienceSourceDefinition
+ * tolerates both shapes) instead of re-deriving the answer from the raw JSON.
+ */
 function configSourceValid(config: MetaAudienceConfigRow): boolean {
   if (config.audience_kind === 'xcraper_master') {
-    if (!config.source_definition || typeof config.source_definition !== 'object' || Array.isArray(config.source_definition)) return false
-    return config.source_definition.sourceType === 'xcraper'
+    const definition = normalizeAudienceSourceDefinition(config.audience_kind, config.source_definition)
+    return (audienceSourceTypes(definition) ?? []).length > 0
   }
   return entityKeysFromDefinition(config.source_definition).length > 0
 }
