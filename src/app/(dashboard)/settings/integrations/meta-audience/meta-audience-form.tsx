@@ -75,6 +75,24 @@ export function MetaAudienceForm({ data }: { data: MetaAudienceDashboardData }) 
   const [busy, setBusy] = React.useState<string | null>(null)
 
   const connection = data.connections.find((item) => item.id === connectionId)
+
+  /**
+   * Only offer connections a real sync could actually use.
+   *
+   * Before this, the dropdown listed every stored row, so on 2026-09-09 it
+   * offered 14 Meta accounts of which 13 had a rejected credential — picking
+   * one got you as far as the server action, which correctly refused with
+   * CONNECTION_INACTIVE. Failing at the end of a form is a worse way to learn
+   * that than not being offered the choice.
+   *
+   * A connection already saved on this config stays listed even when it is no
+   * longer usable: dropping it would blank the field and hide WHY the config
+   * stopped working, and the status line right below already says
+   * "Reconnect required before a real sync."
+   */
+  const selectableConnections = data.connections.filter(
+    (item) => item.usable || item.id === connectionId,
+  )
   const connectionExpired = !connection?.expiresAt || Date.parse(connection.expiresAt) <= Date.now()
   const segment = data.savedSegments.find((item) => item.id === segmentId)
   const configReady = Boolean(selected && isConnectionReady(connection, connectionExpired))
@@ -194,7 +212,7 @@ export function MetaAudienceForm({ data }: { data: MetaAudienceDashboardData }) 
               <Select value={connectionId} onValueChange={setConnectionId}>
                 <SelectTrigger><SelectValue placeholder="Select a Meta account" /></SelectTrigger>
                 <SelectContent>
-                  {data.connections.map((item) => (
+                  {selectableConnections.map((item) => (
                     <SelectItem key={item.id} value={item.id}>{item.adAccountName} · {item.adAccountId}</SelectItem>
                   ))}
                 </SelectContent>
