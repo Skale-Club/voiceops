@@ -7935,15 +7935,17 @@ export interface Database {
           connection_error: string | null
           created_at: string
           encrypted_access_token: string
+          health: 'ok' | 'error'
           id: string
           last_error_at: string | null
           last_verified_at: string | null
           meta_app_scoped_user_id: string | null
           org_id: string
           platform: string
-          status: string
+          status: 'active' | 'available'
           token_expires_at: string | null
           updated_at: string
+          usable: boolean
         }
         Insert: {
           ad_account_id: string
@@ -7952,15 +7954,17 @@ export interface Database {
           connection_error?: string | null
           created_at?: string
           encrypted_access_token: string
+          health?: 'ok' | 'error'
           id?: string
           last_error_at?: string | null
           last_verified_at?: string | null
           meta_app_scoped_user_id?: string | null
           org_id: string
           platform: string
-          status?: string
+          status?: 'active' | 'available'
           token_expires_at?: string | null
           updated_at?: string
+          // usable is a generated column; never settable.
         }
         Update: {
           ad_account_id?: string
@@ -7969,15 +7973,17 @@ export interface Database {
           connection_error?: string | null
           created_at?: string
           encrypted_access_token?: string
+          health?: 'ok' | 'error'
           id?: string
           last_error_at?: string | null
           last_verified_at?: string | null
           meta_app_scoped_user_id?: string | null
           org_id?: string
           platform?: string
-          status?: string
+          status?: 'active' | 'available'
           token_expires_at?: string | null
           updated_at?: string
+          // usable is a generated column; never settable.
         }
         Relationships: [
           {
