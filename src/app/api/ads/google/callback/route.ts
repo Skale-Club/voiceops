@@ -80,7 +80,15 @@ export async function GET(request: NextRequest): Promise<Response> {
         encrypted_access_token: encryptedTokens,
         token_expires_at: expiresAt,
         status: existingStatus.get(c.id) ?? 'available',
+        // We just listed this customer with the token above
+        // (listAccessibleCustomers/getCustomerInfo succeeded), so this is a
+        // real verification, not an assumption — write health independently
+        // of the preserved status selection above so a row that was stuck on
+        // an old health value gets un-stuck on every successful reconnect.
+        health: 'ok' as const,
         connection_error: null,
+        last_error_at: null,
+        last_verified_at: new Date().toISOString(),
         meta_app_scoped_user_id: null,
       }))
 

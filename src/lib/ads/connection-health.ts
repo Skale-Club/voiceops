@@ -53,6 +53,11 @@ function describe(error: unknown): string {
  * Uses the service-role client because it is also called from cron and worker
  * contexts that have no authenticated user; the org_id filter keeps the write
  * scoped to exactly the row that failed.
+ *
+ * Writes `health` only. `status` is the admin's active/available selection —
+ * this function must never touch it, or a broken credential silently hides
+ * (or a hidden account silently reappears) the way it used to when the two
+ * were the same column. See docs/integrations/ads-connection-health-plan.md.
  */
 export async function markConnectionError(params: {
   orgId: string
@@ -65,7 +70,7 @@ export async function markConnectionError(params: {
     await supabase
       .from('ads_connections')
       .update({
-        status: 'error',
+        health: 'error',
         connection_error: describe(params.error),
         last_error_at: new Date().toISOString(),
       })
@@ -79,8 +84,12 @@ export async function markConnectionError(params: {
 
 /**
  * Clear a previously-recorded error after a successful call. Only touches rows
- * that are actually in the error state, so a healthy `available` account is
- * never silently promoted to `active`.
+ * that are actually unhealthy, so an already-healthy row's last_verified_at
+ * isn't churned on every call.
+ *
+ * Writes `health` only — never `status`. Recovering from an error must not
+ * force a hidden ('available') account back to 'active'; the admin's
+ * selection is untouched either way. See markConnectionError above.
  */
 export async function markConnectionHealthy(params: {
   orgId: string
@@ -92,7 +101,7 @@ export async function markConnectionHealthy(params: {
     await supabase
       .from('ads_connections')
       .update({
-        status: 'active',
+        health: 'ok',
         connection_error: null,
         last_error_at: null,
         last_verified_at: new Date().toISOString(),
@@ -100,7 +109,7 @@ export async function markConnectionHealthy(params: {
       .eq('org_id', params.orgId)
       .eq('platform', params.platform)
       .eq('ad_account_id', params.adAccountId)
-      .eq('status', 'error')
+      .eq('health', 'error')
   } catch {
     /* best-effort */
   }
